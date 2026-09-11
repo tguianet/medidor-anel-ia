@@ -86,7 +86,8 @@ export default function App() {
       const result = await detectCard(photo);
       setAnalysis(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível analisar esta foto.");
+      const message = err instanceof Error ? err.message : String(err || "Erro desconhecido");
+      setError(`Não foi possível analisar: ${message}`);
     } finally {
       setAnalyzing(false);
     }
