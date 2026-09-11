@@ -235,7 +235,6 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   const lineEndX = centerX + nx * positiveEdge.distance;
   const lineEndY = centerY + ny * positiveEdge.distance;
   const fingerWidthOriginalPx = measuredWidth / scale;
-  const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
     throw new Error("A largura encontrada não parece válida. Aproxime a mão e mantenha os quatro dedos separados.");
