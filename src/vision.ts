@@ -167,9 +167,9 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     throw new Error("Cartão encontrado, mas não consegui distinguir os quatro dedos. Afaste bem os dedos e tire outra foto.");
   }
 
-  // Evita medir a ponta e também a membrana entre os dedos.
-  const startAt = Math.floor(ringSamples.length * 0.35);
-  const endAt = Math.max(startAt + 1, Math.floor(ringSamples.length * 0.78));
+  // Mede a falange proximal: região onde o anel se apoia, sem alcançar a membrana.
+  const startAt = Math.floor(ringSamples.length * 0.68);
+  const endAt = Math.max(startAt + 1, Math.floor(ringSamples.length * 0.88));
   const stableSamples = ringSamples.slice(startAt, endAt).sort((a, b) => a.run.width - b.run.width);
   const chosen = stableSamples[Math.floor(stableSamples.length / 2)];
   const ringRun = chosen.run;
@@ -214,7 +214,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   ctx.stroke();
   ctx.fillStyle = "#52e0a3";
   ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
-  ctx.fillText("ANELAR", lineStart, Math.max(40, lineY - 18));
+  ctx.fillText("BASE DO ANELAR", lineStart, Math.max(40, lineY - 18));
 
   return {
     pixelsPerMm,
