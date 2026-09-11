@@ -53,9 +53,9 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .card-guide { position: absolute; right: 5%; top: 20%; width: 27%; aspect-ratio: .63; display: grid; place-items: center; border: 2px dashed #f0cd78; border-radius: 9px; color: #f0cd78; font-size: 11px; font-weight: 900; letter-spacing: .08em; writing-mode: vertical-rl; }
 .hand-guide { position: absolute; left: 3%; top: 12%; width: 62%; height: 78%; border: 2px dashed #ffffffaa; border-radius: 42% 42% 22% 22%; border-top-color: transparent; }
 .hand-guide span { position: absolute; top: 0; width: 20%; border: 2px dashed #fff; border-bottom: 0; border-radius: 40px 40px 0 0; color: white; font-size: 8px; font-weight: 900; writing-mode: vertical-rl; display: grid; place-items: center; }
-.guide-index { left: 3%; height: 49%; }
-.guide-middle { left: 27%; height: 59%; }
-.guide-ring { left: 51%; height: 54%; border-color: #f0cd78 !important; color: #f0cd78 !important; overflow: visible; }
+.guide-index { left: 73%; height: 49%; }
+.guide-middle { left: 51%; height: 59%; }
+.guide-ring { left: 27%; height: 54%; border-color: #f0cd78 !important; color: #f0cd78 !important; overflow: visible; }
 .guide-ring::after { content: ""; position: absolute; left: -12%; right: -12%; bottom: 12%; height: 4px; border-radius: 4px; background: #f0cd78; box-shadow: 0 0 0 2px #0008, 0 0 14px #f0cd78; }
 .guide-ring b { position: absolute; left: 50%; bottom: 5%; transform: translate(-50%, 100%); writing-mode: horizontal-tb; white-space: nowrap; color: #f0cd78; font-size: 8px; letter-spacing: .04em; }
 .guide-pinky { left: 75%; height: 40%; }
