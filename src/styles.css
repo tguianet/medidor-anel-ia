@@ -84,6 +84,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 
 .measurement-stage { position: relative; width: 100%; margin: 22px 0 18px; aspect-ratio: 3 / 4; overflow: hidden; border-radius: 16px; background: #050505; touch-action: none; user-select: none; }
 .measurement-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.measurement-stage .zoomable-photo { transform-origin: center; will-change: transform; }
 .measurement-stage.is-active { outline: 1px solid #c9a967; }
 .card-detected { position: absolute; z-index: 2; border: 3px solid #f0cd78; pointer-events: none; box-shadow: 0 0 0 1px #0008, inset 0 0 0 1px #0008; }
 .card-detected span { position: absolute; left: 0; top: -24px; padding: 3px 6px; color: #171109; background: #f0cd78; border-radius: 4px; font-size: 10px; font-weight: 900; }
@@ -102,6 +103,11 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .measure-cross { position: absolute; z-index: 5; height: 40px; padding: 0; transform: translateY(-50%); border: 0; border-top: 4px solid #52e0a3; color: #071b14; background: transparent; cursor: ns-resize; touch-action: none; }
 .measure-cross::before { content: ""; position: absolute; left: 50%; top: -13px; width: 22px; height: 22px; transform: translateX(-50%); border: 2px solid #092118; border-radius: 50%; background: #52e0a3; box-shadow: 0 0 10px #000; }
 .measure-cross span { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 3px 7px; border-radius: 5px; color: #092118; background: #52e0a3; font-size: 9px; font-weight: 900; white-space: nowrap; }
+.zoom-controls { display: grid; grid-template-columns: 48px 58px 48px 1fr; align-items: center; gap: 8px; margin: -4px 0 18px; }
+.zoom-controls button { min-height: 44px; border: 1px solid #8d7444; border-radius: 10px; color: #f5ddb0; background: #292219; font-size: 24px; font-weight: 900; }
+.zoom-controls button:disabled { opacity: .35; }
+.zoom-controls strong { text-align: center; color: #f0cf80; }
+.zoom-controls .zoom-reset { font-size: 14px; }
 
 @media (max-width: 480px) {
   .measurement-stage { margin-inline: -2px; width: calc(100% + 4px); }
