@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { detectCard, type CardAnalysis } from "./vision";
 
 type Stage = "intro" | "camera" | "review";
 
@@ -8,6 +9,8 @@ export default function App() {
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
   const [error, setError] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<CardAnalysis | null>(null);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -62,6 +65,19 @@ export default function App() {
     setStage("review");
   };
 
+  const analyze = async () => {
+    setAnalyzing(true);
+    setError("");
+    try {
+      const result = await detectCard(photo);
+      setAnalysis(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível analisar esta foto.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   return (
     <main className="app">
       <header className="brand">
@@ -112,12 +128,14 @@ export default function App() {
         <section className="panel review">
           <span className="step">PASSO 2 DE 2</span>
           <h1>A foto ficou nítida?</h1>
-          <div className="preview">{photo && <img src={photo} alt="Fotografia capturada" />}</div>
+          <div className="preview">{photo && <img src={analysis?.annotatedPhoto || photo} alt="Fotografia capturada" />}</div>
+          {analysis && <div className="analysis-result"><strong>Cartão reconhecido</strong><span>Escala: {analysis.pixelsPerMm.toFixed(2)} pixels/mm</span><span>Confiança: {analysis.confidence}%</span></div>}
           <div className="review-actions">
-            <button className="secondary" onClick={() => { setPhoto(""); void openCamera(); }}>Tirar outra</button>
-            <button className="primary" onClick={() => alert("Próxima etapa: detectar o cartão e calcular a escala.")}>Usar esta foto</button>
+            <button className="secondary" onClick={() => { setPhoto(""); setAnalysis(null); setError(""); void openCamera(); }}>Tirar outra</button>
+            <button className="primary" disabled={analyzing} onClick={analyze}>{analyzing ? "Analisando..." : analysis ? "Analisar novamente" : "Usar esta foto"}</button>
           </div>
-          <p className="pending">Na próxima fase, o sistema detectará automaticamente o cartão e medirá o dedo.</p>
+          {error && <p className="error">{error}</p>}
+          <p className="pending">{analysis ? "Escala real calculada. Próxima camada: medição do anelar." : "O sistema procurará automaticamente os quatro cantos do cartão."}</p>
         </section>
       )}
     </main>
