@@ -104,7 +104,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Vire a palma para cima e mostre o cartão inteiro. O sistema identificará automaticamente o dedo anelar.</p>
+          <p className="lead">Vire a palma para cima e deixe o cartão inteiro ao lado da mão, sem cobrir a palma. O sistema identificará automaticamente o dedo anelar.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
@@ -112,7 +112,7 @@ export default function App() {
           <ul className="tips">
             <li>Use boa iluminação e evite sombras.</li>
             <li>Mantenha a palma aberta e os dedos esticados.</li>
-            <li>Coloque o cartão horizontal sobre a palma, sem dobrá-lo.</li>
+            <li>Coloque o cartão ao lado da mão, sem cobrir a palma ou os dedos.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
             <li>Fotografe completamente de cima.</li>
           </ul>
@@ -130,9 +130,9 @@ export default function App() {
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
-            <div className="live-hint">Mostre a palma aberta e o cartão inteiro</div>
+            <div className="live-hint">Palma livre • cartão inteiro ao lado da mão</div>
           </div>
-          <p>Palma aberta • quatro dedos visíveis • cartão inteiro</p>
+          <p>Palma completamente livre • cartão inteiro ao lado</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
