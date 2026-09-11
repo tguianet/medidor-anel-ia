@@ -1,30 +1,27 @@
-declare global {
-  interface Window { cv: any; }
-}
-
-export type CardAnalysis = {
-  pixelsPerMm: number;
-  confidence: number;
-  annotatedPhoto: string;
-};
+let loadedCv: any = null;
 
 const waitForOpenCv = async () => {
-  for (let i = 0; i < 150; i++) {
-    const candidate = window.cv;
-    if (candidate?.Mat) return candidate;
-    if (candidate && typeof candidate.then === "function") {
-      const loaded = await Promise.race([
+  if (loadedCv?.Mat) return loadedCv;
+
+  const module = await Promise.race([
+    import("@techstark/opencv-js"),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("O motor de visão demorou para carregar. Tente fechar e abrir o site.")), 20000),
+    ),
+  ]);
+
+  const candidate: any = (module as any).default ?? module;
+  loadedCv = candidate && typeof candidate.then === "function"
+    ? await Promise.race([
         candidate,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
-      ]);
-      if (loaded?.Mat) {
-        window.cv = loaded;
-        return loaded;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error("O módulo de análise não carregou. Verifique sua internet e tente novamente.");
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Não foi possível iniciar o motor de visão neste celular.")), 20000),
+        ),
+      ])
+    : candidate;
+
+  if (!loadedCv?.Mat) throw new Error("O motor de visão não iniciou corretamente.");
+  return loadedCv;
 };
 
 const distance = (a: {x:number;y:number}, b: {x:number;y:number}) =>
