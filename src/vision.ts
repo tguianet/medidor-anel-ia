@@ -182,55 +182,46 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     throw new Error("Encontrei o cartão, mas não consegui separar a mão do fundo. Use uma mesa clara e iluminação uniforme.");
   }
 
-  type Run = { start: number; end: number; width: number; center: number; row: number };
-  const tracked: Run[] = [];
-  let previousCenter: number | null = null;
-  const scanLimit = Math.round(skinMinY + (skinMaxY - skinMinY) * 0.72);
+  // Coordenada fixa da aliança virtual exibida no visor 3:4.
+  const targetX = Math.round(work.width * 0.26);
+  const targetY = Math.round(work.height * 0.49);
+  let centerX = targetX;
+  let centerY = targetY;
 
-  for (let row = skinMinY; row <= scanLimit; row++) {
-    const runs: Run[] = [];
-    let start = -1;
-    for (let col = skinMinX; col <= skinMaxX + 1; col++) {
-      const on = col <= skinMaxX && skinMask[row * work.width + col] === 1;
-      if (on && start < 0) start = col;
-      if (!on && start >= 0) {
-        const width = col - start;
-        if (width >= 4 && width <= work.width * 0.22) {
-          runs.push({ start, end: col - 1, width, center: (start + col - 1) / 2, row });
+  if (!skinMask[centerY * work.width + centerX]) {
+    let found = false;
+    const tolerance = Math.round(work.width * 0.025);
+    for (let radius = 1; radius <= tolerance && !found; radius++) {
+      for (let dy = -radius; dy <= radius && !found; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const x = targetX + dx;
+          const y = targetY + dy;
+          if (x >= 0 && x < work.width && y >= 0 && y < work.height &&
+              skinMask[y * work.width + x]) {
+            centerX = x; centerY = y; found = true; break;
+          }
         }
-        start = -1;
       }
     }
-
-    if (!runs.length) continue;
-    let chosen: Run;
-    if (previousCenter === null) {
-      chosen = runs.sort((x, y) => x.width - y.width)[0];
-    } else {
-      chosen = runs.sort((x, y) => Math.abs(x.center - previousCenter!) - Math.abs(y.center - previousCenter!))[0];
-      if (Math.abs(chosen.center - previousCenter) > work.width * 0.09) continue;
+    if (!found) {
+      throw new Error("O dedo não ficou encaixado na aliança dourada. Posicione o local do anel dentro da marca e tire outra foto.");
     }
-
-    const recentWidths = tracked.slice(-12).map((item) => item.width).sort((x, y) => x - y);
-    const recentMedian = recentWidths.length ? recentWidths[Math.floor(recentWidths.length / 2)] : chosen.width;
-    if (tracked.length > 8 && chosen.width > recentMedian * 1.7) break;
-    tracked.push(chosen);
-    previousCenter = chosen.center;
   }
 
-  if (tracked.length < 18) {
-    throw new Error("Não encontrei um dedo isolado. Estenda somente o dedo que deseja medir e dobre os demais.");
+  let left = centerX;
+  let right = centerX;
+  while (left > 0 && skinMask[centerY * work.width + left - 1]) left--;
+  while (right < work.width - 1 && skinMask[centerY * work.width + right + 1]) right++;
+  const measuredWidth = right - left + 1;
+
+  if (measuredWidth < 4 || measuredWidth > work.width * 0.16) {
+    throw new Error("Não consegui separar as bordas dentro da aliança dourada. Use fundo contrastante e mantenha o dedo reto.");
   }
 
-  const targetIndex = Math.min(tracked.length - 1, Math.floor(tracked.length * 0.74));
-  const neighborhood = tracked.slice(Math.max(0, targetIndex - 4), Math.min(tracked.length, targetIndex + 5));
-  const ordered = [...neighborhood].sort((x, y) => x.width - y.width);
-  const chosenRun = ordered[Math.floor(ordered.length / 2)];
-  const measuredWidth = chosenRun.width;
-  const lineStartX = chosenRun.start;
-  const lineStartY = chosenRun.row;
-  const lineEndX = chosenRun.end;
-  const lineEndY = chosenRun.row;
+  const lineStartX = left;
+  const lineStartY = centerY;
+  const lineEndX = right;
+  const lineEndY = centerY;
   const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
@@ -274,7 +265,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   ctx.stroke();
   ctx.fillStyle = "#52e0a3";
   ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
-  ctx.fillText("DEDO RECONHECIDO", lineStartXOut, Math.max(40, lineStartYOut - 18));
+  ctx.fillText("PONTO MEDIDO", lineStartXOut, Math.max(40, lineStartYOut - 18));
 
   return {
     pixelsPerMm,
