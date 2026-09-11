@@ -1,5 +1,3 @@
-import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-
 export type CardAnalysis = {
   pixelsPerMm: number;
   confidence: number;
@@ -11,44 +9,6 @@ export type CardAnalysis = {
 };
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
-
-let handLandmarkerPromise: Promise<HandLandmarker> | null = null;
-
-const getHandLandmarker = () => {
-  if (!handLandmarkerPromise) {
-    handLandmarkerPromise = (async () => {
-      const files = await FilesetResolver.forVisionTasks(
-        "/mediapipe/wasm",
-      );
-      const options = {
-        baseOptions: {
-          modelAssetPath: "/mediapipe/hand_landmarker.task",
-        },
-        runningMode: "IMAGE" as const,
-        numHands: 1,
-        minHandDetectionConfidence: 0.45,
-        minHandPresenceConfidence: 0.45,
-      };
-      try {
-        return await HandLandmarker.createFromOptions(files, {
-          ...options,
-          baseOptions: { ...options.baseOptions, delegate: "GPU" },
-        });
-      } catch {
-        return HandLandmarker.createFromOptions(files, {
-          ...options,
-          baseOptions: { ...options.baseOptions, delegate: "CPU" },
-        });
-      }
-    })();
-  }
-  return Promise.race([
-    handLandmarkerPromise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("O reconhecimento da mão demorou para carregar. Verifique a internet e tente novamente.")), 25000),
-    ),
-  ]);
-};
 
 const loadImage = async (src: string) => {
   const image = new Image();
@@ -172,88 +132,59 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     throw new Error("Encontrei o cartão, mas não consegui separar a mão do fundo. Use uma mesa clara e iluminação uniforme.");
   }
 
-  const landmarker = await getHandLandmarker();
-  const handResult = landmarker.detect(work);
-  const landmarks = handResult.landmarks?.[0];
+  type Run = { start: number; end: number; width: number; center: number; row: number };
+  const tracked: Run[] = [];
+  let previousCenter: number | null = null;
+  const scanLimit = Math.round(skinMinY + (skinMaxY - skinMinY) * 0.72);
 
-  if (!landmarks) {
-    throw new Error("Não reconheci a mão. Mostre a palma aberta, deixe os quatro dedos visíveis e tente novamente.");
-  }
-
-  // Pontos 13 e 14: base e primeira articulação do anelar.
-  const mcp = landmarks[13];
-  const pip = landmarks[14];
-  const centerX = (mcp.x + (pip.x - mcp.x) * 0.58) * work.width;
-  const centerY = (mcp.y + (pip.y - mcp.y) * 0.58) * work.height;
-  const vx = pip.x - mcp.x;
-  const vy = pip.y - mcp.y;
-  const length = Math.hypot(vx, vy) || 1;
-  const nx = -vy / length;
-  const ny = vx / length;
-
-  const colorAt = (x: number, y: number) => {
-    const ix = Math.max(0, Math.min(work.width - 1, Math.round(x)));
-    const iy = Math.max(0, Math.min(work.height - 1, Math.round(y)));
-    const offset = (iy * work.width + ix) * 4;
-    return [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
-  };
-
-  const colorDistance = (a: number[], b: number[]) =>
-    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-
-  const workPixelsPerMm = pixelsPerMm * scale;
-  const minEdgeDistance = Math.max(3, workPixelsPerMm * 6.2);
-  const maxEdgeDistance = Math.min(work.width * 0.1, workPixelsPerMm * 15);
-  const expectedHalfWidth = workPixelsPerMm * 12.7;
-  const centerColor = colorAt(centerX, centerY);
-
-  const findEdge = (direction: number) => {
-    let bestDistance = 0;
-    let bestScore = -Infinity;
-    let bestContrast = 0;
-    for (let distance = minEdgeDistance; distance <= maxEdgeDistance; distance += 0.35) {
-      const inner = colorAt(
-        centerX + nx * direction * (distance - 1.4),
-        centerY + ny * direction * (distance - 1.4),
-      );
-      const outer = colorAt(
-        centerX + nx * direction * (distance + 1.8),
-        centerY + ny * direction * (distance + 1.8),
-      );
-      const localContrast = colorDistance(inner, outer);
-      const outsideDifference = colorDistance(centerColor, outer);
-      const distancePenalty = Math.abs(distance - expectedHalfWidth) * 0.22;
-      const score = localContrast + outsideDifference * 0.3 - distancePenalty;
-      if (score > bestScore) {
-        bestScore = score;
-        bestContrast = localContrast;
-        bestDistance = distance;
+  for (let row = skinMinY; row <= scanLimit; row++) {
+    const runs: Run[] = [];
+    let start = -1;
+    for (let col = skinMinX; col <= skinMaxX + 1; col++) {
+      const on = col <= skinMaxX && skinMask[row * work.width + col] === 1;
+      if (on && start < 0) start = col;
+      if (!on && start >= 0) {
+        const width = col - start;
+        if (width >= 4 && width <= work.width * 0.22) {
+          runs.push({ start, end: col - 1, width, center: (start + col - 1) / 2, row });
+        }
+        start = -1;
       }
     }
-    return { distance: bestDistance, score: bestScore, contrast: bestContrast };
-  };
 
-  const negativeEdge = findEdge(-1);
-  const positiveEdge = findEdge(1);
-  if (negativeEdge.contrast < 8 || positiveEdge.contrast < 8) {
-    throw new Error("Reconheci o anelar, mas faltou contraste nas laterais. Use uma superfície de cor diferente da pele.");
+    if (!runs.length) continue;
+    let chosen: Run;
+    if (previousCenter === null) {
+      chosen = runs.sort((x, y) => x.width - y.width)[0];
+    } else {
+      chosen = runs.sort((x, y) => Math.abs(x.center - previousCenter!) - Math.abs(y.center - previousCenter!))[0];
+      if (Math.abs(chosen.center - previousCenter) > work.width * 0.09) continue;
+    }
+
+    const recentWidths = tracked.slice(-12).map((item) => item.width).sort((x, y) => x - y);
+    const recentMedian = recentWidths.length ? recentWidths[Math.floor(recentWidths.length / 2)] : chosen.width;
+    if (tracked.length > 8 && chosen.width > recentMedian * 1.7) break;
+    tracked.push(chosen);
+    previousCenter = chosen.center;
   }
 
-  const symmetry = Math.max(negativeEdge.distance, positiveEdge.distance) /
-    Math.max(1, Math.min(negativeEdge.distance, positiveEdge.distance));
-  if (symmetry > 1.42) {
-    throw new Error("As bordas do anelar ficaram assimétricas. Deixe o dedo reto e a câmera paralela.");
+  if (tracked.length < 18) {
+    throw new Error("Não encontrei um dedo isolado. Estenda somente o dedo que deseja medir e dobre os demais.");
   }
 
-  const measuredWidth = negativeEdge.distance + positiveEdge.distance;
-  const lineStartX = centerX - nx * negativeEdge.distance;
-  const lineStartY = centerY - ny * negativeEdge.distance;
-  const lineEndX = centerX + nx * positiveEdge.distance;
-  const lineEndY = centerY + ny * positiveEdge.distance;
+  const targetIndex = Math.min(tracked.length - 1, Math.floor(tracked.length * 0.74));
+  const neighborhood = tracked.slice(Math.max(0, targetIndex - 4), Math.min(tracked.length, targetIndex + 5));
+  const ordered = [...neighborhood].sort((x, y) => x.width - y.width);
+  const chosenRun = ordered[Math.floor(ordered.length / 2)];
+  const measuredWidth = chosenRun.width;
+  const lineStartX = chosenRun.start;
+  const lineStartY = chosenRun.row;
+  const lineEndX = chosenRun.end;
+  const lineEndY = chosenRun.row;
   const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
-    throw new Error("A largura encontrada não parece válida. Aproxime a mão e mantenha os quatro dedos separados.");
+    throw new Error("A largura encontrada não parece válida. Deixe somente um dedo estendido e mantenha a câmera paralela.");
   }
   // Calibração experimental na linha fixa: 25,4 mm detectados = aro 24 (64 mm).
   // Coeficiente inicial: 64 / 25,4 = 2,519685.
@@ -293,7 +224,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   ctx.stroke();
   ctx.fillStyle = "#52e0a3";
   ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
-  ctx.fillText("ANELAR RECONHECIDO", lineStartXOut, Math.max(40, lineStartYOut - 18));
+  ctx.fillText("DEDO RECONHECIDO", lineStartXOut, Math.max(40, lineStartYOut - 18));
 
   return {
     pixelsPerMm,
