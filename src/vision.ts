@@ -135,6 +135,8 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   type Run = { start: number; end: number; width: number };
   let selectedRuns: Run[] | null = null;
   let selectedY = 0;
+  const cardIsRight = (best.box.minX + best.box.maxX) / 2 > (skinMinX + skinMaxX) / 2;
+  const ringSamples: Array<{ run: Run; row: number }> = [];
   const searchBottom = Math.round(skinMinY + (skinMaxY - skinMinY) * 0.52);
 
   for (let row = skinMinY; row <= searchBottom; row++) {
@@ -155,18 +157,36 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
         : [...runs].sort((a, b) => b.width - a.width).slice(0, 4).sort((a, b) => a.start - b.start);
       selectedRuns = four;
       selectedY = row;
+      four.sort((a, b) => a.start - b.start);
+      const target = cardIsRight ? four[1] : four[four.length - 2];
+      ringSamples.push({ run: target, row });
     }
   }
 
-  if (!selectedRuns || selectedRuns.length < 4) {
+  if (!selectedRuns || selectedRuns.length < 4 || ringSamples.length < 6) {
     throw new Error("Cartão encontrado, mas não consegui distinguir os quatro dedos. Afaste bem os dedos e tire outra foto.");
   }
 
-  selectedRuns.sort((a, b) => a.start - b.start);
-  const cardIsRight = (best.box.minX + best.box.maxX) / 2 > (skinMinX + skinMaxX) / 2;
-  const ringRun = cardIsRight ? selectedRuns[1] : selectedRuns[selectedRuns.length - 2];
+  // Evita medir a ponta e também a membrana entre os dedos.
+  const startAt = Math.floor(ringSamples.length * 0.35);
+  const endAt = Math.max(startAt + 1, Math.floor(ringSamples.length * 0.78));
+  const stableSamples = ringSamples.slice(startAt, endAt).sort((a, b) => a.run.width - b.run.width);
+  const chosen = stableSamples[Math.floor(stableSamples.length / 2)];
+  const ringRun = chosen.run;
+  selectedY = chosen.row;
+
+  const widths = stableSamples.map((sample) => sample.run.width);
+  const minWidth = Math.min(...widths);
+  const maxWidth = Math.max(...widths);
+  if (maxWidth / Math.max(1, minWidth) > 1.38) {
+    throw new Error("A leitura do dedo ficou instável. Mantenha a mão reta, afaste os dedos e fotografe exatamente de cima.");
+  }
+
   const fingerWidthOriginalPx = ringRun.width / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
+  if (fingerWidthMm < 13 || fingerWidthMm > 28) {
+    throw new Error("A largura encontrada não parece válida. Aproxime a mão e mantenha os quatro dedos separados.");
+  }
   const circumferenceMm = fingerWidthMm * 2.85;
   const ringSize = Math.max(5, Math.min(40, Math.round(circumferenceMm - 40)));
   const ringRange: [number, number] = [Math.max(5, ringSize - 1), Math.min(40, ringSize + 1)];
