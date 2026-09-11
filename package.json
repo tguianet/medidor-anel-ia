@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
+    "@techstark/opencv-js": "4.10.0-release.1",
     "vite": "^7.1.0",
     "typescript": "^5.8.3",
     "react": "^19.1.1",
