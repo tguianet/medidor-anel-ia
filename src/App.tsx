@@ -104,7 +104,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Estenda somente o dedo que deseja medir e mantenha os outros dobrados. Coloque o cartão inteiro ao lado, sem encostar no dedo.</p>
+          <p className="lead">Estenda o dedo que deseja medir, encaixe o local do anel na aliança dourada e coloque o cartão inteiro ao lado.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
@@ -131,9 +131,10 @@ export default function App() {
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
-            <div className="live-hint">Um dedo estendido • cartão inteiro ao lado</div>
+            <div className="ring-target"><span /><b>ENCAIXE O LOCAL DO ANEL</b></div>
+            <div className="live-hint">Encaixe o dedo na aliança dourada • cartão ao lado</div>
           </div>
-          <p>Um dedo estendido • cartão ao lado • câmera paralela</p>
+          <p>Encaixe o local do anel na marca dourada • câmera paralela</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
@@ -156,7 +157,7 @@ export default function App() {
           </div>
           {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
           {error && <p className="error">{error}</p>}
-          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema reconhecerá o cartão e medirá automaticamente o único dedo estendido."}</p>
+          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema reconhecerá o cartão e medirá exatamente o ponto encaixado na aliança dourada."}</p>
         </section>
       )}
     </main>
