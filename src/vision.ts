@@ -128,6 +128,56 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     }
   }
 
+  // Mantém somente a maior região de pele conectada (dedo + mão).
+  const skinVisited = new Uint8Array(total);
+  const skinLabels = new Int32Array(total);
+  const skinQueue = new Int32Array(total);
+  const componentSizes: number[] = [0];
+  let componentId = 0;
+
+  for (let start = 0; start < total; start++) {
+    if (!skinMask[start] || skinVisited[start]) continue;
+    componentId++;
+    let head = 0;
+    let tail = 0;
+    skinQueue[tail++] = start;
+    skinVisited[start] = 1;
+    let size = 0;
+
+    while (head < tail) {
+      const index = skinQueue[head++];
+      skinLabels[index] = componentId;
+      size++;
+      const x = index % work.width;
+      const neighbors = [index - 1, index + 1, index - work.width, index + work.width];
+      for (const next of neighbors) {
+        if (next < 0 || next >= total || skinVisited[next] || !skinMask[next]) continue;
+        const nx = next % work.width;
+        if (Math.abs(nx - x) > 1) continue;
+        skinVisited[next] = 1;
+        skinQueue[tail++] = next;
+      }
+    }
+    componentSizes[componentId] = size;
+  }
+
+  let largestLabel = 0;
+  for (let id = 1; id < componentSizes.length; id++) {
+    if (componentSizes[id] > (componentSizes[largestLabel] || 0)) largestLabel = id;
+  }
+
+  skinMinX = work.width; skinMinY = work.height; skinMaxX = 0; skinMaxY = 0;
+  for (let index = 0; index < total; index++) {
+    if (skinLabels[index] !== largestLabel) {
+      skinMask[index] = 0;
+      continue;
+    }
+    const x = index % work.width;
+    const y = (index / work.width) | 0;
+    skinMinX = Math.min(skinMinX, x); skinMaxX = Math.max(skinMaxX, x);
+    skinMinY = Math.min(skinMinY, y); skinMaxY = Math.max(skinMaxY, y);
+  }
+
   if (skinMaxX <= skinMinX || skinMaxY <= skinMinY) {
     throw new Error("Encontrei o cartão, mas não consegui separar a mão do fundo. Use uma mesa clara e iluminação uniforme.");
   }
