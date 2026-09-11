@@ -10,6 +10,17 @@ export type CardAnalysis = {
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
 
+const median = (values: number[]) => {
+  const ordered = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 ? ordered[middle] : (ordered[middle - 1] + ordered[middle]) / 2;
+};
+
+const percentile = (values: number[], amount: number) => {
+  const ordered = [...values].sort((a, b) => a - b);
+  return ordered[Math.max(0, Math.min(ordered.length - 1, Math.round((ordered.length - 1) * amount)))];
+};
+
 const loadImage = async (src: string) => {
   const image = new Image();
   image.src = src;
@@ -98,15 +109,53 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     throw new Error("Não encontrei o cartão azul. Aproxime um pouco, deixe os quatro cantos visíveis e evite reflexo.");
   }
 
+  // Mede o cartão nos próprios eixos. A caixa alinhada à tela muda bastante
+  // quando o cartão gira e era a principal fonte de resultados diferentes.
+  const cardPoints: Array<[number, number]> = [];
+  for (let py = best.box.minY; py <= best.box.maxY; py++) {
+    for (let px = best.box.minX; px <= best.box.maxX; px++) {
+      if (mask[py * work.width + px]) cardPoints.push([px, py]);
+    }
+  }
+  const meanX = cardPoints.reduce((sum, point) => sum + point[0], 0) / cardPoints.length;
+  const meanY = cardPoints.reduce((sum, point) => sum + point[1], 0) / cardPoints.length;
+  let covXX = 0, covXY = 0, covYY = 0;
+  for (const [px, py] of cardPoints) {
+    const dx = px - meanX;
+    const dy = py - meanY;
+    covXX += dx * dx;
+    covXY += dx * dy;
+    covYY += dy * dy;
+  }
+  const cardAngle = 0.5 * Math.atan2(2 * covXY, covXX - covYY);
+  const axisX = Math.cos(cardAngle), axisY = Math.sin(cardAngle);
+  const crossX = -axisY, crossY = axisX;
+  const along = cardPoints.map(([px, py]) => (px - meanX) * axisX + (py - meanY) * axisY);
+  const across = cardPoints.map(([px, py]) => (px - meanX) * crossX + (py - meanY) * crossY);
+  const orientedA = percentile(along, 0.99) - percentile(along, 0.01);
+  const orientedB = percentile(across, 0.99) - percentile(across, 0.01);
+  const cardLong = Math.max(orientedA, orientedB);
+  const cardShort = Math.min(orientedA, orientedB);
+  const orientedRatio = cardLong / Math.max(cardShort, 1);
+  if (orientedRatio < 1.35 || orientedRatio > 1.82) {
+    throw new Error("O cartão está muito inclinado. Apoie cartão e mão na mesma superfície e fotografe totalmente de cima.");
+  }
+
   const factor = 1 / scale;
   const x = best.box.minX * factor;
   const y = best.box.minY * factor;
   const width = (best.box.maxX - best.box.minX + 1) * factor;
   const height = (best.box.maxY - best.box.minY + 1) * factor;
-  const longPx = Math.max(width, height);
-  const shortPx = Math.min(width, height);
+  const longPx = cardLong * factor;
+  const shortPx = cardShort * factor;
   const pixelsPerMm = ((longPx / 85.6) + (shortPx / 53.98)) / 2;
-  const confidence = Math.max(55, Math.min(96, Math.round(96 - Math.abs(best.ratio - 1.586) * 70)));
+  const scaleLong = longPx / 85.6;
+  const scaleShort = shortPx / 53.98;
+  const scaleDisagreement = Math.abs(scaleLong - scaleShort) / ((scaleLong + scaleShort) / 2);
+  if (scaleDisagreement > 0.16) {
+    throw new Error("A perspectiva da foto está alterando a medida. Deixe o celular paralelo ao cartão e tente novamente.");
+  }
+  const confidence = Math.max(55, Math.min(96, Math.round(96 - scaleDisagreement * 180)));
 
   // Segmentação leve de pele em YCbCr para localizar os quatro dedos.
   const skinMask = new Uint8Array(total);
@@ -208,11 +257,33 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     }
   }
 
-  let left = centerX;
-  let right = centerX;
-  while (left > 0 && skinMask[centerY * work.width + left - 1]) left--;
-  while (right < work.width - 1 && skinMask[centerY * work.width + right + 1]) right++;
-  const measuredWidth = right - left + 1;
+  // Mede várias linhas ao redor do ponto do anel. Sombras ou ruído em uma
+  // única linha não conseguem mais alterar todo o resultado.
+  const samples: Array<{ width: number; left: number; right: number; y: number }> = [];
+  const sampleRadius = Math.max(4, Math.round(work.height * 0.012));
+  for (let offsetY = -sampleRadius; offsetY <= sampleRadius; offsetY += 2) {
+    const sampleY = centerY + offsetY;
+    if (sampleY < 0 || sampleY >= work.height || !skinMask[sampleY * work.width + centerX]) continue;
+    let sampleLeft = centerX;
+    let sampleRight = centerX;
+    while (sampleLeft > 0 && skinMask[sampleY * work.width + sampleLeft - 1]) sampleLeft--;
+    while (sampleRight < work.width - 1 && skinMask[sampleY * work.width + sampleRight + 1]) sampleRight++;
+    samples.push({ width: sampleRight - sampleLeft + 1, left: sampleLeft, right: sampleRight, y: sampleY });
+  }
+  if (samples.length < 5) {
+    throw new Error("O ponto do anel não ficou nítido o suficiente. Use fundo liso, boa luz e mantenha o dedo parado.");
+  }
+  const measuredWidth = median(samples.map((sample) => sample.width));
+  const deviations = samples.map((sample) => Math.abs(sample.width - measuredWidth) / measuredWidth);
+  if (median(deviations) > 0.08 || Math.max(...deviations) > 0.22) {
+    throw new Error("As bordas do dedo variaram muito no ponto do anel. Mantenha o dedo reto, sem sombra, e tire outra foto.");
+  }
+  const representative = samples.reduce((bestSample, sample) =>
+    Math.abs(sample.width - measuredWidth) < Math.abs(bestSample.width - measuredWidth) ? sample : bestSample
+  );
+  const left = representative.left;
+  const right = representative.right;
+  centerY = representative.y;
 
   if (measuredWidth < 4 || measuredWidth > work.width * 0.16) {
     throw new Error("Não consegui separar as bordas dentro da aliança dourada. Use fundo contrastante e mantenha o dedo reto.");
