@@ -18,11 +18,11 @@ const getHandLandmarker = () => {
   if (!handLandmarkerPromise) {
     handLandmarkerPromise = (async () => {
       const files = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm",
+        "/mediapipe/wasm",
       );
       const options = {
         baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          modelAssetPath: "/mediapipe/hand_landmarker.task",
         },
         runningMode: "IMAGE" as const,
         numHands: 1,
