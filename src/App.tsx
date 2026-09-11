@@ -155,7 +155,7 @@ export default function App() {
           </div>
           {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
           {error && <p className="error">{error}</p>}
-          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema procurará o cartão e medirá o dedo posicionado no traço."}</p>
+          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema reconhecerá o cartão, a mão e o dedo anelar automaticamente."}</p>
         </section>
       )}
     </main>
