@@ -68,7 +68,9 @@ export default function App() {
   const analyze = async () => {
     setAnalyzing(true);
     setError("");
+    setAnalysis(null);
     try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
       const result = await detectCard(photo);
       setAnalysis(result);
     } catch (err) {
@@ -132,8 +134,9 @@ export default function App() {
           {analysis && <div className="analysis-result"><strong>Cartão reconhecido</strong><span>Escala: {analysis.pixelsPerMm.toFixed(2)} pixels/mm</span><span>Confiança: {analysis.confidence}%</span></div>}
           <div className="review-actions">
             <button className="secondary" onClick={() => { setPhoto(""); setAnalysis(null); setError(""); void openCamera(); }}>Tirar outra</button>
-            <button className="primary" disabled={analyzing} onClick={analyze}>{analyzing ? "Analisando..." : analysis ? "Analisar novamente" : "Usar esta foto"}</button>
+            <button type="button" className="primary" disabled={analyzing} onClick={() => void analyze()}>{analyzing ? "Analisando, aguarde..." : analysis ? "Analisar novamente" : "Usar esta foto"}</button>
           </div>
+          {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
           {error && <p className="error">{error}</p>}
           <p className="pending">{analysis ? "Escala real calculada. Próxima camada: medição do anelar." : "O sistema procurará automaticamente os quatro cantos do cartão."}</p>
         </section>
