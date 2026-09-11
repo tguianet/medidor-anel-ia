@@ -20,16 +20,26 @@ const getHandLandmarker = () => {
       const files = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm",
       );
-      return HandLandmarker.createFromOptions(files, {
+      const options = {
         baseOptions: {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
         },
-        runningMode: "IMAGE",
+        runningMode: "IMAGE" as const,
         numHands: 1,
-        minHandDetectionConfidence: 0.55,
-        minHandPresenceConfidence: 0.55,
-      });
+        minHandDetectionConfidence: 0.45,
+        minHandPresenceConfidence: 0.45,
+      };
+      try {
+        return await HandLandmarker.createFromOptions(files, {
+          ...options,
+          baseOptions: { ...options.baseOptions, delegate: "GPU" },
+        });
+      } catch {
+        return HandLandmarker.createFromOptions(files, {
+          ...options,
+          baseOptions: { ...options.baseOptions, delegate: "CPU" },
+        });
+      }
     })();
   }
   return Promise.race([
