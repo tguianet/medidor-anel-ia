@@ -189,7 +189,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   }
 
   if (!fixedRun) {
-    throw new Error("O dedo não ficou sobre a linha dourada. Alinhe a base do anelar exatamente com o risco e tire outra foto.");
+    throw new Error("Nenhum dedo foi encontrado no traço dourado. Posicione o local do anel exatamente sobre o risco e tire outra foto.");
   }
 
   const ringRun = fixedRun;
@@ -228,7 +228,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   ctx.stroke();
   ctx.fillStyle = "#52e0a3";
   ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
-  ctx.fillText("BASE DO ANELAR", lineStart, Math.max(40, lineY - 18));
+  ctx.fillText("LOCAL DO ANEL", lineStart, Math.max(40, lineY - 18));
 
   return {
     pixelsPerMm,
