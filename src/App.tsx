@@ -103,7 +103,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Vire a palma da mão esquerda para cima e apoie o cartão atravessado sobre a palma, próximo à base dos dedos.</p>
+          <p className="lead">Vire a palma para cima, coloque o cartão atravessado sobre ela e alinhe no traço dourado o dedo que deseja medir.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
@@ -113,7 +113,7 @@ export default function App() {
             <li>Mantenha a palma aberta e os dedos esticados.</li>
             <li>Coloque o cartão horizontal sobre a palma, sem dobrá-lo.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
-            <li>Alinhe o local onde o anel fica com a linha dourada.</li>
+            <li>Alinhe no traço dourado exatamente o local do dedo onde o anel ficará.</li>
             <li>Fotografe completamente de cima.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
@@ -131,11 +131,11 @@ export default function App() {
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
             <div className="guide">
-              <div className="hand-guide"><span className="guide-pinky" /><span className="guide-ring">ANELAR<b>LINHA DA ALIANÇA</b></span><span className="guide-middle" /><span className="guide-index">INDICADOR</span><i>PALMA</i></div>
+              <div className="ring-target"><span /><b>POSICIONE O LOCAL DO ANEL</b></div>
               <div className="card-guide">CARTÃO SOBRE A PALMA</div>
             </div>
           </div>
-          <p>Palma para cima • cartão sobre a palma • câmera a cerca de 50 cm</p>
+          <p>Coloque qualquer dedo no traço dourado • cartão sobre a palma</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
@@ -148,7 +148,7 @@ export default function App() {
           {analysis && <div className="analysis-result">
             <strong>Aro provável: {analysis.ringSize}</strong>
             <span>Faixa inicial: aro {analysis.ringRange[0]} a {analysis.ringRange[1]}</span>
-            <span>Largura detectada do anelar: {analysis.fingerWidthMm.toFixed(1)} mm</span>
+            <span>Largura detectada do dedo: {analysis.fingerWidthMm.toFixed(1)} mm</span>
             <span>Circunferência estimada: {analysis.circumferenceMm.toFixed(1)} mm</span>
             <span>Escala: {analysis.pixelsPerMm.toFixed(2)} pixels/mm • confiança do cartão: {analysis.confidence}%</span>
           </div>}
@@ -158,7 +158,7 @@ export default function App() {
           </div>
           {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
           {error && <p className="error">{error}</p>}
-          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema procurará o cartão e identificará o dedo anelar."}</p>
+          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema procurará o cartão e medirá o dedo posicionado no traço."}</p>
         </section>
       )}
     </main>
