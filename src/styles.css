@@ -40,6 +40,8 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .secondary { border: 1px solid #665b4d; color: #f3eadc; background: #26211c; }
 .privacy, .pending { color: #80776b; text-align: center; font-size: 13px; }
 .error { color: #ff9b91; text-align: center; }
+.analysis-loading { color: #f0cf80; text-align: center; font-weight: 700; animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: .55; } to { opacity: 1; } }
 
 .camera-screen { text-align: center; }
 .camera-top { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
