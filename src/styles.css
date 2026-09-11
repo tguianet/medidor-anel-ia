@@ -55,7 +55,9 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .hand-guide span { position: absolute; top: 0; width: 20%; border: 2px dashed #fff; border-bottom: 0; border-radius: 40px 40px 0 0; color: white; font-size: 8px; font-weight: 900; writing-mode: vertical-rl; display: grid; place-items: center; }
 .guide-index { left: 3%; height: 49%; }
 .guide-middle { left: 27%; height: 59%; }
-.guide-ring { left: 51%; height: 54%; border-color: #f0cd78 !important; color: #f0cd78 !important; }
+.guide-ring { left: 51%; height: 54%; border-color: #f0cd78 !important; color: #f0cd78 !important; overflow: visible; }
+.guide-ring::after { content: ""; position: absolute; left: -12%; right: -12%; bottom: 12%; height: 4px; border-radius: 4px; background: #f0cd78; box-shadow: 0 0 0 2px #0008, 0 0 14px #f0cd78; }
+.guide-ring b { position: absolute; left: 50%; bottom: 5%; transform: translate(-50%, 100%); writing-mode: horizontal-tb; white-space: nowrap; color: #f0cd78; font-size: 8px; letter-spacing: .04em; }
 .guide-pinky { left: 75%; height: 40%; }
 .hand-guide i { position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); color: #fff; font-size: 10px; font-style: normal; font-weight: 800; letter-spacing: .1em; }
 .shutter { width: 76px; height: 76px; padding: 6px; border: 2px solid #f0d18b; border-radius: 50%; background: transparent; cursor: pointer; }
