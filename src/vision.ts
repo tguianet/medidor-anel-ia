@@ -167,21 +167,33 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     throw new Error("Cartão encontrado, mas não consegui distinguir os quatro dedos. Afaste bem os dedos e tire outra foto.");
   }
 
-  // Mede a falange proximal: região onde o anel se apoia, sem alcançar a membrana.
-  const startAt = Math.floor(ringSamples.length * 0.68);
-  const endAt = Math.max(startAt + 1, Math.floor(ringSamples.length * 0.88));
-  const stableSamples = ringSamples.slice(startAt, endAt).sort((a, b) => a.run.width - b.run.width);
-  const chosen = stableSamples[Math.floor(stableSamples.length / 2)];
-  const ringRun = chosen.run;
-  selectedY = chosen.row;
+  // Mede exatamente na coordenada da linha dourada do visor 3:4.
+  const guideX = Math.round(work.width * 0.26);
+  const guideY = Math.round(work.height * 0.49);
+  let fixedRun: Run | null = null;
+  let fixedY = guideY;
 
-  const widths = stableSamples.map((sample) => sample.run.width);
-  const minWidth = Math.min(...widths);
-  const maxWidth = Math.max(...widths);
-  if (maxWidth / Math.max(1, minWidth) > 1.38) {
-    throw new Error("A leitura do dedo ficou instável. Mantenha a mão reta, afaste os dedos e fotografe exatamente de cima.");
+  for (let offset = 0; offset <= Math.round(work.height * 0.035) && !fixedRun; offset++) {
+    for (const row of offset === 0 ? [guideY] : [guideY - offset, guideY + offset]) {
+      if (row < 0 || row >= work.height || !skinMask[row * work.width + guideX]) continue;
+      let left = guideX;
+      let right = guideX;
+      while (left > 0 && skinMask[row * work.width + left - 1]) left--;
+      while (right < work.width - 1 && skinMask[row * work.width + right + 1]) right++;
+      const width = right - left + 1;
+      if (width >= 4 && width <= work.width * 0.18) {
+        fixedRun = { start: left, end: right, width };
+        fixedY = row;
+      }
+    }
   }
 
+  if (!fixedRun) {
+    throw new Error("O dedo não ficou sobre a linha dourada. Alinhe a base do anelar exatamente com o risco e tire outra foto.");
+  }
+
+  const ringRun = fixedRun;
+  selectedY = fixedY;
   const fingerWidthOriginalPx = ringRun.width / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
