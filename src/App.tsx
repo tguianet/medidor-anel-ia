@@ -127,7 +127,10 @@ export default function App() {
     const target = draggingRef.current;
     if (target === "left") setLeftLine(Math.min(x, rightLine - 3));
     if (target === "right") setRightLine(Math.max(x, leftLine + 3));
-    if (target === "height") setMeasureY(y);
+    if (target === "height") {
+      const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
+      setMeasureY(clamp(dragStartRef.current.right + dy, 18, 76));
+    }
     if (target === "card-tl") { setCardLeft(Math.min(x, cardRight - 5)); setCardTop(Math.min(y, cardBottom - 4)); }
     if (target === "card-tr") { setCardRight(Math.max(x, cardLeft + 5)); setCardTop(Math.min(y, cardBottom - 4)); }
     if (target === "card-bl") { setCardLeft(Math.min(x, cardRight - 5)); setCardBottom(Math.max(y, cardTop + 4)); }
@@ -153,9 +156,9 @@ export default function App() {
   const startDrag = (target: DragTarget, event: React.PointerEvent) => {
     event.stopPropagation();
     draggingRef.current = target;
-    dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardTop, right: cardRight, bottom: cardBottom };
+    dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardTop, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
     event.currentTarget.setPointerCapture(event.pointerId);
-    updateDrag(event.clientX, event.clientY);
+    if (target !== "height" && target !== "card-move") updateDrag(event.clientX, event.clientY);
   };
 
   const startPan = (event: React.PointerEvent) => {
@@ -225,7 +228,13 @@ export default function App() {
             <button className="icon-button" onClick={() => { stopCamera(); setStage("intro"); }}>×</button>
             <span>Fotografe de cima</span>
           </div>
-          <div className="viewport"><video ref={videoRef} playsInline muted /></div>
+          <div className="viewport">
+            <video ref={videoRef} playsInline muted />
+            <div className="position-guides" aria-hidden="true">
+              <div className="card-alignment"><span>CARTÃO SOBRE OS DEDOS</span></div>
+              <div className="finger-alignment"><span>DEDO</span></div>
+            </div>
+          </div>
           <p>Cartão inteiro sobre os dedos • câmera paralela</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
@@ -255,9 +264,10 @@ export default function App() {
             )}
             {phase === "finger" && pixelsPerMm && (
               <>
-                <button className="caliper-line left" style={{ left: `${leftLine}%`, top: `${measureY - 10}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
-                <button className="caliper-line right" style={{ left: `${rightLine}%`, top: `${measureY - 10}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
-                <button className="measure-cross" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição"><span>ARRASTE</span></button>
+                <button className="caliper-line left" style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
+                <button className="caliper-line right" style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                <button className="measure-cross" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
+                <button className="measure-height-handle" style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>ARRASTE</button>
               </>
             )}
           </div>
