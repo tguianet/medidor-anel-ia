@@ -72,3 +72,5 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   .panel { border-radius: 18px; }
   .review-actions { grid-template-columns: 1fr; }
 }
+
+.live-hint { position: absolute; left: 50%; bottom: 5%; transform: translateX(-50%); width: max-content; max-width: 88%; padding: 9px 14px; border-radius: 999px; color: #f4dfac; background: #0b0907b8; border: 1px solid #c9a96788; font-size: 12px; font-weight: 800; }
