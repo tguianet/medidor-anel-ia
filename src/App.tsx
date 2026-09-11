@@ -104,15 +104,15 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Estenda o dedo que deseja medir, encaixe o local do anel na aliança dourada e coloque o cartão inteiro ao lado.</p>
+          <p className="lead">Mostre a mão ou somente o dedo, encaixe o local do anel na aliança dourada e coloque o cartão inteiro ao lado.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
           </div>
           <ul className="tips">
             <li>Use boa iluminação e evite sombras.</li>
-            <li>Estenda somente o dedo que receberá o anel.</li>
-            <li>Mantenha os outros dedos dobrados e fora da área de medição.</li>
+            <li>Posicione o dedo desejado dentro da aliança dourada.</li>
+            <li>Os outros dedos podem aparecer, desde que não cubram a marca.</li>
             <li>Coloque o cartão ao lado da mão, sem cobrir a palma ou os dedos.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
             <li>Fotografe completamente de cima.</li>
