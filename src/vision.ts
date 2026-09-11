@@ -227,9 +227,9 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
     throw new Error("A largura encontrada não parece válida. Deixe somente um dedo estendido e mantenha a câmera paralela.");
   }
-  // Calibração experimental na linha fixa: 25,4 mm detectados = aro 24 (64 mm).
-  // Coeficiente inicial: 64 / 25,4 = 2,519685.
-  const circumferenceMm = fingerWidthMm * 2.519685;
+  // Aro brasileiro: circunferência interna em mm menos 40.
+  // Acrescenta 0,4 mm ao diâmetro visível para a folga confortável.
+  const circumferenceMm = Math.PI * (fingerWidthMm + 0.4);
   const ringSize = Math.max(5, Math.min(40, Math.round(circumferenceMm - 40)));
   const ringRange: [number, number] = [Math.max(5, ringSize - 1), Math.min(40, ringSize + 1)];
 
