@@ -16,6 +16,16 @@ export default function App() {
 
   useEffect(() => () => stopCamera(), []);
 
+  useEffect(() => {
+    if (stage !== "camera" || !videoRef.current || !streamRef.current) return;
+
+    const video = videoRef.current;
+    video.srcObject = streamRef.current;
+    void video.play().catch(() => {
+      setError("A câmera abriu, mas o vídeo não iniciou. Toque novamente em Abrir câmera.");
+    });
+  }, [stage]);
+
   const openCamera = async () => {
     setError("");
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -34,12 +44,6 @@ export default function App() {
       });
       streamRef.current = stream;
       setStage("camera");
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          void videoRef.current.play();
-        }
-      });
     } catch {
       setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
     }
