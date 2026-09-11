@@ -21,11 +21,16 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .lead { color: #c0b6a5; font-size: 17px; line-height: 1.55; }
 
 .example { position: relative; height: 230px; margin: 28px 0; border-radius: 18px; overflow: hidden; background: linear-gradient(145deg, #b89d79, #755f46); border: 1px solid #d6bd98; }
-.card { position: absolute; width: 43%; aspect-ratio: 1.586; right: 8%; bottom: 14%; padding: 14px; transform: rotate(3deg); border-radius: 10px; color: #2f2419; background: linear-gradient(135deg, #e6d7b7, #b69b68); box-shadow: 0 12px 25px #2b1b0d66; }
-.card small { position: absolute; right: 12px; bottom: 9px; font-weight: 800; letter-spacing: .1em; }
-.chip { display: block; width: 30px; height: 22px; border: 1px solid #8e7546; border-radius: 5px; background: #cbb174; }
-.finger { position: absolute; left: 11%; top: -8%; width: 25%; height: 125%; border-radius: 80px; transform: rotate(-5deg); background: linear-gradient(90deg, #c88563, #efb18e 52%, #b86e54); box-shadow: 0 12px 25px #44211455; }
-.finger span { position: absolute; left: 15%; right: 15%; top: 14%; height: 38px; border-radius: 50%; border-top: 1px solid #7d423baa; }
+.card { position: absolute; width: 26%; aspect-ratio: .63; right: 6%; bottom: 12%; padding: 10px; border-radius: 9px; color: #2f2419; background: linear-gradient(135deg, #e6d7b7, #b69b68); box-shadow: 0 12px 25px #2b1b0d66; }
+.card small { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-weight: 800; font-size: 10px; letter-spacing: .08em; }
+.chip { display: block; width: 24px; height: 18px; border: 1px solid #8e7546; border-radius: 4px; background: #cbb174; }
+.hand-example { position: absolute; left: 4%; bottom: -13%; width: 61%; height: 105%; }
+.hand-example::after { content: ""; position: absolute; left: 8%; bottom: 0; width: 80%; height: 47%; border-radius: 36% 36% 16% 16%; background: linear-gradient(90deg, #c88563, #efb18e 52%, #b86e54); }
+.hand-example span { position: absolute; bottom: 40%; width: 20%; border-radius: 30px 30px 12px 12px; background: linear-gradient(90deg, #c88563, #efb18e 52%, #b86e54); z-index: 1; color: #633c30; font-size: 8px; font-weight: 900; writing-mode: vertical-rl; display: grid; place-items: center; }
+.ex-index { left: 4%; height: 43%; }
+.ex-middle { left: 27%; height: 53%; }
+.ex-ring { left: 50%; height: 48%; outline: 3px solid #f4d98f; outline-offset: 3px; }
+.ex-pinky { left: 73%; height: 35%; }
 
 .tips { display: grid; gap: 10px; padding: 0; list-style: none; color: #d3c9b8; }
 .tips li::before { content: "✓"; color: #d2ae62; font-weight: 900; margin-right: 10px; }
@@ -42,8 +47,14 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .viewport { position: relative; overflow: hidden; aspect-ratio: 3/4; border-radius: 20px; background: #050505; }
 .viewport video { width: 100%; height: 100%; object-fit: cover; }
 .guide { position: absolute; inset: 0; }
-.card-guide { position: absolute; right: 8%; bottom: 14%; width: 46%; aspect-ratio: 1.586; display: grid; place-items: center; border: 2px dashed #f0cd78; border-radius: 9px; color: #f0cd78; font-size: 12px; font-weight: 900; letter-spacing: .12em; }
-.finger-guide { position: absolute; left: 11%; top: 9%; width: 25%; height: 72%; display: grid; place-items: center; border: 2px dashed #fff; border-radius: 80px; color: #fff; font-size: 12px; font-weight: 900; letter-spacing: .12em; writing-mode: vertical-rl; }
+.card-guide { position: absolute; right: 5%; top: 20%; width: 27%; aspect-ratio: .63; display: grid; place-items: center; border: 2px dashed #f0cd78; border-radius: 9px; color: #f0cd78; font-size: 11px; font-weight: 900; letter-spacing: .08em; writing-mode: vertical-rl; }
+.hand-guide { position: absolute; left: 3%; top: 12%; width: 62%; height: 78%; border: 2px dashed #ffffffaa; border-radius: 42% 42% 22% 22%; border-top-color: transparent; }
+.hand-guide span { position: absolute; top: 0; width: 20%; border: 2px dashed #fff; border-bottom: 0; border-radius: 40px 40px 0 0; color: white; font-size: 8px; font-weight: 900; writing-mode: vertical-rl; display: grid; place-items: center; }
+.guide-index { left: 3%; height: 49%; }
+.guide-middle { left: 27%; height: 59%; }
+.guide-ring { left: 51%; height: 54%; border-color: #f0cd78 !important; color: #f0cd78 !important; }
+.guide-pinky { left: 75%; height: 40%; }
+.hand-guide i { position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); color: #fff; font-size: 10px; font-style: normal; font-weight: 800; letter-spacing: .1em; }
 .shutter { width: 76px; height: 76px; padding: 6px; border: 2px solid #f0d18b; border-radius: 50%; background: transparent; cursor: pointer; }
 .shutter span { display: block; width: 100%; height: 100%; border-radius: 50%; background: #f0d18b; }
 
