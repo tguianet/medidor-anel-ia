@@ -9,11 +9,19 @@ export type CardAnalysis = {
 };
 
 const waitForOpenCv = async () => {
-  for (let i = 0; i < 100; i++) {
-    if (window.cv?.Mat) return window.cv;
+  for (let i = 0; i < 150; i++) {
+    const candidate = window.cv;
+    if (candidate?.Mat) return candidate;
+    if (candidate && typeof candidate.then === "function") {
+      const loaded = await candidate;
+      if (loaded?.Mat) {
+        window.cv = loaded;
+        return loaded;
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error("A visão computacional ainda está carregando. Tente novamente.");
+  throw new Error("O módulo de análise não carregou. Verifique sua internet e tente novamente.");
 };
 
 const distance = (a: {x:number;y:number}, b: {x:number;y:number}) =>
@@ -26,10 +34,12 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   await image.decode();
 
   const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
+  const maxSide = 1280;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  canvas.width = Math.round(image.naturalWidth * scale);
+  canvas.height = Math.round(image.naturalHeight * scale);
   const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(image, 0, 0);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
   const src = cv.imread(canvas);
   const gray = new cv.Mat();
