@@ -183,36 +183,58 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   // Pontos 13 e 14: base e primeira articulação do anelar.
   const mcp = landmarks[13];
   const pip = landmarks[14];
-  const centerX = (mcp.x + (pip.x - mcp.x) * 0.36) * work.width;
-  const centerY = (mcp.y + (pip.y - mcp.y) * 0.36) * work.height;
+  const centerX = (mcp.x + (pip.x - mcp.x) * 0.58) * work.width;
+  const centerY = (mcp.y + (pip.y - mcp.y) * 0.58) * work.height;
   const vx = pip.x - mcp.x;
   const vy = pip.y - mcp.y;
   const length = Math.hypot(vx, vy) || 1;
   const nx = -vy / length;
   const ny = vx / length;
 
-  const insideSkin = (x: number, y: number) => {
-    const ix = Math.round(x);
-    const iy = Math.round(y);
-    return ix >= 0 && ix < work.width && iy >= 0 && iy < work.height &&
-      skinMask[iy * work.width + ix] === 1;
+  const colorAt = (x: number, y: number) => {
+    const ix = Math.max(0, Math.min(work.width - 1, Math.round(x)));
+    const iy = Math.max(0, Math.min(work.height - 1, Math.round(y)));
+    const offset = (iy * work.width + ix) * 4;
+    return [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
   };
 
-  let negative = 0;
-  let positive = 0;
-  const maxRay = work.width * 0.14;
-  while (negative < maxRay && insideSkin(centerX - nx * negative, centerY - ny * negative)) negative += 0.5;
-  while (positive < maxRay && insideSkin(centerX + nx * positive, centerY + ny * positive)) positive += 0.5;
+  const colorDistance = (a: number[], b: number[]) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 
-  const measuredWidth = negative + positive;
-  if (measuredWidth < 4 || measuredWidth >= maxRay * 1.8) {
-    throw new Error("Reconheci o anelar, mas suas bordas não ficaram nítidas. Use um fundo liso e boa iluminação.");
+  const maxRay = work.width * 0.13;
+  const findEdge = (direction: number) => {
+    let bestDistance = 0;
+    let bestScore = 0;
+    for (let distance = 2; distance < maxRay; distance += 0.5) {
+      const inner = colorAt(
+        centerX + nx * direction * (distance - 1.5),
+        centerY + ny * direction * (distance - 1.5),
+      );
+      const outer = colorAt(
+        centerX + nx * direction * (distance + 1.5),
+        centerY + ny * direction * (distance + 1.5),
+      );
+      const score = colorDistance(inner, outer);
+      if (score > bestScore) {
+        bestScore = score;
+        bestDistance = distance;
+      }
+    }
+    return { distance: bestDistance, score: bestScore };
+  };
+
+  const negativeEdge = findEdge(-1);
+  const positiveEdge = findEdge(1);
+  if (negativeEdge.score < 10 || positiveEdge.score < 10) {
+    throw new Error("Reconheci o anelar, mas faltou contraste nas laterais. Use uma superfície de cor diferente da pele.");
   }
 
-  const lineStartX = centerX - nx * negative;
-  const lineStartY = centerY - ny * negative;
-  const lineEndX = centerX + nx * positive;
-  const lineEndY = centerY + ny * positive;
+  const measuredWidth = negativeEdge.distance + positiveEdge.distance;
+  const lineStartX = centerX - nx * negativeEdge.distance;
+  const lineStartY = centerY - ny * negativeEdge.distance;
+  const lineEndX = centerX + nx * positiveEdge.distance;
+  const lineEndY = centerY + ny * positiveEdge.distance;
+  const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
