@@ -31,10 +31,14 @@ export default function App() {
   const [panY, setPanY] = useState(0);
   const [leftLocked, setLeftLocked] = useState(false);
   const [rightLocked, setRightLocked] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    setTorchOn(false);
+    setTorchSupported(false);
   };
 
   useEffect(() => () => stopCamera(), []);
@@ -72,13 +76,31 @@ export default function App() {
       return;
     }
     try {
-      streamRef.current = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
+      streamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+      setTorchSupported(Boolean(capabilities?.torch));
       setStage("camera");
     } catch {
       setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
+    }
+  };
+
+  const toggleTorch = async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || !torchSupported) return;
+    const next = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet & { torch: boolean }] });
+      setTorchOn(next);
+      setError("");
+    } catch {
+      setError("A lanterna não pôde ser ativada neste navegador.");
+      setTorchSupported(false);
     }
   };
 
@@ -308,12 +330,13 @@ export default function App() {
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
+            {torchSupported && <button type="button" className={`torch-button${torchOn ? " is-on" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>}
             <div className="position-guides" aria-hidden="true">
               <div className="card-alignment"><span>CARTÃO SOBRE OS DEDOS</span></div>
               <div className="finger-alignment"><span>DEDO</span></div>
             </div>
           </div>
-          <p>Cartão inteiro sobre os dedos • câmera paralela</p>
+          <p>{torchOn ? "Luz ligada • incline levemente se houver reflexo" : "Cartão inteiro sobre os dedos • câmera paralela"}</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
