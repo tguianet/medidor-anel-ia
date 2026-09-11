@@ -131,14 +131,20 @@ export default function App() {
           <span className="step">PASSO 2 DE 2</span>
           <h1>A foto ficou nítida?</h1>
           <div className="preview">{photo && <img src={analysis?.annotatedPhoto || photo} alt="Fotografia capturada" />}</div>
-          {analysis && <div className="analysis-result"><strong>Cartão reconhecido</strong><span>Escala: {analysis.pixelsPerMm.toFixed(2)} pixels/mm</span><span>Confiança: {analysis.confidence}%</span></div>}
+          {analysis && <div className="analysis-result">
+            <strong>Aro provável: {analysis.ringSize}</strong>
+            <span>Faixa inicial: aro {analysis.ringRange[0]} a {analysis.ringRange[1]}</span>
+            <span>Largura detectada do anelar: {analysis.fingerWidthMm.toFixed(1)} mm</span>
+            <span>Circunferência estimada: {analysis.circumferenceMm.toFixed(1)} mm</span>
+            <span>Escala: {analysis.pixelsPerMm.toFixed(2)} pixels/mm • confiança do cartão: {analysis.confidence}%</span>
+          </div>}
           <div className="review-actions">
             <button className="secondary" onClick={() => { setPhoto(""); setAnalysis(null); setError(""); void openCamera(); }}>Tirar outra</button>
             <button type="button" className="primary" disabled={analyzing} onClick={() => void analyze()}>{analyzing ? "Analisando, aguarde..." : analysis ? "Analisar novamente" : "Usar esta foto"}</button>
           </div>
           {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
           {error && <p className="error">{error}</p>}
-          <p className="pending">{analysis ? "Escala real calculada. Próxima camada: medição do anelar." : "O sistema procurará automaticamente os quatro cantos do cartão."}</p>
+          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema procurará o cartão e identificará o dedo anelar."}</p>
         </section>
       )}
     </main>
