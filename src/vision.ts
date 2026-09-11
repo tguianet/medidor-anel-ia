@@ -13,7 +13,10 @@ const waitForOpenCv = async () => {
     const candidate = window.cv;
     if (candidate?.Mat) return candidate;
     if (candidate && typeof candidate.then === "function") {
-      const loaded = await candidate;
+      const loaded = await Promise.race([
+        candidate,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
+      ]);
       if (loaded?.Mat) {
         window.cv = loaded;
         return loaded;
@@ -34,7 +37,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   await image.decode();
 
   const canvas = document.createElement("canvas");
-  const maxSide = 1280;
+  const maxSide = 800;
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
   canvas.width = Math.round(image.naturalWidth * scale);
   canvas.height = Math.round(image.naturalHeight * scale);
@@ -53,7 +56,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
     cv.Canny(blurred, edges, 45, 135);
     cv.dilate(edges, edges, cv.Mat.ones(3, 3, cv.CV_8U));
-    cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
     const imageArea = src.rows * src.cols;
     let best: { points: Array<{x:number;y:number}>; score: number; area: number } | null = null;
