@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type Stage = "intro" | "camera" | "review";
 type MeasurePhase = "card" | "finger";
-type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | null;
+type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -25,6 +25,9 @@ export default function App() {
   const [leftLine, setLeftLine] = useState(25);
   const [rightLine, setRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(50);
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -42,6 +45,9 @@ export default function App() {
     setError("");
     setPixelsPerMm(null);
     setPhase("card");
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("Este navegador não permite acesso à câmera.");
       return;
@@ -81,6 +87,9 @@ export default function App() {
     setCardBottom(58);
     setPixelsPerMm(null);
     setPhase("card");
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
     stopCamera();
     setStage("review");
   };
@@ -103,6 +112,9 @@ export default function App() {
     setLeftLine(25);
     setRightLine(38);
     setMeasureY(64);
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
     setError("");
     setPhase("finger");
   };
@@ -130,28 +142,51 @@ export default function App() {
       setCardLeft(nextLeft); setCardRight(nextLeft + width);
       setCardTop(nextTop); setCardBottom(nextTop + height);
     }
+    if (target === "pan") {
+      const maxX = (zoom - 1) * rect.width / 2;
+      const maxY = (zoom - 1) * rect.height / 2;
+      setPanX(clamp(dragStartRef.current.left + clientX - dragStartRef.current.x, -maxX, maxX));
+      setPanY(clamp(dragStartRef.current.top + clientY - dragStartRef.current.y, -maxY, maxY));
+    }
   };
 
   const startDrag = (target: DragTarget, event: React.PointerEvent) => {
+    event.stopPropagation();
     draggingRef.current = target;
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardTop, right: cardRight, bottom: cardBottom };
     event.currentTarget.setPointerCapture(event.pointerId);
     updateDrag(event.clientX, event.clientY);
   };
 
+  const startPan = (event: React.PointerEvent) => {
+    if (phase !== "finger" || zoom <= 1) return;
+    draggingRef.current = "pan";
+    dragStartRef.current = { x: event.clientX, y: event.clientY, left: panX, top: panY, right: 0, bottom: 0 };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const changeZoom = (nextZoom: number) => {
+    const value = clamp(nextZoom, 1, 4);
+    setZoom(value);
+    if (value === 1) { setPanX(0); setPanY(0); }
+  };
+
   const result = useMemo(() => {
     if (!pixelsPerMm) return null;
-    const widthPx = Math.abs(rightLine - leftLine) / 100 * 900;
+    const widthPx = Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
     const circumferenceMm = Math.PI * (widthMm + 0.4);
     const ringSize = clamp(Math.round(circumferenceMm - 40), 5, 40);
     return { widthMm, circumferenceMm, ringSize };
-  }, [pixelsPerMm, leftLine, rightLine]);
+  }, [pixelsPerMm, leftLine, rightLine, zoom]);
 
   const resetPhoto = () => {
     setPhoto("");
     setPixelsPerMm(null);
     setPhase("card");
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
     setError("");
     void openCamera();
   };
@@ -203,11 +238,12 @@ export default function App() {
           <div
             ref={measureRef}
             className="measurement-stage is-active"
+            onPointerDown={startPan}
             onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
             onPointerUp={() => { draggingRef.current = null; }}
             onPointerCancel={() => { draggingRef.current = null; }}
           >
-            {photo && <img src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className={phase === "finger" ? "zoomable-photo" : ""} style={phase === "finger" ? { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` } : undefined} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && (
               <div className="card-calibrator" style={{ left: `${cardLeft}%`, top: `${cardTop}%`, width: `${cardRight - cardLeft}%`, height: `${cardBottom - cardTop}%` }}>
                 <button className="card-move" onPointerDown={(event) => startDrag("card-move", event)} aria-label="Mover retângulo do cartão">CARTÃO</button>
@@ -226,6 +262,15 @@ export default function App() {
             )}
           </div>
 
+          {phase === "finger" && (
+            <div className="zoom-controls" aria-label="Controles de zoom">
+              <button onClick={() => changeZoom(zoom - 0.5)} disabled={zoom <= 1} aria-label="Diminuir zoom">−</button>
+              <strong>{zoom.toFixed(1)}×</strong>
+              <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= 4} aria-label="Aumentar zoom">+</button>
+              <button className="zoom-reset" onClick={() => { setZoom(1); setPanX(0); setPanY(0); }}>Redefinir</button>
+            </div>
+          )}
+
           {phase === "finger" && result && (
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
@@ -241,7 +286,7 @@ export default function App() {
             {phase === "card" ? <button className="primary" onClick={confirmCard}>Confirmar cartão</button> : <button className="primary" onClick={() => { setPhase("card"); setPixelsPerMm(null); }}>Recalibrar cartão</button>}
           </div>
           {error && <p className="error">{error}</p>}
-          <p className="pending">{phase === "card" ? "Arraste os quatro cantos amarelos até coincidirem com as quatro bordas reais do cartão." : "Arraste as duas linhas para as bordas do dedo e a linha verde para a altura exata da aliança."}</p>
+          <p className="pending">{phase === "card" ? "Arraste os quatro cantos amarelos até coincidirem com as quatro bordas reais do cartão." : "Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo."}</p>
         </section>
       )}
     </main>
