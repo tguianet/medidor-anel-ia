@@ -199,8 +199,9 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
     throw new Error("A largura encontrada não parece válida. Aproxime a mão e mantenha os quatro dedos separados.");
   }
-  // Calibração inicial: diâmetro confortável ≈ largura superior do dedo + 1 mm.
-  const circumferenceMm = Math.PI * (fingerWidthMm + 1);
+  // Calibração experimental na linha fixa: 25,4 mm detectados = aro 24 (64 mm).
+  // Coeficiente inicial: 64 / 25,4 = 2,519685.
+  const circumferenceMm = fingerWidthMm * 2.519685;
   const ringSize = Math.max(5, Math.min(40, Math.round(circumferenceMm - 40)));
   const ringRange: [number, number] = [Math.max(5, ringSize - 1), Math.min(40, ringSize + 1)];
 
