@@ -36,6 +36,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .tips li::before { content: "✓"; color: #d2ae62; font-weight: 900; margin-right: 10px; }
 .primary, .secondary { border-radius: 12px; padding: 15px 20px; font-weight: 800; cursor: pointer; }
 .primary { width: 100%; border: 1px solid #e2c47d; color: #1b1409; background: linear-gradient(135deg, #f1d896, #bd9142); }
+.primary:disabled { opacity: .65; cursor: wait; }
 .secondary { border: 1px solid #665b4d; color: #f3eadc; background: #26211c; }
 .privacy, .pending { color: #80776b; text-align: center; font-size: 13px; }
 .error { color: #ff9b91; text-align: center; }
@@ -62,6 +63,9 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .preview img { display: block; width: 100%; max-height: 55vh; object-fit: contain; }
 .review-actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
 .review-actions .primary { width: auto; }
+.analysis-result { display: grid; gap: 5px; margin: -8px 0 18px; padding: 14px 16px; border: 1px solid #8d7444; border-radius: 12px; color: #d9cfbd; background: #231e17; }
+.analysis-result strong { color: #f0cf80; }
+.analysis-result span { font-size: 14px; }
 
 @media (max-width: 480px) {
   .app { padding: 16px; }
