@@ -1,3 +1,5 @@
+import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+
 export type CardAnalysis = {
   pixelsPerMm: number;
   confidence: number;
@@ -9,6 +11,34 @@ export type CardAnalysis = {
 };
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
+
+let handLandmarkerPromise: Promise<HandLandmarker> | null = null;
+
+const getHandLandmarker = () => {
+  if (!handLandmarkerPromise) {
+    handLandmarkerPromise = (async () => {
+      const files = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm",
+      );
+      return HandLandmarker.createFromOptions(files, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "IMAGE",
+        numHands: 1,
+        minHandDetectionConfidence: 0.55,
+        minHandPresenceConfidence: 0.55,
+      });
+    })();
+  }
+  return Promise.race([
+    handLandmarkerPromise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("O reconhecimento da mão demorou para carregar. Verifique a internet e tente novamente.")), 25000),
+    ),
+  ]);
+};
 
 const loadImage = async (src: string) => {
   const image = new Image();
@@ -132,69 +162,48 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
     throw new Error("Encontrei o cartão, mas não consegui separar a mão do fundo. Use uma mesa clara e iluminação uniforme.");
   }
 
-  type Run = { start: number; end: number; width: number };
-  let selectedRuns: Run[] | null = null;
-  let selectedY = 0;
-  const cardIsRight = (best.box.minX + best.box.maxX) / 2 > (skinMinX + skinMaxX) / 2;
-  const ringSamples: Array<{ run: Run; row: number }> = [];
-  const searchBottom = Math.round(skinMinY + (skinMaxY - skinMinY) * 0.52);
+  const landmarker = await getHandLandmarker();
+  const handResult = landmarker.detect(work);
+  const landmarks = handResult.landmarks?.[0];
 
-  for (let row = skinMinY; row <= searchBottom; row++) {
-    const runs: Run[] = [];
-    let start = -1;
-    for (let col = skinMinX; col <= skinMaxX + 1; col++) {
-      const on = col <= skinMaxX && skinMask[row * work.width + col] === 1;
-      if (on && start < 0) start = col;
-      if (!on && start >= 0) {
-        const width = col - start;
-        if (width >= 4 && width <= work.width * 0.18) runs.push({ start, end: col - 1, width });
-        start = -1;
-      }
-    }
-    if (runs.length >= 4) {
-      const four = runs.length === 4
-        ? runs
-        : [...runs].sort((a, b) => b.width - a.width).slice(0, 4).sort((a, b) => a.start - b.start);
-      selectedRuns = four;
-      selectedY = row;
-      four.sort((a, b) => a.start - b.start);
-      const target = cardIsRight ? four[1] : four[four.length - 2];
-      ringSamples.push({ run: target, row });
-    }
+  if (!landmarks) {
+    throw new Error("Não reconheci a mão. Mostre a palma aberta, deixe os quatro dedos visíveis e tente novamente.");
   }
 
-  if (!selectedRuns || selectedRuns.length < 4 || ringSamples.length < 6) {
-    throw new Error("Cartão encontrado, mas não consegui distinguir os quatro dedos. Afaste bem os dedos e tire outra foto.");
+  // Pontos 13 e 14: base e primeira articulação do anelar.
+  const mcp = landmarks[13];
+  const pip = landmarks[14];
+  const centerX = (mcp.x + (pip.x - mcp.x) * 0.36) * work.width;
+  const centerY = (mcp.y + (pip.y - mcp.y) * 0.36) * work.height;
+  const vx = pip.x - mcp.x;
+  const vy = pip.y - mcp.y;
+  const length = Math.hypot(vx, vy) || 1;
+  const nx = -vy / length;
+  const ny = vx / length;
+
+  const insideSkin = (x: number, y: number) => {
+    const ix = Math.round(x);
+    const iy = Math.round(y);
+    return ix >= 0 && ix < work.width && iy >= 0 && iy < work.height &&
+      skinMask[iy * work.width + ix] === 1;
+  };
+
+  let negative = 0;
+  let positive = 0;
+  const maxRay = work.width * 0.14;
+  while (negative < maxRay && insideSkin(centerX - nx * negative, centerY - ny * negative)) negative += 0.5;
+  while (positive < maxRay && insideSkin(centerX + nx * positive, centerY + ny * positive)) positive += 0.5;
+
+  const measuredWidth = negative + positive;
+  if (measuredWidth < 4 || measuredWidth >= maxRay * 1.8) {
+    throw new Error("Reconheci o anelar, mas suas bordas não ficaram nítidas. Use um fundo liso e boa iluminação.");
   }
 
-  // Mede exatamente na coordenada da linha dourada do visor 3:4.
-  const guideX = Math.round(work.width * 0.26);
-  const guideY = Math.round(work.height * 0.49);
-  let fixedRun: Run | null = null;
-  let fixedY = guideY;
-
-  for (let offset = 0; offset <= Math.round(work.height * 0.035) && !fixedRun; offset++) {
-    for (const row of offset === 0 ? [guideY] : [guideY - offset, guideY + offset]) {
-      if (row < 0 || row >= work.height || !skinMask[row * work.width + guideX]) continue;
-      let left = guideX;
-      let right = guideX;
-      while (left > 0 && skinMask[row * work.width + left - 1]) left--;
-      while (right < work.width - 1 && skinMask[row * work.width + right + 1]) right++;
-      const width = right - left + 1;
-      if (width >= 4 && width <= work.width * 0.18) {
-        fixedRun = { start: left, end: right, width };
-        fixedY = row;
-      }
-    }
-  }
-
-  if (!fixedRun) {
-    throw new Error("Nenhum dedo foi encontrado no traço dourado. Posicione o local do anel exatamente sobre o risco e tire outra foto.");
-  }
-
-  const ringRun = fixedRun;
-  selectedY = fixedY;
-  const fingerWidthOriginalPx = ringRun.width / scale;
+  const lineStartX = centerX - nx * negative;
+  const lineStartY = centerY - ny * negative;
+  const lineEndX = centerX + nx * positive;
+  const lineEndY = centerY + ny * positive;
+  const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
     throw new Error("A largura encontrada não parece válida. Aproxime a mão e mantenha os quatro dedos separados.");
@@ -217,18 +226,19 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   ctx.font = `bold ${Math.max(24, output.width / 32)}px sans-serif`;
   ctx.fillText("CARTÃO RECONHECIDO", x, Math.max(38, y - 16));
 
-  const lineY = selectedY / scale;
-  const lineStart = ringRun.start / scale;
-  const lineEnd = ringRun.end / scale;
+  const lineStartXOut = lineStartX / scale;
+  const lineStartYOut = lineStartY / scale;
+  const lineEndXOut = lineEndX / scale;
+  const lineEndYOut = lineEndY / scale;
   ctx.strokeStyle = "#52e0a3";
   ctx.lineWidth = Math.max(6, output.width / 160);
   ctx.beginPath();
-  ctx.moveTo(lineStart, lineY);
-  ctx.lineTo(lineEnd, lineY);
+  ctx.moveTo(lineStartXOut, lineStartYOut);
+  ctx.lineTo(lineEndXOut, lineEndYOut);
   ctx.stroke();
   ctx.fillStyle = "#52e0a3";
   ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
-  ctx.fillText("LOCAL DO ANEL", lineStart, Math.max(40, lineY - 18));
+  ctx.fillText("ANELAR RECONHECIDO", lineStartXOut, Math.max(40, lineStartYOut - 18));
 
   return {
     pixelsPerMm,
