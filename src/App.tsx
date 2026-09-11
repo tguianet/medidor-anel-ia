@@ -100,6 +100,7 @@ export default function App() {
             <li>Use boa iluminação e evite sombras.</li>
             <li>Mantenha todos os dedos apoiados, sem colocar um por baixo do outro.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
+            <li>Alinhe o local onde o anel fica com a linha dourada.</li>
             <li>Fotografe completamente de cima.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
@@ -117,11 +118,11 @@ export default function App() {
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
             <div className="guide">
-              <div className="hand-guide"><span className="guide-index">INDICADOR</span><span className="guide-middle" /><span className="guide-ring">ANELAR</span><span className="guide-pinky" /><i>PALMA</i></div>
+              <div className="hand-guide"><span className="guide-index">INDICADOR</span><span className="guide-middle" /><span className="guide-ring">ANELAR<b>LINHA DO ANEL</b></span><span className="guide-pinky" /><i>PALMA</i></div>
               <div className="card-guide">CARTÃO</div>
             </div>
           </div>
-          <p>Mão inteira apoiada • cartão na vertical • câmera paralela</p>
+          <p>Alinhe a base do anelar com a linha dourada • cartão na vertical</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
