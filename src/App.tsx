@@ -91,7 +91,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Apoie a mão aberta e um cartão padrão sobre uma superfície plana. Deixe o cartão na vertical, ao lado do dedo anelar.</p>
+          <p className="lead">Apoie a mão esquerda aberta e o cartão sobre uma superfície plana. Deixe o cartão na vertical, ao lado do polegar.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
@@ -118,11 +118,11 @@ export default function App() {
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
             <div className="guide">
-              <div className="hand-guide"><span className="guide-index">INDICADOR</span><span className="guide-middle" /><span className="guide-ring">ANELAR<b>LINHA DO ANEL</b></span><span className="guide-pinky" /><i>PALMA</i></div>
+              <div className="hand-guide"><span className="guide-pinky" /><span className="guide-ring">ANELAR<b>LINHA DA ALIANÇA</b></span><span className="guide-middle" /><span className="guide-index">INDICADOR</span><i>PALMA</i></div>
               <div className="card-guide">CARTÃO</div>
             </div>
           </div>
-          <p>Alinhe a base do anelar com a linha dourada • cartão na vertical</p>
+          <p>Use a mão esquerda • alinhe o dedo da aliança • cartão ao lado do polegar</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
