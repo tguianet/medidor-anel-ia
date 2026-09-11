@@ -1,16 +1,24 @@
-import { useEffect, useRef, useState } from "react";
-import { detectCard, type CardAnalysis } from "./vision";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { calibratePhoto, type CardCalibration } from "./vision";
 
 type Stage = "intro" | "camera" | "review";
+type DragTarget = "left" | "right" | "height" | null;
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<DragTarget>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
   const [error, setError] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<CardAnalysis | null>(null);
+  const [calibration, setCalibration] = useState<CardCalibration | null>(null);
+  const [leftLine, setLeftLine] = useState(25);
+  const [rightLine, setRightLine] = useState(38);
+  const [measureY, setMeasureY] = useState(50);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -18,34 +26,24 @@ export default function App() {
   };
 
   useEffect(() => () => stopCamera(), []);
-
   useEffect(() => {
     if (stage !== "camera" || !videoRef.current || !streamRef.current) return;
-
-    const video = videoRef.current;
-    video.srcObject = streamRef.current;
-    void video.play().catch(() => {
-      setError("A câmera abriu, mas o vídeo não iniciou. Toque novamente em Abrir câmera.");
-    });
+    videoRef.current.srcObject = streamRef.current;
+    void videoRef.current.play().catch(() => setError("A câmera não iniciou. Toque novamente em Abrir câmera."));
   }, [stage]);
 
   const openCamera = async () => {
     setError("");
+    setCalibration(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("Este navegador não permite acesso à câmera.");
       return;
     }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
+      streamRef.current = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
-      streamRef.current = stream;
       setStage("camera");
     } catch {
       setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
@@ -55,71 +53,98 @@ export default function App() {
   const capture = () => {
     const video = videoRef.current;
     if (!video?.videoWidth) return;
-
     const canvas = document.createElement("canvas");
     canvas.width = 900;
     canvas.height = 1200;
-    const sourceWidth = video.videoWidth;
-    const sourceHeight = video.videoHeight;
     const targetRatio = canvas.width / canvas.height;
-    const sourceRatio = sourceWidth / sourceHeight;
-    let sx = 0, sy = 0, sw = sourceWidth, sh = sourceHeight;
+    const sourceRatio = video.videoWidth / video.videoHeight;
+    let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
     if (sourceRatio > targetRatio) {
-      sw = sourceHeight * targetRatio;
-      sx = (sourceWidth - sw) / 2;
+      sw = video.videoHeight * targetRatio;
+      sx = (video.videoWidth - sw) / 2;
     } else {
-      sh = sourceWidth / targetRatio;
-      sy = (sourceHeight - sh) / 2;
+      sh = video.videoWidth / targetRatio;
+      sy = (video.videoHeight - sh) / 2;
     }
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    setPhoto(canvas.toDataURL("image/jpeg", 0.92));
+    setPhoto(canvas.toDataURL("image/jpeg", 0.94));
     stopCamera();
     setStage("review");
   };
 
-  const analyze = async () => {
+  const prepareMeasurement = async () => {
     setAnalyzing(true);
     setError("");
-    setAnalysis(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      const result = await detectCard(photo);
-      setAnalysis(result);
+      const result = await calibratePhoto(photo);
+      setCalibration(result);
+      setLeftLine(25);
+      setRightLine(38);
+      setMeasureY(50);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err || "Erro desconhecido");
-      setError(`Não foi possível analisar: ${message}`);
+      setError(`Não foi possível calibrar: ${err instanceof Error ? err.message : "erro desconhecido"}`);
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  const updateDrag = (clientX: number, clientY: number) => {
+    if (!draggingRef.current || !measureRef.current) return;
+    const rect = measureRef.current.getBoundingClientRect();
+    const x = clamp(((clientX - rect.left) / rect.width) * 100, 2, 98);
+    const y = clamp(((clientY - rect.top) / rect.height) * 100, 8, 92);
+    if (draggingRef.current === "left") setLeftLine(Math.min(x, rightLine - 3));
+    if (draggingRef.current === "right") setRightLine(Math.max(x, leftLine + 3));
+    if (draggingRef.current === "height") setMeasureY(y);
+  };
+
+  const startDrag = (target: DragTarget, event: React.PointerEvent) => {
+    draggingRef.current = target;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateDrag(event.clientX, event.clientY);
+  };
+
+  const result = useMemo(() => {
+    if (!calibration) return null;
+    const widthPx = Math.abs(rightLine - leftLine) / 100 * 900;
+    const widthMm = widthPx / calibration.pixelsPerMm;
+    const circumferenceMm = Math.PI * (widthMm + 0.4);
+    const ringSize = clamp(Math.round(circumferenceMm - 40), 5, 40);
+    return { widthMm, circumferenceMm, ringSize };
+  }, [calibration, leftLine, rightLine]);
+
+  const resetPhoto = () => {
+    setPhoto("");
+    setCalibration(null);
+    setError("");
+    void openCamera();
   };
 
   return (
     <main className="app">
       <header className="brand">
         <span className="mark">◇</span>
-        <div><strong>Medidor de Anel</strong><small>Visão computacional</small></div>
+        <div><strong>Medidor de Anel</strong><small>Paquímetro digital</small></div>
       </header>
 
       {stage === "intro" && (
         <section className="panel intro">
-          <span className="step">PASSO 1 DE 2</span>
-          <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Mostre a mão ou somente o dedo, encaixe o local do anel na aliança dourada e coloque o cartão inteiro ao lado.</p>
-          <div className="example" aria-label="Exemplo de posicionamento">
-            <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
-            <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
+          <span className="step">MEDIÇÃO MANUAL ASSISTIDA</span>
+          <h1>Marque as bordas do dedo</h1>
+          <p className="lead">Fotografe o dedo e um cartão sobre a mesma superfície. Depois, arraste duas linhas até as laterais do dedo no local da aliança.</p>
+          <div className="manual-example" aria-label="Duas linhas marcando as laterais do dedo">
+            <div className="example-finger" />
+            <i className="example-line example-left" />
+            <i className="example-line example-right" />
+            <i className="example-cross" />
           </div>
           <ul className="tips">
-            <li>Use boa iluminação e evite sombras.</li>
-            <li>Posicione o dedo desejado dentro da aliança dourada.</li>
-            <li>Os outros dedos podem aparecer, desde que não cubram a marca.</li>
-            <li>Coloque o cartão ao lado da mão, sem cobrir a palma ou os dedos.</li>
-            <li>Deixe os quatro cantos do cartão visíveis.</li>
-            <li>Fotografe completamente de cima.</li>
+            <li>Cartão e dedo devem estar apoiados na mesma superfície.</li>
+            <li>Fotografe de cima e deixe o cartão inteiro visível.</li>
+            <li>Você escolherá exatamente o ponto e as bordas da medição.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
           {error && <p className="error">{error}</p>}
-          <p className="privacy">A fotografia é processada no seu aparelho.</p>
         </section>
       )}
 
@@ -127,37 +152,52 @@ export default function App() {
         <section className="camera-screen">
           <div className="camera-top">
             <button className="icon-button" onClick={() => { stopCamera(); setStage("intro"); }}>×</button>
-            <span>Enquadre a mão e o cartão</span>
+            <span>Fotografe de cima</span>
           </div>
-          <div className="viewport">
-            <video ref={videoRef} playsInline muted />
-            <div className="ring-target"><span /><b>ENCAIXE O LOCAL DO ANEL</b></div>
-            <div className="live-hint">Encaixe o dedo na aliança dourada • cartão ao lado</div>
-          </div>
-          <p>Encaixe o local do anel na marca dourada • câmera paralela</p>
+          <div className="viewport"><video ref={videoRef} playsInline muted /></div>
+          <p>Cartão inteiro ao lado do dedo • ambos apoiados</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
 
       {stage === "review" && (
         <section className="panel review">
-          <span className="step">PASSO 2 DE 2</span>
-          <h1>A foto ficou nítida?</h1>
-          <div className="preview">{photo && <img src={analysis?.annotatedPhoto || photo} alt="Fotografia capturada" />}</div>
-          {analysis && <div className="analysis-result">
-            <strong>Aro provável: {analysis.ringSize}</strong>
-            <span>Faixa inicial: aro {analysis.ringRange[0]} a {analysis.ringRange[1]}</span>
-            <span>Largura detectada do dedo: {analysis.fingerWidthMm.toFixed(1)} mm</span>
-            <span>Circunferência estimada: {analysis.circumferenceMm.toFixed(1)} mm</span>
-            <span>Escala: {analysis.pixelsPerMm.toFixed(2)} pixels/mm • confiança do cartão: {analysis.confidence}%</span>
-          </div>}
-          <div className="review-actions">
-            <button className="secondary" onClick={() => { setPhoto(""); setAnalysis(null); setError(""); void openCamera(); }}>Tirar outra</button>
-            <button type="button" className="primary" disabled={analyzing} onClick={() => void analyze()}>{analyzing ? "Analisando, aguarde..." : analysis ? "Analisar novamente" : "Usar esta foto"}</button>
+          <span className="step">AJUSTE DA MEDIDA</span>
+          <h1>{calibration ? "Encaixe as linhas no dedo" : "A foto ficou nítida?"}</h1>
+          <div
+            ref={measureRef}
+            className={`measurement-stage${calibration ? " is-active" : ""}`}
+            onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
+            onPointerUp={() => { draggingRef.current = null; }}
+            onPointerCancel={() => { draggingRef.current = null; }}
+          >
+            {photo && <img src={photo} alt="Fotografia para medição" draggable={false} />}
+            {calibration && (
+              <>
+                <div className="card-detected" style={{ left: `${calibration.cardBox.x * 100}%`, top: `${calibration.cardBox.y * 100}%`, width: `${calibration.cardBox.width * 100}%`, height: `${calibration.cardBox.height * 100}%` }}><span>CARTÃO</span></div>
+                <button className="caliper-line left" style={{ left: `${leftLine}%`, top: `${measureY - 10}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
+                <button className="caliper-line right" style={{ left: `${rightLine}%`, top: `${measureY - 10}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                <button className="measure-cross" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição"><span>ARRASTE</span></button>
+              </>
+            )}
           </div>
-          {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
+
+          {calibration && result && (
+            <div className="analysis-result">
+              <strong>Aro provável: {result.ringSize}</strong>
+              <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 5, 40)} a {clamp(result.ringSize + 1, 5, 40)}</span>
+              <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
+              <span>Circunferência estimada: {result.circumferenceMm.toFixed(1)} mm</span>
+              <span>Calibração do cartão: {calibration.confidence}%</span>
+            </div>
+          )}
+
+          <div className="review-actions">
+            <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
+            <button className="primary" disabled={analyzing} onClick={() => void prepareMeasurement()}>{analyzing ? "Calibrando..." : calibration ? "Recalibrar cartão" : "Usar esta foto"}</button>
+          </div>
           {error && <p className="error">{error}</p>}
-          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema reconhecerá o cartão e medirá exatamente o ponto encaixado na aliança dourada."}</p>
+          <p className="pending">{calibration ? "Arraste as duas linhas para as bordas do dedo e a linha horizontal para a altura exata da aliança." : "O cartão será usado somente para transformar a distância entre as linhas em milímetros."}</p>
         </section>
       )}
     </main>
