@@ -2,6 +2,10 @@ export type CardAnalysis = {
   pixelsPerMm: number;
   confidence: number;
   annotatedPhoto: string;
+  fingerWidthMm: number;
+  circumferenceMm: number;
+  ringSize: number;
+  ringRange: [number, number];
 };
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
@@ -104,6 +108,69 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   const pixelsPerMm = ((longPx / 85.6) + (shortPx / 53.98)) / 2;
   const confidence = Math.max(55, Math.min(96, Math.round(96 - Math.abs(best.ratio - 1.586) * 70)));
 
+  // Segmentação leve de pele em YCbCr para localizar os quatro dedos.
+  const skinMask = new Uint8Array(total);
+  let skinMinX = work.width, skinMinY = work.height, skinMaxX = 0, skinMaxY = 0;
+  for (let index = 0; index < total; index++) {
+    const offset = index * 4;
+    const r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2];
+    const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+    const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+    const x = index % work.width;
+    const y = (index / work.width) | 0;
+    const insideCard = x >= best.box.minX - 3 && x <= best.box.maxX + 3 &&
+      y >= best.box.minY - 3 && y <= best.box.maxY + 3;
+    const skin = !insideCard && r > 45 && r > b * 1.08 && cb > 72 && cb < 136 && cr > 132 && cr < 183;
+    if (skin) {
+      skinMask[index] = 1;
+      skinMinX = Math.min(skinMinX, x); skinMaxX = Math.max(skinMaxX, x);
+      skinMinY = Math.min(skinMinY, y); skinMaxY = Math.max(skinMaxY, y);
+    }
+  }
+
+  if (skinMaxX <= skinMinX || skinMaxY <= skinMinY) {
+    throw new Error("Encontrei o cartão, mas não consegui separar a mão do fundo. Use uma mesa clara e iluminação uniforme.");
+  }
+
+  type Run = { start: number; end: number; width: number };
+  let selectedRuns: Run[] | null = null;
+  let selectedY = 0;
+  const searchBottom = Math.round(skinMinY + (skinMaxY - skinMinY) * 0.52);
+
+  for (let row = skinMinY; row <= searchBottom; row++) {
+    const runs: Run[] = [];
+    let start = -1;
+    for (let col = skinMinX; col <= skinMaxX + 1; col++) {
+      const on = col <= skinMaxX && skinMask[row * work.width + col] === 1;
+      if (on && start < 0) start = col;
+      if (!on && start >= 0) {
+        const width = col - start;
+        if (width >= 4 && width <= work.width * 0.18) runs.push({ start, end: col - 1, width });
+        start = -1;
+      }
+    }
+    if (runs.length >= 4) {
+      const four = runs.length === 4
+        ? runs
+        : [...runs].sort((a, b) => b.width - a.width).slice(0, 4).sort((a, b) => a.start - b.start);
+      selectedRuns = four;
+      selectedY = row;
+    }
+  }
+
+  if (!selectedRuns || selectedRuns.length < 4) {
+    throw new Error("Cartão encontrado, mas não consegui distinguir os quatro dedos. Afaste bem os dedos e tire outra foto.");
+  }
+
+  selectedRuns.sort((a, b) => a.start - b.start);
+  const cardIsRight = (best.box.minX + best.box.maxX) / 2 > (skinMinX + skinMaxX) / 2;
+  const ringRun = cardIsRight ? selectedRuns[1] : selectedRuns[selectedRuns.length - 2];
+  const fingerWidthOriginalPx = ringRun.width / scale;
+  const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
+  const circumferenceMm = fingerWidthMm * 2.85;
+  const ringSize = Math.max(5, Math.min(40, Math.round(circumferenceMm - 40)));
+  const ringRange: [number, number] = [Math.max(5, ringSize - 1), Math.min(40, ringSize + 1)];
+
   const output = document.createElement("canvas");
   output.width = image.naturalWidth;
   output.height = image.naturalHeight;
@@ -116,9 +183,26 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   ctx.font = `bold ${Math.max(24, output.width / 32)}px sans-serif`;
   ctx.fillText("CARTÃO RECONHECIDO", x, Math.max(38, y - 16));
 
+  const lineY = selectedY / scale;
+  const lineStart = ringRun.start / scale;
+  const lineEnd = ringRun.end / scale;
+  ctx.strokeStyle = "#52e0a3";
+  ctx.lineWidth = Math.max(6, output.width / 160);
+  ctx.beginPath();
+  ctx.moveTo(lineStart, lineY);
+  ctx.lineTo(lineEnd, lineY);
+  ctx.stroke();
+  ctx.fillStyle = "#52e0a3";
+  ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
+  ctx.fillText("ANELAR", lineStart, Math.max(40, lineY - 18));
+
   return {
     pixelsPerMm,
     confidence,
     annotatedPhoto: output.toDataURL("image/jpeg", 0.9),
+    fingerWidthMm,
+    circumferenceMm,
+    ringSize,
+    ringRange,
   };
 }
