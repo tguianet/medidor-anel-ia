@@ -69,13 +69,14 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Coloque um cartão padrão e o dedo sobre uma superfície plana. Eles devem ficar lado a lado.</p>
+          <p className="lead">Apoie a mão aberta e um cartão padrão sobre uma superfície plana. Deixe o cartão na vertical, ao lado do dedo anelar.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
-            <div className="finger"><span /></div>
-            <div className="card"><span className="chip" /><small>CARTÃO</small></div>
+            <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
+            <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
           </div>
           <ul className="tips">
             <li>Use boa iluminação e evite sombras.</li>
+            <li>Mantenha todos os dedos apoiados, sem colocar um por baixo do outro.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
             <li>Fotografe completamente de cima.</li>
           </ul>
@@ -89,16 +90,16 @@ export default function App() {
         <section className="camera-screen">
           <div className="camera-top">
             <button className="icon-button" onClick={() => { stopCamera(); setStage("intro"); }}>×</button>
-            <span>Alinhe cartão e dedo</span>
+            <span>Alinhe a mão e o cartão</span>
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
             <div className="guide">
-              <div className="finger-guide">DEDO</div>
+              <div className="hand-guide"><span className="guide-index">INDICADOR</span><span className="guide-middle" /><span className="guide-ring">ANELAR</span><span className="guide-pinky" /><i>PALMA</i></div>
               <div className="card-guide">CARTÃO</div>
             </div>
           </div>
-          <p>Mantenha o celular paralelo à mesa</p>
+          <p>Mão inteira apoiada • cartão na vertical • câmera paralela</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
