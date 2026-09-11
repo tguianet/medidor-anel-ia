@@ -201,32 +201,48 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   const colorDistance = (a: number[], b: number[]) =>
     Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 
-  const maxRay = work.width * 0.13;
+  const workPixelsPerMm = pixelsPerMm * scale;
+  const minEdgeDistance = Math.max(3, workPixelsPerMm * 6.2);
+  const maxEdgeDistance = Math.min(work.width * 0.1, workPixelsPerMm * 15);
+  const expectedHalfWidth = workPixelsPerMm * 12.7;
+  const centerColor = colorAt(centerX, centerY);
+
   const findEdge = (direction: number) => {
     let bestDistance = 0;
-    let bestScore = 0;
-    for (let distance = 2; distance < maxRay; distance += 0.5) {
+    let bestScore = -Infinity;
+    let bestContrast = 0;
+    for (let distance = minEdgeDistance; distance <= maxEdgeDistance; distance += 0.35) {
       const inner = colorAt(
-        centerX + nx * direction * (distance - 1.5),
-        centerY + ny * direction * (distance - 1.5),
+        centerX + nx * direction * (distance - 1.4),
+        centerY + ny * direction * (distance - 1.4),
       );
       const outer = colorAt(
-        centerX + nx * direction * (distance + 1.5),
-        centerY + ny * direction * (distance + 1.5),
+        centerX + nx * direction * (distance + 1.8),
+        centerY + ny * direction * (distance + 1.8),
       );
-      const score = colorDistance(inner, outer);
+      const localContrast = colorDistance(inner, outer);
+      const outsideDifference = colorDistance(centerColor, outer);
+      const distancePenalty = Math.abs(distance - expectedHalfWidth) * 0.22;
+      const score = localContrast + outsideDifference * 0.3 - distancePenalty;
       if (score > bestScore) {
         bestScore = score;
+        bestContrast = localContrast;
         bestDistance = distance;
       }
     }
-    return { distance: bestDistance, score: bestScore };
+    return { distance: bestDistance, score: bestScore, contrast: bestContrast };
   };
 
   const negativeEdge = findEdge(-1);
   const positiveEdge = findEdge(1);
-  if (negativeEdge.score < 10 || positiveEdge.score < 10) {
+  if (negativeEdge.contrast < 8 || positiveEdge.contrast < 8) {
     throw new Error("Reconheci o anelar, mas faltou contraste nas laterais. Use uma superfície de cor diferente da pele.");
+  }
+
+  const symmetry = Math.max(negativeEdge.distance, positiveEdge.distance) /
+    Math.max(1, Math.min(negativeEdge.distance, positiveEdge.distance));
+  if (symmetry > 1.42) {
+    throw new Error("As bordas do anelar ficaram assimétricas. Deixe o dedo reto e a câmera paralela.");
   }
 
   const measuredWidth = negativeEdge.distance + positiveEdge.distance;
@@ -234,6 +250,7 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   const lineStartY = centerY - ny * negativeEdge.distance;
   const lineEndX = centerX + nx * positiveEdge.distance;
   const lineEndY = centerY + ny * positiveEdge.distance;
+  const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthOriginalPx = measuredWidth / scale;
   const fingerWidthMm = fingerWidthOriginalPx / pixelsPerMm;
   if (fingerWidthMm < 13 || fingerWidthMm > 28) {
@@ -261,11 +278,19 @@ export async function detectCard(photo: string): Promise<CardAnalysis> {
   const lineStartYOut = lineStartY / scale;
   const lineEndXOut = lineEndX / scale;
   const lineEndYOut = lineEndY / scale;
+  const ringCenterX = (lineStartXOut + lineEndXOut) / 2;
+  const ringCenterY = (lineStartYOut + lineEndYOut) / 2;
+  const ringRadiusX = Math.hypot(lineEndXOut - lineStartXOut, lineEndYOut - lineStartYOut) / 2;
+  const ringAngle = Math.atan2(lineEndYOut - lineStartYOut, lineEndXOut - lineStartXOut);
+  const bandWidth = Math.max(5, ringRadiusX * 0.16);
   ctx.strokeStyle = "#52e0a3";
-  ctx.lineWidth = Math.max(6, output.width / 160);
+  ctx.lineWidth = Math.max(4, output.width / 260);
   ctx.beginPath();
-  ctx.moveTo(lineStartXOut, lineStartYOut);
-  ctx.lineTo(lineEndXOut, lineEndYOut);
+  ctx.ellipse(ringCenterX, ringCenterY, ringRadiusX, Math.max(5, ringRadiusX * 0.22), ringAngle, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(3, output.width / 340);
+  ctx.beginPath();
+  ctx.ellipse(ringCenterX, ringCenterY, Math.max(2, ringRadiusX - bandWidth), Math.max(3, ringRadiusX * 0.14), ringAngle, 0, Math.PI * 2);
   ctx.stroke();
   ctx.fillStyle = "#52e0a3";
   ctx.font = `bold ${Math.max(24, output.width / 34)}px sans-serif`;
