@@ -104,14 +104,15 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Vire a palma para cima e deixe o cartão inteiro ao lado da mão, sem cobrir a palma. O sistema identificará automaticamente o dedo anelar.</p>
+          <p className="lead">Estenda somente o dedo que deseja medir e mantenha os outros dobrados. Coloque o cartão inteiro ao lado, sem encostar no dedo.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
           </div>
           <ul className="tips">
             <li>Use boa iluminação e evite sombras.</li>
-            <li>Mantenha a palma aberta e os dedos esticados.</li>
+            <li>Estenda somente o dedo que receberá o anel.</li>
+            <li>Mantenha os outros dedos dobrados e fora da área de medição.</li>
             <li>Coloque o cartão ao lado da mão, sem cobrir a palma ou os dedos.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
             <li>Fotografe completamente de cima.</li>
@@ -130,9 +131,9 @@ export default function App() {
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
-            <div className="live-hint">Palma livre • cartão inteiro ao lado da mão</div>
+            <div className="live-hint">Um dedo estendido • cartão inteiro ao lado</div>
           </div>
-          <p>Palma completamente livre • cartão inteiro ao lado</p>
+          <p>Um dedo estendido • cartão ao lado • câmera paralela</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
@@ -155,7 +156,7 @@ export default function App() {
           </div>
           {analyzing && <p className="analysis-loading">Carregando visão computacional e procurando o cartão…</p>}
           {error && <p className="error">{error}</p>}
-          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema reconhecerá o cartão, a mão e o dedo anelar automaticamente."}</p>
+          <p className="pending">{analysis ? "Estimativa experimental: confirme o resultado com uma aneleira para calibrarmos a precisão." : "O sistema reconhecerá o cartão e medirá automaticamente o único dedo estendido."}</p>
         </section>
       )}
     </main>
