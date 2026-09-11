@@ -12,6 +12,7 @@ export default function App() {
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
+  const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
   const [error, setError] = useState("");
@@ -28,6 +29,8 @@ export default function App() {
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
+  const [leftLocked, setLeftLocked] = useState(false);
+  const [rightLocked, setRightLocked] = useState(false);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -35,6 +38,20 @@ export default function App() {
   };
 
   useEffect(() => () => stopCamera(), []);
+  useEffect(() => {
+    if (!photo) { photoPixelsRef.current = null; return; }
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context?.drawImage(image, 0, 0);
+      const imageData = context?.getImageData(0, 0, canvas.width, canvas.height);
+      if (imageData) photoPixelsRef.current = { data: imageData.data, width: canvas.width, height: canvas.height };
+    };
+    image.src = photo;
+  }, [photo]);
   useEffect(() => {
     if (stage !== "camera" || !videoRef.current || !streamRef.current) return;
     videoRef.current.srcObject = streamRef.current;
@@ -48,6 +65,8 @@ export default function App() {
     setZoom(1);
     setPanX(0);
     setPanY(0);
+    setLeftLocked(false);
+    setRightLocked(false);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("Este navegador não permite acesso à câmera.");
       return;
@@ -90,6 +109,8 @@ export default function App() {
     setZoom(1);
     setPanX(0);
     setPanY(0);
+    setLeftLocked(false);
+    setRightLocked(false);
     stopCamera();
     setStage("review");
   };
@@ -117,6 +138,8 @@ export default function App() {
     setPanY(0);
     setError("");
     setPhase("finger");
+    setLeftLocked(false);
+    setRightLocked(false);
   };
 
   const updateDrag = (clientX: number, clientY: number) => {
@@ -125,9 +148,11 @@ export default function App() {
     const x = clamp(((clientX - rect.left) / rect.width) * 100, 2, 98);
     const y = clamp(((clientY - rect.top) / rect.height) * 100, 8, 92);
     const target = draggingRef.current;
-    if (target === "left") setLeftLine(Math.min(x, rightLine - 3));
-    if (target === "right") setRightLine(Math.max(x, leftLine + 3));
+    if (target === "left") { setLeftLocked(false); setLeftLine(Math.min(x, rightLine - 3)); }
+    if (target === "right") { setRightLocked(false); setRightLine(Math.max(x, leftLine + 3)); }
     if (target === "height") {
+      setLeftLocked(false);
+      setRightLocked(false);
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
       setMeasureY(clamp(dragStartRef.current.right + dy, 18, 76));
     }
@@ -146,6 +171,8 @@ export default function App() {
       setCardTop(nextTop); setCardBottom(nextTop + height);
     }
     if (target === "pan") {
+      setLeftLocked(false);
+      setRightLocked(false);
       const maxX = (zoom - 1) * rect.width / 2;
       const maxY = (zoom - 1) * rect.height / 2;
       setPanX(clamp(dragStartRef.current.left + clientX - dragStartRef.current.x, -maxX, maxX));
@@ -171,7 +198,56 @@ export default function App() {
   const changeZoom = (nextZoom: number) => {
     const value = clamp(nextZoom, 1, 4);
     setZoom(value);
+    setLeftLocked(false);
+    setRightLocked(false);
     if (value === 1) { setPanX(0); setPanY(0); }
+  };
+
+  const snapBoundary = (side: "left" | "right", clientX: number) => {
+    const stage = measureRef.current;
+    const source = photoPixelsRef.current;
+    if (!stage || !source) return;
+    const rect = stage.getBoundingClientRect();
+    const screenX = clientX - rect.left;
+    const screenY = measureY / 100 * rect.height;
+    const imageX = ((screenX - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width;
+    const imageY = ((screenY - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
+    const radius = Math.max(8, Math.round(18 / zoom));
+    let bestX = Math.round(imageX);
+    let bestScore = 0;
+    const colorAt = (x: number, y: number) => {
+      const offset = (y * source.width + x) * 4;
+      return [source.data[offset], source.data[offset + 1], source.data[offset + 2]];
+    };
+    for (let candidate = Math.round(imageX) - radius; candidate <= Math.round(imageX) + radius; candidate++) {
+      if (candidate < 3 || candidate >= source.width - 3) continue;
+      let score = 0;
+      let samples = 0;
+      for (let y = Math.round(imageY) - 7; y <= Math.round(imageY) + 7; y += 2) {
+        if (y < 0 || y >= source.height) continue;
+        const before = colorAt(candidate - 2, y);
+        const after = colorAt(candidate + 2, y);
+        score += Math.abs(before[0] - after[0]) + Math.abs(before[1] - after[1]) + Math.abs(before[2] - after[2]);
+        samples++;
+      }
+      score /= Math.max(samples, 1);
+      const distancePenalty = Math.abs(candidate - imageX) * 1.2;
+      if (score - distancePenalty > bestScore) { bestScore = score - distancePenalty; bestX = candidate; }
+    }
+    if (bestScore < 24) {
+      if (side === "left") setLeftLocked(false); else setRightLocked(false);
+      return;
+    }
+    const snappedScreenX = rect.width / 2 + (bestX / source.width * rect.width - rect.width / 2) * zoom + panX;
+    const snappedPercent = clamp(snappedScreenX / rect.width * 100, 2, 98);
+    if (side === "left") { setLeftLine(Math.min(snappedPercent, rightLine - 3)); setLeftLocked(true); }
+    else { setRightLine(Math.max(snappedPercent, leftLine + 3)); setRightLocked(true); }
+  };
+
+  const finishDrag = (event: React.PointerEvent) => {
+    const target = draggingRef.current;
+    if (target === "left" || target === "right") snapBoundary(target, event.clientX);
+    draggingRef.current = null;
   };
 
   const result = useMemo(() => {
@@ -190,6 +266,8 @@ export default function App() {
     setZoom(1);
     setPanX(0);
     setPanY(0);
+    setLeftLocked(false);
+    setRightLocked(false);
     setError("");
     void openCamera();
   };
@@ -249,7 +327,7 @@ export default function App() {
             className="measurement-stage is-active"
             onPointerDown={startPan}
             onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
-            onPointerUp={() => { draggingRef.current = null; }}
+            onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; }}
           >
             {photo && <img className={phase === "finger" ? "zoomable-photo" : ""} style={phase === "finger" ? { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` } : undefined} src={photo} alt="Fotografia para medição" draggable={false} />}
@@ -264,8 +342,8 @@ export default function App() {
             )}
             {phase === "finger" && pixelsPerMm && (
               <>
-                <button className="caliper-line left" style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
-                <button className="caliper-line right" style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                <button className={`caliper-line left${leftLocked ? " locked" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
+                <button className={`caliper-line right${rightLocked ? " locked" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
                 <button className="measure-cross" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
                 <button className="measure-height-handle" style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>ARRASTE</button>
               </>
@@ -281,7 +359,7 @@ export default function App() {
             </div>
           )}
 
-          {phase === "finger" && result && (
+          {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 5, 40)} a {clamp(result.ringSize + 1, 5, 40)}</span>
@@ -290,6 +368,7 @@ export default function App() {
               <span>Calibração do cartão: {calibrationConfidence}%</span>
             </div>
           )}
+          {phase === "finger" && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
