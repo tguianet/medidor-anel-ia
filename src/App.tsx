@@ -103,7 +103,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">PASSO 1 DE 2</span>
           <h1>Descubra seu aro usando a câmera</h1>
-          <p className="lead">Vire a palma para cima, coloque o cartão atravessado sobre ela e alinhe no traço dourado o dedo que deseja medir.</p>
+          <p className="lead">Vire a palma para cima e mostre o cartão inteiro. O sistema identificará automaticamente o dedo anelar.</p>
           <div className="example" aria-label="Exemplo de posicionamento">
             <div className="hand-example"><span className="ex-index">INDICADOR</span><span className="ex-middle" /><span className="ex-ring">ANELAR</span><span className="ex-pinky" /></div>
             <div className="card vertical"><span className="chip" /><small>CARTÃO</small></div>
@@ -113,7 +113,6 @@ export default function App() {
             <li>Mantenha a palma aberta e os dedos esticados.</li>
             <li>Coloque o cartão horizontal sobre a palma, sem dobrá-lo.</li>
             <li>Deixe os quatro cantos do cartão visíveis.</li>
-            <li>Alinhe no traço dourado exatamente o local do dedo onde o anel ficará.</li>
             <li>Fotografe completamente de cima.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
@@ -126,16 +125,13 @@ export default function App() {
         <section className="camera-screen">
           <div className="camera-top">
             <button className="icon-button" onClick={() => { stopCamera(); setStage("intro"); }}>×</button>
-            <span>Alinhe a mão e o cartão</span>
+            <span>Enquadre a mão e o cartão</span>
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
-            <div className="guide">
-              <div className="ring-target"><span /><b>POSICIONE O LOCAL DO ANEL</b></div>
-              <div className="card-guide">CARTÃO SOBRE A PALMA</div>
-            </div>
+            <div className="live-hint">Mostre a palma aberta e o cartão inteiro</div>
           </div>
-          <p>Coloque qualquer dedo no traço dourado • cartão sobre a palma</p>
+          <p>Palma aberta • quatro dedos visíveis • cartão inteiro</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
