@@ -404,10 +404,10 @@ export default function App() {
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
-            {phase === "card" ? <button className="primary" onClick={confirmCard}>Confirmar cartão</button> : <button className="primary" onClick={() => { setPhase("card"); setPixelsPerMm(null); }}>Recalibrar manualmente</button>}
+            <button className="primary" type="button" disabled>Cartão calibrado automaticamente</button>
           </div>
           {error && <p className="error">{error}</p>}
-          <p className="pending">{phase === "card" ? "Arraste os quatro cantos amarelos até coincidirem com as quatro bordas reais do cartão." : "Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo."}</p>
+          <p className="pending">Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo.</p>
         </section>
       )}
     </main>
