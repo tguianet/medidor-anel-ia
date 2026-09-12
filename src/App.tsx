@@ -5,6 +5,9 @@ type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const CARD_GUIDE_WIDTH = 0.78;
+const STANDARD_CARD_WIDTH_MM = 85.6;
+const AUTO_PIXELS_PER_MM = 900 * CARD_GUIDE_WIDTH / STANDARD_CARD_WIDTH_MM;
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -65,6 +68,7 @@ export default function App() {
   const openCamera = async () => {
     setError("");
     setPixelsPerMm(null);
+    setCalibrationConfidence(0);
     setPhase("card");
     setZoom(1);
     setPanX(0);
@@ -122,12 +126,16 @@ export default function App() {
     }
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     setPhoto(canvas.toDataURL("image/jpeg", 0.94));
-    setCardLeft(15);
-    setCardTop(35);
-    setCardRight(85);
-    setCardBottom(58);
-    setPixelsPerMm(null);
-    setPhase("card");
+    setCardLeft(11);
+    setCardTop(10);
+    setCardRight(89);
+    setCardBottom(46.88);
+    setPixelsPerMm(AUTO_PIXELS_PER_MM);
+    setCalibrationConfidence(99);
+    setPhase("finger");
+    setLeftLine(37);
+    setRightLine(63);
+    setMeasureY(64);
     setZoom(1);
     setPanX(0);
     setPanY(0);
@@ -306,7 +314,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">MEDIÇÃO MANUAL ASSISTIDA</span>
           <h1>Marque as bordas do dedo</h1>
-          <p className="lead">Coloque o cartão atravessado sobre os dedos e fotografe de cima. Primeiro encaixe o retângulo no cartão; depois ajuste as linhas no dedo.</p>
+          <p className="lead">Coloque o cartão atravessado sobre os dedos e encaixe suas bordas na moldura branca. A escala será calibrada automaticamente ao tirar a foto.</p>
           <div className="manual-example" aria-label="Duas linhas marcando as laterais do dedo">
             <div className="example-finger" />
             <i className="example-line example-left" />
@@ -314,9 +322,9 @@ export default function App() {
             <i className="example-cross" />
           </div>
           <ul className="tips">
-            <li>Coloque o cartão sobre os dedos para ficar na mesma distância da câmera.</li>
-            <li>Fotografe de cima e deixe o cartão inteiro visível.</li>
-            <li>Você escolherá exatamente o ponto e as bordas da medição.</li>
+            <li>Use um cartão padrão de 85,60 × 53,98 mm.</li>
+            <li>Aproxime ou afaste o celular até o cartão preencher a moldura branca.</li>
+            <li>Mantenha cartão, dedos e câmera paralelos.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
           {error && <p className="error">{error}</p>}
@@ -337,7 +345,7 @@ export default function App() {
               <div className="finger-alignment"><span>DEDO</span></div>
             </div>
           </div>
-          <p>{torchOn ? "Luz ligada • incline levemente se houver reflexo" : "Cartão inteiro sobre os dedos • câmera paralela"}</p>
+          <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Encaixe as 4 bordas do cartão dentro da moldura branca"}</p>
           <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
@@ -396,7 +404,7 @@ export default function App() {
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
-            {phase === "card" ? <button className="primary" onClick={confirmCard}>Confirmar cartão</button> : <button className="primary" onClick={() => { setPhase("card"); setPixelsPerMm(null); }}>Recalibrar cartão</button>}
+            {phase === "card" ? <button className="primary" onClick={confirmCard}>Confirmar cartão</button> : <button className="primary" onClick={() => { setPhase("card"); setPixelsPerMm(null); }}>Recalibrar manualmente</button>}
           </div>
           {error && <p className="error">{error}</p>}
           <p className="pending">{phase === "card" ? "Arraste os quatro cantos amarelos até coincidirem com as quatro bordas reais do cartão." : "Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo."}</p>
