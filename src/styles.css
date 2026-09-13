@@ -87,7 +87,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .analysis-result span { font-size: 14px; }
 .try-on-button { margin-top: 9px; min-height: 46px; border: 1px solid #efd184; border-radius: 10px; color: #1a1309; background: linear-gradient(135deg, #f4dc9c, #c89a42); font-weight: 900; cursor: pointer; }
 .virtual-ring { position: absolute; z-index: 8; transform: translate(-50%, -50%); min-height: 7px; pointer-events: none; filter: drop-shadow(0 3px 3px #0009); }
-.virtual-ring > img { display: block; width: 100%; height: 100%; object-fit: fill; }
+.virtual-ring > img { display: block; width: 100%; height: 100%; object-fit: fill; -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 6%, #000 94%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0%, #000 6%, #000 94%, transparent 100%); }
 .virtual-ring.metal-gold > img { filter: saturate(1.04) contrast(1.03); }
 .virtual-ring.metal-silver > img { filter: grayscale(1) brightness(1.18) contrast(.94); }
 .virtual-ring.metal-rose > img { filter: sepia(.55) saturate(1.3) hue-rotate(326deg) brightness(1.02); }
@@ -182,6 +182,9 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .measure-cross { position: absolute; z-index: 5; height: 40px; padding: 0; transform: translateY(-50%); border: 0; border-top: 2px solid #52e0a3; color: #071b14; background: transparent; cursor: ns-resize; touch-action: none; }
 .measure-cross::before { content: ""; position: absolute; left: 50%; top: -13px; width: 22px; height: 22px; transform: translateX(-50%); border: 2px solid #092118; border-radius: 50%; background: #52e0a3; box-shadow: 0 0 10px #000; }
 .measure-height-handle { position: absolute; z-index: 7; min-width: 74px; min-height: 36px; padding: 7px 10px; transform: translate(-50%, -50%); border: 2px solid #092118; border-radius: 999px; color: #092118; background: #52e0a3; box-shadow: 0 3px 12px #000b; font-size: 10px; font-weight: 900; cursor: ns-resize; touch-action: none; }
+.caliper-line.ring-adjust { z-index: 12; }
+.measure-cross.ring-adjust { z-index: 10; }
+.measure-height-handle.ring-adjust { z-index: 13; }
 .ring-size-badge { position: absolute; z-index: 9; bottom: 3.5%; width: clamp(132px, 36%, 190px); padding: 8px 14px 7px; transform: translateX(-50%); border: 2px solid #d7b55f; border-radius: 14px; color: #fff; background: #100e0beF; box-shadow: 0 7px 20px #000b, inset 0 0 0 1px #594719; text-align: center; pointer-events: none; }
 .ring-size-badge span { display: block; font-size: 11px; font-weight: 900; letter-spacing: .035em; }
 .ring-size-badge strong { display: block; margin-top: -2px; color: #f1cf72; font-family: Georgia, serif; font-size: clamp(38px, 9vw, 54px); line-height: .98; text-shadow: 0 2px 9px #000; }
