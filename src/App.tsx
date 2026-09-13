@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto } from "./vision";
+import AdminCalibration from "./AdminCalibration";
 
 type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | "showcase-ring" | "showcase-left" | "showcase-right" | null;
 type RingMetal = "gold" | "silver" | "rose" | "black";
 type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
+type CalibrationRule = { key: string; minWidthMm: number; maxWidthMm: number; predictedRing: number; offset: number };
 
 const RING_MODELS: { id: RingStyle; label: string }[] = [
   { id: "classic", label: "Lisa" },
@@ -140,6 +142,18 @@ export default function App() {
   const [showcaseY, setShowcaseY] = useState(55);
   const [showcaseWidth, setShowcaseWidth] = useState(24);
   const [showcaseAngle, setShowcaseAngle] = useState(0);
+  const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
+
+  const loadCalibrationRules = async () => {
+    try {
+      const response = await fetch("/.netlify/functions/calibration", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setCalibrationRules(Array.isArray(data.rules) ? data.rules : []);
+    } catch {
+      // A medição original continua funcionando se o banco estiver indisponível.
+    }
+  };
 
   const stopCamera = () => {
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -151,6 +165,7 @@ export default function App() {
   };
 
   useEffect(() => () => stopCamera(), []);
+  useEffect(() => { void loadCalibrationRules(); }, []);
   useEffect(() => {
     if (!photo) { photoPixelsRef.current = null; return; }
     const image = new Image();
@@ -528,9 +543,13 @@ export default function App() {
       Math.abs(candidate.diameterMm - widthMm) < Math.abs(closest.diameterMm - widthMm) ? candidate : closest
     );
     // Ajuste final validado nos testes reais: reduz dois aros do resultado exibido.
-    const ringSize = clamp(closestRing.size - 3, 10, 29);
-    return { widthMm, circumferenceMm, ringSize };
-  }, [pixelsPerMm, leftLine, rightLine, zoom]);
+    const originalRingSize = clamp(closestRing.size - 3, 10, 29);
+    const activeRule = calibrationRules.find((rule) =>
+      rule.predictedRing === originalRingSize && widthMm >= rule.minWidthMm && widthMm < rule.maxWidthMm
+    );
+    const ringSize = clamp(originalRingSize + (activeRule?.offset || 0), 1, 40);
+    return { widthMm, circumferenceMm, ringSize, originalRingSize, learnedOffset: activeRule?.offset || 0 };
+  }, [pixelsPerMm, leftLine, rightLine, zoom, calibrationRules]);
 
   const resetPhoto = () => {
     setPhoto("");
@@ -681,6 +700,14 @@ export default function App() {
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
+          )}
+          {phase === "finger" && result && leftLocked && rightLocked && (
+            <AdminCalibration
+              measurement={{ widthMm: result.widthMm, ringSize: result.originalRingSize }}
+              calibrationConfidence={calibrationConfidence}
+              zoom={zoom}
+              onRulesChanged={loadCalibrationRules}
+            />
           )}
           {phase === "finger" && !tryOn && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
 
