@@ -58,6 +58,7 @@ export default function App() {
   const [rightLocked, setRightLocked] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [cameraOpening, setCameraOpening] = useState(false);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
@@ -70,8 +71,10 @@ export default function App() {
   const [showcaseAngle, setShowcaseAngle] = useState(0);
 
   const stopCamera = () => {
+    if (videoRef.current) videoRef.current.srcObject = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    setCameraOpening(false);
     setTorchOn(false);
     setTorchSupported(false);
   };
@@ -94,8 +97,62 @@ export default function App() {
   useEffect(() => {
     if ((stage !== "camera" && stage !== "hand-camera") || !videoRef.current || !streamRef.current) return;
     videoRef.current.srcObject = streamRef.current;
-    void videoRef.current.play().catch(() => setError("A câmera não iniciou. Toque novamente em Abrir câmera."));
+    void videoRef.current.play().catch(() => setError("A imagem não iniciou. Toque em Tentar novamente."));
   }, [stage]);
+
+  const startCameraStream = async (targetStage: "camera" | "hand-camera") => {
+    stopCamera();
+    setError("");
+    setCameraOpening(true);
+    setStage(targetStage);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraOpening(false);
+      setError("Este navegador não permite acesso à câmera. Abra o site no Chrome ou Safari atualizado.");
+      return;
+    }
+
+    const attempts: MediaStreamConstraints[] = [
+      { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+      { video: { facingMode: { ideal: "environment" } }, audio: false },
+      { video: true, audio: false },
+    ];
+    let lastFailure: unknown;
+
+    for (const constraints of attempts) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        streamRef.current = stream;
+        const track = stream.getVideoTracks()[0];
+        const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+        setTorchSupported(Boolean(capabilities?.torch));
+        const video = videoRef.current;
+        if (!video) throw new Error("A tela da câmera não ficou pronta.");
+        video.srcObject = stream;
+        video.muted = true;
+        video.setAttribute("playsinline", "true");
+        await video.play();
+        setCameraOpening(false);
+        setError("");
+        return;
+      } catch (reason) {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        lastFailure = reason;
+      }
+    }
+
+    setCameraOpening(false);
+    const failureName = lastFailure instanceof DOMException ? lastFailure.name : "";
+    if (failureName === "NotAllowedError" || failureName === "SecurityError") {
+      setError("A câmera está bloqueada. Libere a permissão nas configurações do navegador e tente novamente.");
+    } else if (failureName === "NotReadableError" || failureName === "TrackStartError") {
+      setError("A câmera está sendo usada por outro aplicativo. Feche-o e tente novamente.");
+    } else {
+      setError("Não foi possível iniciar a câmera. Toque em Tentar novamente.");
+    }
+  };
 
   const openCamera = async () => {
     setError("");
@@ -107,44 +164,11 @@ export default function App() {
     setPanY(0);
     setLeftLocked(false);
     setRightLocked(false);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Este navegador não permite acesso à câmera.");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      const track = stream.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
-      setTorchSupported(Boolean(capabilities?.torch));
-      setStage("camera");
-    } catch {
-      setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
-    }
+    await startCameraStream("camera");
   };
 
   const openHandCamera = async () => {
-    setError("");
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Este navegador não permite acesso à câmera.");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      const track = stream.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
-      setTorchSupported(Boolean(capabilities?.torch));
-      setStage("hand-camera");
-    } catch {
-      setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
-    }
+    await startCameraStream("hand-camera");
   };
 
   const toggleTorch = async () => {
@@ -203,17 +227,22 @@ export default function App() {
       const calibration = await calibratePhoto(capturedPhoto);
       const cardCenterX = calibration.cardBox.x + calibration.cardBox.width / 2;
       const cardCenterY = calibration.cardBox.y + calibration.cardBox.height / 2;
+      const cardLongSide = Math.max(calibration.cardBox.width, calibration.cardBox.height);
+      const cardShortSide = Math.min(calibration.cardBox.width, calibration.cardBox.height);
+      const cardRatio = cardLongSide / Math.max(cardShortSide, 0.01);
       const cardIsInsideGuide =
-        Math.abs(cardCenterX - 0.5) <= 0.1 &&
-        Math.abs(cardCenterY - 0.285) <= 0.11 &&
-        calibration.cardBox.width >= 0.6 &&
-        calibration.cardBox.width <= 0.94 &&
-        calibration.cardBox.height >= 0.25 &&
-        calibration.cardBox.height <= 0.5 &&
-        calibration.pixelsPerMm >= 6.2 &&
-        calibration.pixelsPerMm <= 10.5;
+        Math.abs(cardCenterX - 0.5) <= 0.2 &&
+        Math.abs(cardCenterY - 0.3) <= 0.22 &&
+        cardLongSide >= 0.5 &&
+        cardLongSide <= 0.98 &&
+        cardShortSide >= 0.2 &&
+        cardShortSide <= 0.62 &&
+        cardRatio >= 1.25 &&
+        cardRatio <= 2.05 &&
+        calibration.pixelsPerMm >= 5 &&
+        calibration.pixelsPerMm <= 13;
       if (!cardIsInsideGuide) {
-        throw new Error("O cartão não está encaixado corretamente na moldura. Centralize as quatro bordas do cartão e tire outra foto.");
+        throw new Error("Não consegui confirmar o cartão na moldura. Deixe as quatro bordas visíveis, sem reflexo forte, e tire outra foto.");
       }
       setPixelsPerMm(calibration.pixelsPerMm);
       setCalibrationConfidence(calibration.confidence);
@@ -458,13 +487,15 @@ export default function App() {
             <span>Fotografe de cima</span>
           </div>
           <div className="viewport">
-            <video ref={videoRef} playsInline muted />
+            <video ref={videoRef} playsInline muted autoPlay />
             <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
             <div className="card-alignment" aria-hidden="true"><span>ENCAIXE O CARTÃO AQUI</span></div>
             <div className="finger-vertical-line" aria-hidden="true"><span>ALINHE O DEDO</span></div>
+            {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
           </div>
           <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Encaixe o cartão na moldura e deixe o dedo reto na linha vertical"}</p>
           <button className="shutter" onClick={() => void capture()} aria-label="Tirar fotografia"><span /></button>
+          {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={() => void openCamera()}>Tentar novamente</button></>}
         </section>
       )}
 
@@ -475,13 +506,14 @@ export default function App() {
             <span>Fotografe a mão inteira</span>
           </div>
           <div className="viewport hand-camera-viewport">
-            <video ref={videoRef} playsInline muted />
+            <video ref={videoRef} playsInline muted autoPlay />
             <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
             <div className="full-hand-guide" aria-hidden="true"><span>MÃO INTEIRA</span><i>ANELAR AQUI</i></div>
+            {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
           </div>
           <p>Abra a mão, mostre todos os dedos e deixe o anelar sobre a marca.</p>
           <button className="shutter" onClick={captureHand} aria-label="Fotografar a mão inteira"><span /></button>
-          {error && <p className="error">{error}</p>}
+          {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={() => void openHandCamera()}>Tentar novamente</button></>}
         </section>
       )}
 
