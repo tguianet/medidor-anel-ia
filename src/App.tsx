@@ -22,6 +22,7 @@ const RING_DIAMETER_TABLE = [
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const autoStartRef = useRef(false);
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
@@ -104,6 +105,12 @@ export default function App() {
       setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
     }
   };
+
+  useEffect(() => {
+    if (autoStartRef.current) return;
+    autoStartRef.current = true;
+    void openCamera();
+  }, []);
 
   const toggleTorch = async () => {
     const track = streamRef.current?.getVideoTracks()[0];
