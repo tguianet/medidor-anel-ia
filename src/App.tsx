@@ -107,14 +107,18 @@ export default function App() {
 
   const toggleTorch = async () => {
     const track = streamRef.current?.getVideoTracks()[0];
-    if (!track || !torchSupported) return;
+    if (!track) {
+      setError("A câmera ainda não está pronta. Aguarde um instante e tente novamente.");
+      return;
+    }
     const next = !torchOn;
     try {
       await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet & { torch: boolean }] });
       setTorchOn(next);
+      setTorchSupported(true);
       setError("");
     } catch {
-      setError("A lanterna não pôde ser ativada neste navegador.");
+      setError("Este celular ou navegador não permite controlar a lanterna pela câmera. Use uma boa iluminação externa.");
       setTorchSupported(false);
     }
   };
@@ -371,7 +375,7 @@ export default function App() {
           </div>
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
-            {torchSupported && <button type="button" className={`torch-button${torchOn ? " is-on" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>}
+            <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
             <div className="card-alignment" aria-hidden="true"><span>ENCAIXE O CARTÃO AQUI</span></div>
             <div className="finger-vertical-line" aria-hidden="true"><span>ALINHE O DEDO</span></div>
           </div>
