@@ -22,7 +22,6 @@ const RING_DIAMETER_TABLE = [
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const autoStartRef = useRef(false);
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
@@ -105,12 +104,6 @@ export default function App() {
       setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
     }
   };
-
-  useEffect(() => {
-    if (autoStartRef.current) return;
-    autoStartRef.current = true;
-    void openCamera();
-  }, []);
 
   const toggleTorch = async () => {
     const track = streamRef.current?.getVideoTracks()[0];
@@ -342,8 +335,8 @@ export default function App() {
       {stage === "intro" && (
         <section className="panel intro">
           <span className="step">MEDIÇÃO MANUAL ASSISTIDA</span>
-          <h1>Marque as bordas do dedo</h1>
-          <p className="lead">Coloque o cartão atravessado sobre os dedos e tire a foto. O sistema encontra o cartão e calibra a escala automaticamente.</p>
+          <h1>Como medir corretamente</h1>
+          <p className="lead">Antes de abrir a câmera, coloque um cartão bancário sobre o dedo. O sistema reconhecerá o cartão automaticamente e depois você ajustará as linhas magnéticas nas bordas do dedo.</p>
           <div className="manual-example" aria-label="Duas linhas marcando as laterais do dedo">
             <div className="example-finger" />
             <i className="example-line example-left" />
@@ -354,6 +347,7 @@ export default function App() {
             <li>Use um cartão padrão de 85,60 × 53,98 mm.</li>
             <li>Deixe o cartão inteiro visível na foto, sem cobrir o ponto do anel.</li>
             <li>Mantenha cartão, dedos e câmera paralelos.</li>
+            <li>Na câmera, mantenha o dedo reto sobre a linha vertical.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
           {error && <p className="error">{error}</p>}
