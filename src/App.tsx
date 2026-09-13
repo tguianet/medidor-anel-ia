@@ -292,8 +292,8 @@ export default function App() {
     const widthPx = Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
     const circumferenceMm = Math.PI * (widthMm + 0.4);
-    // Correção prática: reduz três aros do resultado anteriormente exibido.
-    const ringSize = clamp(Math.round(circumferenceMm - 40) - 4, 5, 40);
+    // Correção prática: acrescenta um aro ao resultado anteriormente exibido.
+    const ringSize = clamp(Math.round(circumferenceMm - 40) - 3, 5, 40);
     return { widthMm, circumferenceMm, ringSize };
   }, [pixelsPerMm, leftLine, rightLine, zoom]);
 
