@@ -155,6 +155,20 @@ export default function App() {
     setAnalyzingCard(true);
     try {
       const calibration = await calibratePhoto(capturedPhoto);
+      const cardCenterX = calibration.cardBox.x + calibration.cardBox.width / 2;
+      const cardCenterY = calibration.cardBox.y + calibration.cardBox.height / 2;
+      const cardIsInsideGuide =
+        Math.abs(cardCenterX - 0.5) <= 0.1 &&
+        Math.abs(cardCenterY - 0.285) <= 0.11 &&
+        calibration.cardBox.width >= 0.6 &&
+        calibration.cardBox.width <= 0.94 &&
+        calibration.cardBox.height >= 0.25 &&
+        calibration.cardBox.height <= 0.5 &&
+        calibration.pixelsPerMm >= 6.2 &&
+        calibration.pixelsPerMm <= 10.5;
+      if (!cardIsInsideGuide) {
+        throw new Error("O cartão não está encaixado corretamente na moldura. Centralize as quatro bordas do cartão e tire outra foto.");
+      }
       setPixelsPerMm(calibration.pixelsPerMm);
       setCalibrationConfidence(calibration.confidence);
     } catch (reason) {
