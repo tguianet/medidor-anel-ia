@@ -48,20 +48,30 @@ const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
   const verticalScore = (x: number, insideDirection: number) => {
     let total = 0;
     let count = 0;
+    let continuous = 0;
     for (let y = top + 12; y <= bottom - 12; y += 5) {
-      total += Math.abs(grayAt(x + insideDirection * 4, y) - grayAt(x - insideDirection * 4, y));
+      const difference = Math.abs(grayAt(x + insideDirection * 4, y) - grayAt(x - insideDirection * 4, y));
+      total += difference;
+      if (difference >= 12) continuous++;
       count++;
     }
-    return total / Math.max(1, count);
+    const average = total / Math.max(1, count);
+    const coverage = continuous / Math.max(1, count);
+    return average * (0.35 + coverage * 0.65);
   };
   const horizontalScore = (y: number, insideDirection: number) => {
     let total = 0;
     let count = 0;
+    let continuous = 0;
     for (let x = left + 14; x <= right - 14; x += 5) {
-      total += Math.abs(grayAt(x, y + insideDirection * 4) - grayAt(x, y - insideDirection * 4));
+      const difference = Math.abs(grayAt(x, y + insideDirection * 4) - grayAt(x, y - insideDirection * 4));
+      total += difference;
+      if (difference >= 12) continuous++;
       count++;
     }
-    return total / Math.max(1, count);
+    const average = total / Math.max(1, count);
+    const coverage = continuous / Math.max(1, count);
+    return average * (0.35 + coverage * 0.65);
   };
   const bestNear = (position: number, score: (value: number) => number) => {
     let best = 0;
@@ -74,9 +84,8 @@ const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
     bestNear(top, (value) => horizontalScore(value, 1)),
     bestNear(bottom, (value) => horizontalScore(value, -1)),
   ];
-  const strongEdges = scores.filter((score) => score >= 13).length;
   const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  return strongEdges >= 3 && average >= 16;
+  return scores.every((score) => score >= 15) && average >= 18;
 };
 const RING_DIAMETER_TABLE = [
   { size: 10, diameterMm: 15.0 }, { size: 11, diameterMm: 15.1 },
