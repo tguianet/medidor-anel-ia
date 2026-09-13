@@ -6,6 +6,18 @@ type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const RING_DIAMETER_TABLE = [
+  { size: 10, diameterMm: 15.0 }, { size: 11, diameterMm: 15.1 },
+  { size: 12, diameterMm: 15.2 }, { size: 13, diameterMm: 16.0 },
+  { size: 14, diameterMm: 16.1 }, { size: 15, diameterMm: 17.0 },
+  { size: 16, diameterMm: 17.1 }, { size: 17, diameterMm: 17.2 },
+  { size: 18, diameterMm: 17.5 }, { size: 19, diameterMm: 18.0 },
+  { size: 20, diameterMm: 18.5 }, { size: 21, diameterMm: 18.8 },
+  { size: 22, diameterMm: 19.0 }, { size: 23, diameterMm: 19.2 },
+  { size: 24, diameterMm: 19.9 }, { size: 25, diameterMm: 20.0 },
+  { size: 26, diameterMm: 20.5 }, { size: 27, diameterMm: 20.8 },
+  { size: 28, diameterMm: 21.1 }, { size: 29, diameterMm: 21.2 },
+];
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -291,9 +303,11 @@ export default function App() {
     if (!pixelsPerMm) return null;
     const widthPx = Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
-    const circumferenceMm = Math.PI * (widthMm + 0.4);
-    // Correção prática: acrescenta um aro ao resultado anteriormente exibido.
-    const ringSize = clamp(Math.round(circumferenceMm - 40) - 3, 5, 40);
+    const circumferenceMm = Math.PI * widthMm;
+    const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
+      Math.abs(candidate.diameterMm - widthMm) < Math.abs(closest.diameterMm - widthMm) ? candidate : closest
+    );
+    const ringSize = closestRing.size;
     return { widthMm, circumferenceMm, ringSize };
   }, [pixelsPerMm, leftLine, rightLine, zoom]);
 
