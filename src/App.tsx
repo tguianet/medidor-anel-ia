@@ -5,7 +5,16 @@ type Stage = "intro" | "camera" | "review";
 type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
 type RingMetal = "gold" | "silver" | "rose" | "black";
-type RingStyle = "classic" | "textured" | "stone";
+type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
+
+const RING_MODELS: { id: RingStyle; label: string }[] = [
+  { id: "classic", label: "Lisa" },
+  { id: "textured", label: "Diamantada" },
+  { id: "matte", label: "Fosca" },
+  { id: "grooved", label: "Com friso" },
+  { id: "stone", label: "Com pedra" },
+  { id: "solitaire", label: "Solitária" },
+];
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const RING_DIAMETER_TABLE = [
@@ -432,7 +441,7 @@ export default function App() {
                 }}
                 aria-label="Aliança virtual aplicada ao dedo"
               >
-                {ringStyle === "stone" && <span className="virtual-stone" />}
+                <img src={`/rings/${ringStyle}.svg`} alt="" />
               </div>
             )}
           </div>
@@ -473,9 +482,12 @@ export default function App() {
               </div>
               <label>Modelo</label>
               <div className="choice-row style-choices">
-                <button type="button" className={ringStyle === "classic" ? "selected" : ""} onClick={() => setRingStyle("classic")}>Lisa</button>
-                <button type="button" className={ringStyle === "textured" ? "selected" : ""} onClick={() => setRingStyle("textured")}>Diamantada</button>
-                <button type="button" className={ringStyle === "stone" ? "selected" : ""} onClick={() => setRingStyle("stone")}>Com pedra</button>
+                {RING_MODELS.map((model) => (
+                  <button key={model.id} type="button" className={ringStyle === model.id ? "selected" : ""} onClick={() => setRingStyle(model.id)}>
+                    <img src={`/rings/${model.id}.svg`} alt="" />
+                    <span>{model.label}</span>
+                  </button>
+                ))}
               </div>
               <button className="secondary back-to-measure" type="button" onClick={() => setTryOn(false)}>Voltar ao ajuste</button>
             </section>
