@@ -16,10 +16,7 @@ const RING_MODELS: { id: RingStyle; label: string }[] = [
   { id: "solitaire", label: "Solitária" },
 ];
 const ringImage = (style: RingStyle) => `/rings/${style}.svg?v=20260913-2`;
-const wearableRingImage = (style: RingStyle) =>
-  style === "stone" || style === "solitaire"
-    ? ringImage(style)
-    : `/rings-wear/${style}.svg?v=20260913-1`;
+const wearableRingImage = (style: RingStyle) => `/rings-wear/${style}.svg?v=20260913-2`;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
