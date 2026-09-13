@@ -512,7 +512,8 @@ export default function App() {
     const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
       Math.abs(candidate.diameterMm - widthMm) < Math.abs(closest.diameterMm - widthMm) ? candidate : closest
     );
-    const ringSize = clamp(closestRing.size - 1, 10, 29);
+    // Ajuste final validado nos testes reais: reduz dois aros do resultado exibido.
+    const ringSize = clamp(closestRing.size - 3, 10, 29);
     return { widthMm, circumferenceMm, ringSize };
   }, [pixelsPerMm, leftLine, rightLine, zoom]);
 
