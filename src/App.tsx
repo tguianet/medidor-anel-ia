@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto } from "./vision";
 
-type Stage = "intro" | "camera" | "review";
+type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 type MeasurePhase = "card" | "finger";
-type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
+type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | "showcase-ring" | null;
 type RingMetal = "gold" | "silver" | "rose" | "black";
 type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
 
@@ -62,6 +62,11 @@ export default function App() {
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
   const [ringBandWidth, setRingBandWidth] = useState(4);
   const [ringStyle, setRingStyle] = useState<RingStyle>("classic");
+  const [handPhoto, setHandPhoto] = useState("");
+  const [showcaseX, setShowcaseX] = useState(50);
+  const [showcaseY, setShowcaseY] = useState(55);
+  const [showcaseWidth, setShowcaseWidth] = useState(24);
+  const [showcaseAngle, setShowcaseAngle] = useState(0);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -86,7 +91,7 @@ export default function App() {
     image.src = photo;
   }, [photo]);
   useEffect(() => {
-    if (stage !== "camera" || !videoRef.current || !streamRef.current) return;
+    if ((stage !== "camera" && stage !== "hand-camera") || !videoRef.current || !streamRef.current) return;
     videoRef.current.srcObject = streamRef.current;
     void videoRef.current.play().catch(() => setError("A câmera não iniciou. Toque novamente em Abrir câmera."));
   }, [stage]);
@@ -115,6 +120,27 @@ export default function App() {
       const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
       setTorchSupported(Boolean(capabilities?.torch));
       setStage("camera");
+    } catch {
+      setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
+    }
+  };
+
+  const openHandCamera = async () => {
+    setError("");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Este navegador não permite acesso à câmera.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+      setTorchSupported(Boolean(capabilities?.torch));
+      setStage("hand-camera");
     } catch {
       setError("Não foi possível abrir a câmera. Autorize o acesso e tente novamente.");
     }
@@ -197,6 +223,32 @@ export default function App() {
     }
   };
 
+  const captureHand = () => {
+    const video = videoRef.current;
+    if (!video?.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 900;
+    canvas.height = 1200;
+    const targetRatio = canvas.width / canvas.height;
+    const sourceRatio = video.videoWidth / video.videoHeight;
+    let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+    if (sourceRatio > targetRatio) {
+      sw = video.videoHeight * targetRatio;
+      sx = (video.videoWidth - sw) / 2;
+    } else {
+      sh = video.videoWidth / targetRatio;
+      sy = (video.videoHeight - sh) / 2;
+    }
+    canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    setHandPhoto(canvas.toDataURL("image/jpeg", 0.94));
+    setShowcaseX(50);
+    setShowcaseY(55);
+    setShowcaseWidth(24);
+    setShowcaseAngle(0);
+    stopCamera();
+    setStage("hand-review");
+  };
+
   const confirmCard = () => {
     const widthPx = (cardRight - cardLeft) / 100 * 900;
     const heightPx = (cardBottom - cardTop) / 100 * 1200;
@@ -230,6 +282,13 @@ export default function App() {
     const x = clamp(((clientX - rect.left) / rect.width) * 100, 2, 98);
     const y = clamp(((clientY - rect.top) / rect.height) * 100, 8, 92);
     const target = draggingRef.current;
+    if (target === "showcase-ring") {
+      const dx = ((clientX - dragStartRef.current.x) / rect.width) * 100;
+      const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
+      setShowcaseX(clamp(dragStartRef.current.left + dx, 5, 95));
+      setShowcaseY(clamp(dragStartRef.current.top + dy, 5, 95));
+      return;
+    }
     if (target === "left") { setLeftLocked(false); setLeftLine(Math.min(x, rightLine - 3)); }
     if (target === "right") { setRightLocked(false); setRightLine(Math.max(x, leftLine + 3)); }
     if (target === "height") {
@@ -274,6 +333,13 @@ export default function App() {
     if (phase !== "finger" || zoom <= 1 || tryOn) return;
     draggingRef.current = "pan";
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: panX, top: panY, right: 0, bottom: 0 };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const startShowcaseDrag = (event: React.PointerEvent) => {
+    event.stopPropagation();
+    draggingRef.current = "showcase-ring";
+    dragStartRef.current = { x: event.clientX, y: event.clientY, left: showcaseX, top: showcaseY, right: 0, bottom: 0 };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -356,6 +422,7 @@ export default function App() {
     setLeftLocked(false);
     setRightLocked(false);
     setError("");
+    setHandPhoto("");
     void openCamera();
   };
 
@@ -397,6 +464,23 @@ export default function App() {
           </div>
           <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Encaixe o cartão na moldura e deixe o dedo reto na linha vertical"}</p>
           <button className="shutter" onClick={() => void capture()} aria-label="Tirar fotografia"><span /></button>
+        </section>
+      )}
+
+      {stage === "hand-camera" && (
+        <section className="camera-screen">
+          <div className="camera-top">
+            <button className="icon-button" onClick={() => { stopCamera(); setStage("review"); }}>×</button>
+            <span>Fotografe a mão inteira</span>
+          </div>
+          <div className="viewport hand-camera-viewport">
+            <video ref={videoRef} playsInline muted />
+            <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
+            <div className="full-hand-guide" aria-hidden="true"><span>MÃO INTEIRA</span><i>ANELAR AQUI</i></div>
+          </div>
+          <p>Abra a mão, mostre todos os dedos e deixe o anelar sobre a marca.</p>
+          <button className="shutter" onClick={captureHand} aria-label="Fotografar a mão inteira"><span /></button>
+          {error && <p className="error">{error}</p>}
         </section>
       )}
 
@@ -490,6 +574,11 @@ export default function App() {
                 ))}
               </div>
               <button className="secondary back-to-measure" type="button" onClick={() => setTryOn(false)}>Voltar ao ajuste</button>
+              <div className="full-hand-question">
+                <strong>Quer ver este anel em uma foto da mão inteira?</strong>
+                <span>Vamos manter o modelo, a cor, a largura e o aro escolhidos.</span>
+                <button className="primary" type="button" onClick={() => void openHandCamera()}>Sim, tirar foto da mão</button>
+              </div>
             </section>
           )}
 
@@ -499,6 +588,47 @@ export default function App() {
           </div>
           {error && <p className="error">{error}</p>}
           <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo."}</p>
+        </section>
+      )}
+
+      {stage === "hand-review" && (
+        <section className="panel hand-result">
+          <span className="step">PROVADOR NA MÃO INTEIRA</span>
+          <h1>Ajuste o anel no dedo</h1>
+          <p className="lead">Arraste o anel até o dedo anelar. Use os botões para ajustar tamanho e inclinação.</p>
+          <div
+            ref={measureRef}
+            className="measurement-stage hand-showcase"
+            onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
+            onPointerUp={finishDrag}
+            onPointerCancel={() => { draggingRef.current = null; }}
+          >
+            {handPhoto && <img src={handPhoto} alt="Foto da mão inteira com anel virtual" draggable={false} />}
+            <button
+              type="button"
+              className={`virtual-ring showcase-ring metal-${ringMetal} style-${ringStyle}`}
+              style={{
+                left: `${showcaseX}%`,
+                top: `${showcaseY}%`,
+                width: `${showcaseWidth}%`,
+                height: `${clamp(showcaseWidth * ringBandWidth / 15, 2.4, 11)}%`,
+                transform: `translate(-50%, -50%) rotate(${showcaseAngle}deg)`,
+              }}
+              onPointerDown={startShowcaseDrag}
+              aria-label="Arraste o anel para posicionar"
+            >
+              <img src={`/rings/${ringStyle}.svg`} alt="" />
+            </button>
+          </div>
+          <div className="showcase-controls">
+            <div><span>Tamanho</span><button type="button" onClick={() => setShowcaseWidth((value) => clamp(value - 2, 10, 50))}>−</button><strong>{showcaseWidth}%</strong><button type="button" onClick={() => setShowcaseWidth((value) => clamp(value + 2, 10, 50))}>+</button></div>
+            <div><span>Inclinação</span><button type="button" onClick={() => setShowcaseAngle((value) => value - 3)}>↶</button><strong>{showcaseAngle}°</strong><button type="button" onClick={() => setShowcaseAngle((value) => value + 3)}>↷</button></div>
+          </div>
+          <div className="hand-result-summary"><strong>{RING_MODELS.find((model) => model.id === ringStyle)?.label} · {ringBandWidth} mm</strong><span>{result ? `Aro ${result.ringSize}` : "Modelo selecionado"}</span></div>
+          <div className="review-actions">
+            <button className="secondary" type="button" onClick={() => void openHandCamera()}>Tirar outra foto</button>
+            <button className="primary" type="button" onClick={() => setStage("review")}>Voltar aos modelos</button>
+          </div>
         </section>
       )}
     </main>
