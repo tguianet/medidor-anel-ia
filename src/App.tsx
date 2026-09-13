@@ -348,8 +348,9 @@ export default function App() {
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
             {torchSupported && <button type="button" className={`torch-button${torchOn ? " is-on" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>}
+            <div className="finger-center-line" aria-hidden="true"><span>ALINHE O PONTO DO ANEL AQUI</span></div>
           </div>
-          <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Deixe o cartão inteiro visível sobre o dedo"}</p>
+          <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Alinhe o dedo na linha e deixe o cartão inteiro visível"}</p>
           <button className="shutter" onClick={() => void capture()} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
