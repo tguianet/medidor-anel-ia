@@ -55,7 +55,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .finger-vertical-line { position: absolute; z-index: 7; left: 50%; top: 0; bottom: 0; width: 3px; transform: translateX(-50%); border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px #0009, 0 0 12px #000; pointer-events: none; }
 .finger-vertical-line span { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) rotate(-90deg); width: max-content; padding: 5px 9px; border-radius: 999px; color: #111; background: #fff; font-size: 9px; font-weight: 900; letter-spacing: .05em; }
 .card-alignment { position: absolute; left: 11%; top: 10%; width: 78%; aspect-ratio: 85.6 / 53.98; border: 3px solid #fff; border-radius: 10px; box-shadow: 0 0 0 2px #0008, 0 0 12px #0008; }
-.card-alignment::before, .card-alignment::after { content: ""; position: absolute; background: #fff; opacity: .9; }
+.card-alignment::before, .card-alignment::after { display: none; }
 .card-alignment::before { left: 50%; top: 100%; height: 128%; width: 3px; transform: translateX(-50%); }
 .card-alignment::after { left: 0; right: 0; top: 50%; height: 3px; transform: translateY(-50%); }
 .card-alignment span { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); padding: 4px 7px; border-radius: 5px; color: #111; background: #fff; font-size: 9px; font-weight: 900; white-space: nowrap; }
@@ -108,13 +108,13 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .card-corner.bl { left: 0; bottom: 0; transform: translate(-50%, 50%); }
 .card-corner.br { right: 0; bottom: 0; transform: translate(50%, 50%); }
 .caliper-line { position: absolute; z-index: 4; width: 34px; height: 32%; padding: 0; transform: translateX(-50%); border: 0; background: transparent; cursor: ew-resize; touch-action: none; }
-.caliper-line::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 4px; transform: translateX(-50%); border-radius: 4px; background: #080807; box-shadow: 0 0 0 2px #f2cf73, 0 0 12px #000; }
-.caliper-line span, .caliper-line::after { content: ""; position: absolute; left: 50%; width: 22px; height: 8px; transform: translateX(-50%); border: 2px solid #171109; border-radius: 5px; background: #f2cf73; }
+.caliper-line::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); border-radius: 2px; background: #f2cf73; box-shadow: 0 0 0 1px #171109, 0 0 5px #000; }
+.caliper-line span, .caliper-line::after { content: ""; position: absolute; left: 50%; width: 14px; height: 5px; transform: translateX(-50%); border: 1px solid #171109; border-radius: 3px; background: #f2cf73; }
 .caliper-line span { top: -4px; }
 .caliper-line::after { bottom: -4px; }
-.caliper-line.locked::before { background: #0b5b3e; box-shadow: 0 0 0 3px #52e0a3, 0 0 16px #52e0a3; }
+.caliper-line.locked::before { background: #52e0a3; box-shadow: 0 0 0 1px #092118, 0 0 7px #52e0a3; }
 .caliper-line.locked span, .caliper-line.locked::after { border-color: #092118; background: #52e0a3; box-shadow: 0 0 10px #52e0a3aa; }
-.measure-cross { position: absolute; z-index: 5; height: 40px; padding: 0; transform: translateY(-50%); border: 0; border-top: 4px solid #52e0a3; color: #071b14; background: transparent; cursor: ns-resize; touch-action: none; }
+.measure-cross { position: absolute; z-index: 5; height: 40px; padding: 0; transform: translateY(-50%); border: 0; border-top: 2px solid #52e0a3; color: #071b14; background: transparent; cursor: ns-resize; touch-action: none; }
 .measure-cross::before { content: ""; position: absolute; left: 50%; top: -13px; width: 22px; height: 22px; transform: translateX(-50%); border: 2px solid #092118; border-radius: 50%; background: #52e0a3; box-shadow: 0 0 10px #000; }
 .measure-height-handle { position: absolute; z-index: 7; min-width: 74px; min-height: 36px; padding: 7px 10px; transform: translate(-50%, -50%); border: 2px solid #092118; border-radius: 999px; color: #092118; background: #52e0a3; box-shadow: 0 3px 12px #000b; font-size: 10px; font-weight: 900; cursor: ns-resize; touch-action: none; }
 .zoom-controls { display: grid; grid-template-columns: 48px 58px 48px 1fr; align-items: center; gap: 8px; margin: -4px 0 18px; }
