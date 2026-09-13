@@ -3,7 +3,7 @@ import { calibratePhoto } from "./vision";
 
 type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 type MeasurePhase = "card" | "finger";
-type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | "showcase-ring" | null;
+type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | "showcase-ring" | "showcase-left" | "showcase-right" | null;
 type RingMetal = "gold" | "silver" | "rose" | "black";
 type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
 
@@ -395,6 +395,20 @@ export default function App() {
       setShowcaseY(clamp(dragStartRef.current.top + dy, 5, 95));
       return;
     }
+    if (target === "showcase-left") {
+      const fixedRight = showcaseX + showcaseWidth / 2;
+      const nextLeft = Math.min(x, fixedRight - 4);
+      setShowcaseX((nextLeft + fixedRight) / 2);
+      setShowcaseWidth(fixedRight - nextLeft);
+      return;
+    }
+    if (target === "showcase-right") {
+      const fixedLeft = showcaseX - showcaseWidth / 2;
+      const nextRight = Math.max(x, fixedLeft + 4);
+      setShowcaseX((fixedLeft + nextRight) / 2);
+      setShowcaseWidth(nextRight - fixedLeft);
+      return;
+    }
     if (target === "left") { setLeftLocked(false); setLeftLine(Math.min(x, rightLine - 3)); }
     if (target === "right") { setRightLocked(false); setRightLine(Math.max(x, leftLine + 3)); }
     if (target === "height") {
@@ -711,7 +725,7 @@ export default function App() {
         <section className="panel hand-result">
           <span className="step">PROVADOR NA MÃO INTEIRA</span>
           <h1>Ajuste o anel no dedo</h1>
-          <p className="lead">Arraste o anel até o dedo anelar. Use os botões para ajustar tamanho e inclinação.</p>
+          <p className="lead">Arraste o anel até o dedo e encaixe as linhas magnéticas nas duas bordas. O anel será centralizado automaticamente.</p>
           <div
             ref={measureRef}
             className="measurement-stage hand-showcase"
@@ -720,6 +734,9 @@ export default function App() {
             onPointerCancel={() => { draggingRef.current = null; }}
           >
             {handPhoto && <img src={handPhoto} alt="Foto da mão inteira com anel virtual" draggable={false} />}
+            <button className="showcase-caliper left" style={{ left: `${showcaseX - showcaseWidth / 2}%`, top: `${showcaseY - 10}%` }} onPointerDown={(event) => startDrag("showcase-left", event)} aria-label="Ajustar borda esquerda do dedo"><span /></button>
+            <button className="showcase-caliper right" style={{ left: `${showcaseX + showcaseWidth / 2}%`, top: `${showcaseY - 10}%` }} onPointerDown={(event) => startDrag("showcase-right", event)} aria-label="Ajustar borda direita do dedo"><span /></button>
+            <div className="showcase-magnetic-line" style={{ left: `${showcaseX - showcaseWidth / 2}%`, top: `${showcaseY}%`, width: `${showcaseWidth}%` }} aria-hidden="true" />
             <button
               type="button"
               className={`virtual-ring showcase-ring metal-${ringMetal} style-${ringStyle}`}
