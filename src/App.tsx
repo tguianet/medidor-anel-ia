@@ -315,25 +315,9 @@ export default function App() {
     setCalibrationConfidence(84);
     try {
       const calibration = await calibratePhoto(capturedPhoto);
-      const cardCenterX = calibration.cardBox.x + calibration.cardBox.width / 2;
-      const cardCenterY = calibration.cardBox.y + calibration.cardBox.height / 2;
-      const cardLongSide = Math.max(calibration.cardBox.width, calibration.cardBox.height);
-      const cardShortSide = Math.min(calibration.cardBox.width, calibration.cardBox.height);
-      const cardRatio = cardLongSide / Math.max(cardShortSide, 0.01);
-      const detectorConfirmedCard =
-        Math.abs(cardCenterX - 0.5) <= 0.24 &&
-        Math.abs(cardCenterY - 0.3) <= 0.25 &&
-        cardLongSide >= 0.42 &&
-        cardLongSide <= 1 &&
-        cardShortSide >= 0.18 &&
-        cardShortSide <= 0.68 &&
-        cardRatio >= 1.25 &&
-        cardRatio <= 2.05 &&
-        calibration.pixelsPerMm >= guidePixelsPerMm * 0.72 &&
-        calibration.pixelsPerMm <= guidePixelsPerMm * 1.28;
-      if (detectorConfirmedCard) {
-        setPixelsPerMm(guidePixelsPerMm * 0.8 + calibration.pixelsPerMm * 0.2);
-        setCalibrationConfidence(Math.max(90, calibration.confidence));
+      if (calibration.pixelsPerMm >= 5 && calibration.pixelsPerMm <= 13) {
+        setPixelsPerMm(calibration.pixelsPerMm);
+        setCalibrationConfidence(calibration.confidence);
       }
       setError("");
     } catch {
