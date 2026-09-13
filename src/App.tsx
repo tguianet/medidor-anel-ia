@@ -15,6 +15,7 @@ const RING_MODELS: { id: RingStyle; label: string }[] = [
   { id: "stone", label: "Com pedra" },
   { id: "solitaire", label: "Solitária" },
 ];
+const ringImage = (style: RingStyle) => `/rings/${style}.svg?v=20260913-2`;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const RING_DIAMETER_TABLE = [
@@ -525,7 +526,7 @@ export default function App() {
                 }}
                 aria-label="Aliança virtual aplicada ao dedo"
               >
-                <img src={`/rings/${ringStyle}.svg`} alt="" />
+                <img src={ringImage(ringStyle)} alt="" />
               </div>
             )}
           </div>
@@ -568,7 +569,7 @@ export default function App() {
               <div className="choice-row style-choices">
                 {RING_MODELS.map((model) => (
                   <button key={model.id} type="button" className={ringStyle === model.id ? "selected" : ""} onClick={() => setRingStyle(model.id)}>
-                    <img src={`/rings/${model.id}.svg`} alt="" />
+                    <img src={ringImage(model.id)} alt="" />
                     <span>{model.label}</span>
                   </button>
                 ))}
@@ -617,7 +618,7 @@ export default function App() {
               onPointerDown={startShowcaseDrag}
               aria-label="Arraste o anel para posicionar"
             >
-              <img src={`/rings/${ringStyle}.svg`} alt="" />
+              <img src={ringImage(ringStyle)} alt="" />
             </button>
           </div>
           <div className="showcase-controls">
