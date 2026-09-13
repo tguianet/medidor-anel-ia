@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { calibratePhoto } from "./vision";
 
 type Stage = "intro" | "camera" | "review";
 type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-const CARD_GUIDE_WIDTH = 0.78;
-const STANDARD_CARD_WIDTH_MM = 85.6;
-const AUTO_PIXELS_PER_MM = 900 * CARD_GUIDE_WIDTH / STANDARD_CARD_WIDTH_MM;
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -36,6 +34,7 @@ export default function App() {
   const [rightLocked, setRightLocked] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [analyzingCard, setAnalyzingCard] = useState(false);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -108,7 +107,7 @@ export default function App() {
     }
   };
 
-  const capture = () => {
+  const capture = async () => {
     const video = videoRef.current;
     if (!video?.videoWidth) return;
     const canvas = document.createElement("canvas");
@@ -125,13 +124,10 @@ export default function App() {
       sy = (video.videoHeight - sh) / 2;
     }
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    setPhoto(canvas.toDataURL("image/jpeg", 0.94));
-    setCardLeft(11);
-    setCardTop(10);
-    setCardRight(89);
-    setCardBottom(46.88);
-    setPixelsPerMm(AUTO_PIXELS_PER_MM);
-    setCalibrationConfidence(99);
+    const capturedPhoto = canvas.toDataURL("image/jpeg", 0.94);
+    setPhoto(capturedPhoto);
+    setPixelsPerMm(null);
+    setCalibrationConfidence(0);
     setPhase("finger");
     setLeftLine(37);
     setRightLine(63);
@@ -143,6 +139,17 @@ export default function App() {
     setRightLocked(false);
     stopCamera();
     setStage("review");
+    setError("");
+    setAnalyzingCard(true);
+    try {
+      const calibration = await calibratePhoto(capturedPhoto);
+      setPixelsPerMm(calibration.pixelsPerMm);
+      setCalibrationConfidence(calibration.confidence);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível reconhecer o cartão automaticamente.");
+    } finally {
+      setAnalyzingCard(false);
+    }
   };
 
   const confirmCard = () => {
@@ -292,6 +299,7 @@ export default function App() {
 
   const resetPhoto = () => {
     setPhoto("");
+    setAnalyzingCard(false);
     setPixelsPerMm(null);
     setPhase("card");
     setZoom(1);
@@ -314,7 +322,7 @@ export default function App() {
         <section className="panel intro">
           <span className="step">MEDIÇÃO MANUAL ASSISTIDA</span>
           <h1>Marque as bordas do dedo</h1>
-          <p className="lead">Coloque o cartão atravessado sobre os dedos e encaixe suas bordas na moldura branca. A escala será calibrada automaticamente ao tirar a foto.</p>
+          <p className="lead">Coloque o cartão atravessado sobre os dedos e tire a foto. O sistema encontra o cartão e calibra a escala automaticamente.</p>
           <div className="manual-example" aria-label="Duas linhas marcando as laterais do dedo">
             <div className="example-finger" />
             <i className="example-line example-left" />
@@ -323,7 +331,7 @@ export default function App() {
           </div>
           <ul className="tips">
             <li>Use um cartão padrão de 85,60 × 53,98 mm.</li>
-            <li>Aproxime ou afaste o celular até o cartão preencher a moldura branca.</li>
+            <li>Deixe o cartão inteiro visível na foto, sem cobrir o ponto do anel.</li>
             <li>Mantenha cartão, dedos e câmera paralelos.</li>
           </ul>
           <button className="primary" onClick={openCamera}>Abrir câmera</button>
@@ -340,13 +348,9 @@ export default function App() {
           <div className="viewport">
             <video ref={videoRef} playsInline muted />
             {torchSupported && <button type="button" className={`torch-button${torchOn ? " is-on" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>}
-            <div className="position-guides" aria-hidden="true">
-              <div className="card-alignment"><span>CARTÃO SOBRE OS DEDOS</span></div>
-              <div className="finger-alignment"><span>DEDO</span></div>
-            </div>
           </div>
-          <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Encaixe as 4 bordas do cartão dentro da moldura branca"}</p>
-          <button className="shutter" onClick={capture} aria-label="Tirar fotografia"><span /></button>
+          <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Deixe o cartão inteiro visível sobre o dedo"}</p>
+          <button className="shutter" onClick={() => void capture()} aria-label="Tirar fotografia"><span /></button>
         </section>
       )}
 
@@ -382,6 +386,8 @@ export default function App() {
             )}
           </div>
 
+          {analyzingCard && <p className="analysis-loading">Reconhecendo e calibrando o cartão automaticamente...</p>}
+
           {phase === "finger" && (
             <div className="zoom-controls" aria-label="Controles de zoom">
               <button onClick={() => changeZoom(zoom - 0.5)} disabled={zoom <= 1} aria-label="Diminuir zoom">−</button>
@@ -404,7 +410,7 @@ export default function App() {
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
-            <button className="primary" type="button" disabled>Cartão calibrado automaticamente</button>
+            <button className="primary" type="button" disabled>{analyzingCard ? "Calibrando cartão..." : pixelsPerMm ? "Cartão calibrado" : "Cartão não reconhecido"}</button>
           </div>
           {error && <p className="error">{error}</p>}
           <p className="pending">Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo.</p>
