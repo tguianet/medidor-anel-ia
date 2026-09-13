@@ -639,6 +639,12 @@ export default function App() {
                 <button className="measure-height-handle" style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>ARRASTE</button>
               </>
             )}
+            {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
+              <div className="ring-size-badge" style={{ left: `${(leftLine + rightLine) / 2}%` }} aria-live="polite">
+                <span>ARO PROVÁVEL:</span>
+                <strong>{result.ringSize}</strong>
+              </div>
+            )}
             {phase === "finger" && pixelsPerMm && tryOn && (
               <div
                 className={`virtual-ring metal-${ringMetal} style-${ringStyle}`}
