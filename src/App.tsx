@@ -434,9 +434,9 @@ export default function App() {
               <div
                 className={`virtual-ring metal-${ringMetal} style-${ringStyle}`}
                 style={{
-                  left: `${Math.max(0, leftLine - 0.6)}%`,
+                  left: `${(leftLine + rightLine) / 2}%`,
                   top: `${measureY}%`,
-                  width: `${Math.min(100, rightLine - leftLine + 1.2)}%`,
+                  width: `${Math.min(100, rightLine - leftLine + 2)}%`,
                   height: `${clamp(ringBandWidth * pixelsPerMm * zoom / 12, 0.8, 7)}%`,
                 }}
                 aria-label="Aliança virtual aplicada ao dedo"
