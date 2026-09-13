@@ -4,6 +4,8 @@ import { calibratePhoto } from "./vision";
 type Stage = "intro" | "camera" | "review";
 type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | null;
+type RingMetal = "gold" | "silver" | "rose" | "black";
+type RingStyle = "classic" | "textured" | "stone";
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const RING_DIAMETER_TABLE = [
@@ -47,6 +49,10 @@ export default function App() {
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [analyzingCard, setAnalyzingCard] = useState(false);
+  const [tryOn, setTryOn] = useState(false);
+  const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
+  const [ringBandWidth, setRingBandWidth] = useState(4);
+  const [ringStyle, setRingStyle] = useState<RingStyle>("classic");
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -256,7 +262,7 @@ export default function App() {
   };
 
   const startPan = (event: React.PointerEvent) => {
-    if (phase !== "finger" || zoom <= 1) return;
+    if (phase !== "finger" || zoom <= 1 || tryOn) return;
     draggingRef.current = "pan";
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: panX, top: panY, right: 0, bottom: 0 };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -331,6 +337,7 @@ export default function App() {
 
   const resetPhoto = () => {
     setPhoto("");
+    setTryOn(false);
     setAnalyzingCard(false);
     setPixelsPerMm(null);
     setPhase("card");
@@ -406,7 +413,7 @@ export default function App() {
                 <button className="card-corner br" onPointerDown={(event) => startDrag("card-br", event)} aria-label="Ajustar canto inferior direito" />
               </div>
             )}
-            {phase === "finger" && pixelsPerMm && (
+            {phase === "finger" && pixelsPerMm && !tryOn && (
               <>
                 <button className={`caliper-line left${leftLocked ? " locked" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
                 <button className={`caliper-line right${rightLocked ? " locked" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
@@ -414,11 +421,25 @@ export default function App() {
                 <button className="measure-height-handle" style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>ARRASTE</button>
               </>
             )}
+            {phase === "finger" && pixelsPerMm && tryOn && (
+              <div
+                className={`virtual-ring metal-${ringMetal} style-${ringStyle}`}
+                style={{
+                  left: `${Math.max(0, leftLine - 0.6)}%`,
+                  top: `${measureY}%`,
+                  width: `${Math.min(100, rightLine - leftLine + 1.2)}%`,
+                  height: `${clamp(ringBandWidth * pixelsPerMm * zoom / 12, 0.8, 7)}%`,
+                }}
+                aria-label="Aliança virtual aplicada ao dedo"
+              >
+                {ringStyle === "stone" && <span className="virtual-stone" />}
+              </div>
+            )}
           </div>
 
           {analyzingCard && <p className="analysis-loading">Reconhecendo e calibrando o cartão automaticamente...</p>}
 
-          {phase === "finger" && (
+          {phase === "finger" && !tryOn && (
             <div className="zoom-controls" aria-label="Controles de zoom">
               <button onClick={() => changeZoom(zoom - 0.5)} disabled={zoom <= 1} aria-label="Diminuir zoom">−</button>
               <strong>{zoom.toFixed(1)}×</strong>
@@ -434,16 +455,38 @@ export default function App() {
               <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
               <span>Circunferência estimada: {result.circumferenceMm.toFixed(1)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
+              {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
           )}
-          {phase === "finger" && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
+          {phase === "finger" && !tryOn && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
+
+          {tryOn && result && (
+            <section className="try-on-panel">
+              <div className="try-on-heading"><div><span>PROVADOR VIRTUAL</span><strong>Aro {result.ringSize} no seu dedo</strong></div><button type="button" onClick={() => setTryOn(false)}>×</button></div>
+              <label>Cor do metal</label>
+              <div className="choice-row metal-choices">
+                {(["gold", "silver", "rose", "black"] as RingMetal[]).map((metal) => <button key={metal} type="button" className={`${metal}${ringMetal === metal ? " selected" : ""}`} onClick={() => setRingMetal(metal)} aria-label={`Selecionar ${metal}`} />)}
+              </div>
+              <label>Largura da aliança</label>
+              <div className="choice-row width-choices">
+                {[2, 4, 6, 8].map((width) => <button key={width} type="button" className={ringBandWidth === width ? "selected" : ""} onClick={() => setRingBandWidth(width)}>{width} mm</button>)}
+              </div>
+              <label>Modelo</label>
+              <div className="choice-row style-choices">
+                <button type="button" className={ringStyle === "classic" ? "selected" : ""} onClick={() => setRingStyle("classic")}>Lisa</button>
+                <button type="button" className={ringStyle === "textured" ? "selected" : ""} onClick={() => setRingStyle("textured")}>Diamantada</button>
+                <button type="button" className={ringStyle === "stone" ? "selected" : ""} onClick={() => setRingStyle("stone")}>Com pedra</button>
+              </div>
+              <button className="secondary back-to-measure" type="button" onClick={() => setTryOn(false)}>Voltar ao ajuste</button>
+            </section>
+          )}
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
             <button className="primary" type="button" disabled>{analyzingCard ? "Calibrando cartão..." : pixelsPerMm ? "Cartão calibrado" : "Cartão não reconhecido"}</button>
           </div>
           {error && <p className="error">{error}</p>}
-          <p className="pending">Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo.</p>
+          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo."}</p>
         </section>
       )}
     </main>
