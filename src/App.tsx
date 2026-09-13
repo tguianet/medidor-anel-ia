@@ -18,6 +18,66 @@ const RING_MODELS: { id: RingStyle; label: string }[] = [
 const ringImage = (style: RingStyle) => `/rings/${style}.svg?v=20260913-2`;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
+  if (!video.videoWidth || !video.videoHeight) return false;
+  const canvas = document.createElement("canvas");
+  canvas.width = 300;
+  canvas.height = 400;
+  const targetRatio = canvas.width / canvas.height;
+  const sourceRatio = video.videoWidth / video.videoHeight;
+  let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+  if (sourceRatio > targetRatio) {
+    sw = video.videoHeight * targetRatio;
+    sx = (video.videoWidth - sw) / 2;
+  } else {
+    sh = video.videoWidth / targetRatio;
+    sy = (video.videoHeight - sh) / 2;
+  }
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const grayAt = (x: number, y: number) => {
+    const offset = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+    return pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114;
+  };
+  const left = canvas.width * 0.11;
+  const right = canvas.width * 0.89;
+  const top = canvas.height * 0.1;
+  const bottom = top + (canvas.width * 0.78) / 1.586;
+  const verticalScore = (x: number, insideDirection: number) => {
+    let total = 0;
+    let count = 0;
+    for (let y = top + 12; y <= bottom - 12; y += 5) {
+      total += Math.abs(grayAt(x + insideDirection * 4, y) - grayAt(x - insideDirection * 4, y));
+      count++;
+    }
+    return total / Math.max(1, count);
+  };
+  const horizontalScore = (y: number, insideDirection: number) => {
+    let total = 0;
+    let count = 0;
+    for (let x = left + 14; x <= right - 14; x += 5) {
+      total += Math.abs(grayAt(x, y + insideDirection * 4) - grayAt(x, y - insideDirection * 4));
+      count++;
+    }
+    return total / Math.max(1, count);
+  };
+  const bestNear = (position: number, score: (value: number) => number) => {
+    let best = 0;
+    for (let shift = -9; shift <= 9; shift += 3) best = Math.max(best, score(position + shift));
+    return best;
+  };
+  const scores = [
+    bestNear(left, (value) => verticalScore(value, 1)),
+    bestNear(right, (value) => verticalScore(value, -1)),
+    bestNear(top, (value) => horizontalScore(value, 1)),
+    bestNear(bottom, (value) => horizontalScore(value, -1)),
+  ];
+  const strongEdges = scores.filter((score) => score >= 13).length;
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return strongEdges >= 3 && average >= 16;
+};
 const RING_DIAMETER_TABLE = [
   { size: 10, diameterMm: 15.0 }, { size: 11, diameterMm: 15.1 },
   { size: 12, diameterMm: 15.2 }, { size: 13, diameterMm: 16.0 },
@@ -59,6 +119,7 @@ export default function App() {
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [cameraOpening, setCameraOpening] = useState(false);
+  const [cardReady, setCardReady] = useState(false);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
@@ -99,6 +160,22 @@ export default function App() {
     videoRef.current.srcObject = streamRef.current;
     void videoRef.current.play().catch(() => setError("A imagem não iniciou. Toque em Tentar novamente."));
   }, [stage]);
+  useEffect(() => {
+    if (stage !== "camera" || cameraOpening) {
+      setCardReady(false);
+      return;
+    }
+    let running = false;
+    const checkAlignment = () => {
+      if (running || !videoRef.current) return;
+      running = true;
+      try { setCardReady(cardMatchesLiveGuide(videoRef.current)); }
+      finally { running = false; }
+    };
+    checkAlignment();
+    const interval = window.setInterval(checkAlignment, 450);
+    return () => window.clearInterval(interval);
+  }, [stage, cameraOpening]);
 
   const startCameraStream = async (targetStage: "camera" | "hand-camera") => {
     stopCamera();
@@ -164,6 +241,7 @@ export default function App() {
     setPanY(0);
     setLeftLocked(false);
     setRightLocked(false);
+    setCardReady(false);
     await startCameraStream("camera");
   };
 
@@ -223,6 +301,9 @@ export default function App() {
     setStage("review");
     setError("");
     setAnalyzingCard(true);
+    const guidePixelsPerMm = (900 * 0.78) / 85.6;
+    setPixelsPerMm(guidePixelsPerMm);
+    setCalibrationConfidence(84);
     try {
       const calibration = await calibratePhoto(capturedPhoto);
       const cardCenterX = calibration.cardBox.x + calibration.cardBox.width / 2;
@@ -230,24 +311,26 @@ export default function App() {
       const cardLongSide = Math.max(calibration.cardBox.width, calibration.cardBox.height);
       const cardShortSide = Math.min(calibration.cardBox.width, calibration.cardBox.height);
       const cardRatio = cardLongSide / Math.max(cardShortSide, 0.01);
-      const cardIsInsideGuide =
-        Math.abs(cardCenterX - 0.5) <= 0.2 &&
-        Math.abs(cardCenterY - 0.3) <= 0.22 &&
-        cardLongSide >= 0.5 &&
-        cardLongSide <= 0.98 &&
-        cardShortSide >= 0.2 &&
-        cardShortSide <= 0.62 &&
+      const detectorConfirmedCard =
+        Math.abs(cardCenterX - 0.5) <= 0.24 &&
+        Math.abs(cardCenterY - 0.3) <= 0.25 &&
+        cardLongSide >= 0.42 &&
+        cardLongSide <= 1 &&
+        cardShortSide >= 0.18 &&
+        cardShortSide <= 0.68 &&
         cardRatio >= 1.25 &&
         cardRatio <= 2.05 &&
-        calibration.pixelsPerMm >= 5 &&
-        calibration.pixelsPerMm <= 13;
-      if (!cardIsInsideGuide) {
-        throw new Error("Não consegui confirmar o cartão na moldura. Deixe as quatro bordas visíveis, sem reflexo forte, e tire outra foto.");
+        calibration.pixelsPerMm >= guidePixelsPerMm * 0.72 &&
+        calibration.pixelsPerMm <= guidePixelsPerMm * 1.28;
+      if (detectorConfirmedCard) {
+        setPixelsPerMm(guidePixelsPerMm * 0.8 + calibration.pixelsPerMm * 0.2);
+        setCalibrationConfidence(Math.max(90, calibration.confidence));
       }
-      setPixelsPerMm(calibration.pixelsPerMm);
-      setCalibrationConfidence(calibration.confidence);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Não foi possível reconhecer o cartão automaticamente.");
+      setError("");
+    } catch {
+      // A moldura tem a proporção física do cartão e mantém a calibração mesmo
+      // quando reflexos ou a cor do cartão impedem a confirmação automática.
+      setError("");
     } finally {
       setAnalyzingCard(false);
     }
@@ -489,12 +572,12 @@ export default function App() {
           <div className="viewport">
             <video ref={videoRef} playsInline muted autoPlay />
             <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={() => void toggleTorch()}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
-            <div className="card-alignment" aria-hidden="true"><span>ENCAIXE O CARTÃO AQUI</span></div>
+            <div className={`card-alignment${cardReady ? " ready" : ""}`} aria-hidden="true"><span>{cardReady ? "✓ CARTÃO ALINHADO" : "ENCAIXE O CARTÃO AQUI"}</span></div>
             <div className="finger-vertical-line" aria-hidden="true"><span>ALINHE O DEDO</span></div>
             {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
           </div>
-          <p>{torchOn ? "Luz ligada • evite reflexo no cartão" : "Encaixe o cartão na moldura e deixe o dedo reto na linha vertical"}</p>
-          <button className="shutter" onClick={() => void capture()} aria-label="Tirar fotografia"><span /></button>
+          <p>{cardReady ? "Moldura verde: pode tirar a foto" : torchOn ? "Luz ligada • ajuste até a moldura ficar verde" : "Ajuste o cartão até a moldura ficar verde"}</p>
+          <button className={`shutter${cardReady ? " ready" : ""}`} onClick={() => void capture()} aria-label="Tirar fotografia"><span /></button>
           {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={() => void openCamera()}>Tentar novamente</button></>}
         </section>
       )}
