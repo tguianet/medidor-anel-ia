@@ -16,6 +16,10 @@ const RING_MODELS: { id: RingStyle; label: string }[] = [
   { id: "solitaire", label: "Solitária" },
 ];
 const ringImage = (style: RingStyle) => `/rings/${style}.svg?v=20260913-2`;
+const wearableRingImage = (style: RingStyle) =>
+  style === "stone" || style === "solitaire"
+    ? ringImage(style)
+    : `/rings-wear/${style}.svg?v=20260913-1`;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
@@ -630,12 +634,12 @@ export default function App() {
                 <button className="card-corner br" onPointerDown={(event) => startDrag("card-br", event)} aria-label="Ajustar canto inferior direito" />
               </div>
             )}
-            {phase === "finger" && pixelsPerMm && !tryOn && (
+            {phase === "finger" && pixelsPerMm && (
               <>
-                <button className={`caliper-line left${leftLocked ? " locked" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
-                <button className={`caliper-line right${rightLocked ? " locked" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
-                <button className="measure-cross" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
-                <button className="measure-height-handle" style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>ARRASTE</button>
+                <button className={`caliper-line left${leftLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
+                <button className={`caliper-line right${rightLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
+                <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
               </>
             )}
             {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
@@ -650,12 +654,12 @@ export default function App() {
                 style={{
                   left: `${(leftLine + rightLine) / 2}%`,
                   top: `${measureY}%`,
-                  width: `${Math.min(100, rightLine - leftLine + 2)}%`,
+                  width: `${Math.min(100, rightLine - leftLine)}%`,
                   height: `${clamp(ringBandWidth * pixelsPerMm * zoom / 12, 0.8, 7)}%`,
                 }}
                 aria-label="Aliança virtual aplicada ao dedo"
               >
-                <img src={ringImage(ringStyle)} alt="" />
+                <img src={wearableRingImage(ringStyle)} alt="" />
               </div>
             )}
           </div>
@@ -750,7 +754,7 @@ export default function App() {
               onPointerDown={startShowcaseDrag}
               aria-label="Arraste o anel para posicionar"
             >
-              <img src={ringImage(ringStyle)} alt="" />
+              <img src={wearableRingImage(ringStyle)} alt="" />
             </button>
           </div>
           <div className="showcase-controls">
