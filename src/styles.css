@@ -52,9 +52,8 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .position-guides { position: absolute; inset: 0; pointer-events: none; }
 .torch-button { position: absolute; z-index: 9; right: 12px; top: 12px; min-height: 42px; padding: 9px 13px; border: 1px solid #fff9; border-radius: 999px; color: #fff; background: #0b0907cc; box-shadow: 0 4px 16px #0008; font-size: 13px; font-weight: 900; }
 .torch-button.is-on { border-color: #f2cf73; color: #171109; background: #f2cf73; box-shadow: 0 0 18px #f2cf73aa; }
-.finger-center-line { position: absolute; z-index: 8; left: 7%; right: 7%; top: 67%; height: 3px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px #0009, 0 0 12px #000; pointer-events: none; }
-.finger-center-line::before { content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); border: 3px solid #fff; border-radius: 50%; background: #0007; box-shadow: 0 0 0 2px #0008; }
-.finger-center-line span { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: max-content; max-width: 90%; padding: 5px 9px; border-radius: 999px; color: #111; background: #fff; font-size: 9px; font-weight: 900; letter-spacing: .04em; }
+.finger-vertical-line { position: absolute; z-index: 7; left: 50%; top: 0; bottom: 0; width: 3px; transform: translateX(-50%); border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px #0009, 0 0 12px #000; pointer-events: none; }
+.finger-vertical-line span { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) rotate(-90deg); width: max-content; padding: 5px 9px; border-radius: 999px; color: #111; background: #fff; font-size: 9px; font-weight: 900; letter-spacing: .05em; }
 .card-alignment { position: absolute; left: 11%; top: 10%; width: 78%; aspect-ratio: 85.6 / 53.98; border: 3px solid #fff; border-radius: 10px; box-shadow: 0 0 0 2px #0008, 0 0 12px #0008; }
 .card-alignment::before, .card-alignment::after { content: ""; position: absolute; background: #fff; opacity: .9; }
 .card-alignment::before { left: 50%; top: 100%; height: 128%; width: 3px; transform: translateX(-50%); }
