@@ -50,6 +50,8 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .icon-button { width: 42px; height: 42px; border: 0; border-radius: 50%; color: white; background: #ffffff18; font-size: 28px; }
 .viewport { position: relative; overflow: hidden; aspect-ratio: 3/4; border-radius: 20px; background: #050505; }
 .viewport video { width: 100%; height: 100%; object-fit: cover; }
+.camera-opening { position: absolute; z-index: 12; inset: 0; display: grid; place-items: center; color: #f4dfac; background: #090704b8; font-size: 15px; font-weight: 900; }
+.camera-retry { width: 100%; margin-top: 10px; }
 .position-guides { position: absolute; inset: 0; pointer-events: none; }
 .torch-button { position: absolute; z-index: 9; right: 12px; top: 12px; min-height: 42px; padding: 9px 13px; border: 1px solid #fff9; border-radius: 999px; color: #fff; background: #0b0907cc; box-shadow: 0 4px 16px #0008; font-size: 13px; font-weight: 900; }
 .torch-button.is-on { border-color: #f2cf73; color: #171109; background: #f2cf73; box-shadow: 0 0 18px #f2cf73aa; }
