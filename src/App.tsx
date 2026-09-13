@@ -337,12 +337,7 @@ export default function App() {
           <span className="step">MEDIÇÃO MANUAL ASSISTIDA</span>
           <h1>Como medir corretamente</h1>
           <p className="lead">Antes de abrir a câmera, coloque um cartão bancário sobre o dedo. O sistema reconhecerá o cartão automaticamente e depois você ajustará as linhas magnéticas nas bordas do dedo.</p>
-          <div className="manual-example" aria-label="Duas linhas marcando as laterais do dedo">
-            <div className="example-finger" />
-            <i className="example-line example-left" />
-            <i className="example-line example-right" />
-            <i className="example-cross" />
-          </div>
+          <img className="tutorial-image" src="/tutorial-medidor.svg" alt="Passo a passo ilustrado para medir o tamanho do anel" />
           <ul className="tips">
             <li>Use um cartão padrão de 85,60 × 53,98 mm.</li>
             <li>Deixe o cartão inteiro visível na foto, sem cobrir o ponto do anel.</li>
