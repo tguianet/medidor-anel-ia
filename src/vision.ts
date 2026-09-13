@@ -25,6 +25,84 @@ const percentile = (values: number[], amount: number) => {
   return ordered[Math.max(0, Math.min(ordered.length - 1, Math.round((ordered.length - 1) * amount)))];
 };
 
+const findCardByEdges = (pixels: Uint8ClampedArray, width: number, height: number): Box | null => {
+  const total = width * height;
+  const gray = new Uint8Array(total);
+  for (let index = 0; index < total; index++) {
+    const offset = index * 4;
+    gray[index] = Math.round(pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114);
+  }
+
+  const strength = new Uint16Array(total);
+  const samples: number[] = [];
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const index = y * width + x;
+      const gx = gray[index + 1] - gray[index - 1];
+      const gy = gray[index + width] - gray[index - width];
+      const value = Math.abs(gx) + Math.abs(gy);
+      strength[index] = value;
+      if ((x + y) % 3 === 0) samples.push(value);
+    }
+  }
+  const threshold = Math.max(28, percentile(samples, 0.84));
+  let mask = new Uint8Array(total);
+  for (let index = 0; index < total; index++) mask[index] = strength[index] >= threshold ? 1 : 0;
+
+  // Une bordas interrompidas por reflexos, letras e cantos arredondados.
+  for (let pass = 0; pass < 4; pass++) {
+    const expanded = new Uint8Array(mask);
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const index = y * width + x;
+        if (mask[index]) continue;
+        if (mask[index - 1] || mask[index + 1] || mask[index - width] || mask[index + width]) expanded[index] = 1;
+      }
+    }
+    mask = expanded;
+  }
+
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let best: Box | null = null;
+  let bestScore = 0;
+  for (let start = 0; start < total; start++) {
+    if (!mask[start] || visited[start]) continue;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    visited[start] = 1;
+    const box: Box = { minX: width, minY: height, maxX: 0, maxY: 0, count: 0 };
+    while (head < tail) {
+      const index = queue[head++];
+      const x = index % width;
+      const y = (index / width) | 0;
+      box.minX = Math.min(box.minX, x);
+      box.maxX = Math.max(box.maxX, x);
+      box.minY = Math.min(box.minY, y);
+      box.maxY = Math.max(box.maxY, y);
+      box.count++;
+      for (const next of [index - 1, index + 1, index - width, index + width]) {
+        if (next < 0 || next >= total || visited[next] || !mask[next]) continue;
+        if (Math.abs((next % width) - x) > 1) continue;
+        visited[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    const boxWidth = box.maxX - box.minX + 1;
+    const boxHeight = box.maxY - box.minY + 1;
+    const area = boxWidth * boxHeight;
+    const areaShare = area / total;
+    const ratio = Math.max(boxWidth, boxHeight) / Math.max(1, Math.min(boxWidth, boxHeight));
+    if (areaShare < 0.012 || areaShare > 0.58 || ratio < 1.25 || ratio > 2.02) continue;
+    const ratioQuality = 1 - Math.min(1, Math.abs(ratio - 1.586) / 0.5);
+    const density = Math.min(1, box.count / Math.max(1, area * 0.18));
+    const score = areaShare * (0.35 + ratioQuality * 0.65) * (0.4 + density * 0.6);
+    if (score > bestScore) { best = box; bestScore = score; }
+  }
+  return best;
+};
+
 export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   const image = await loadImage(photo);
   const work = document.createElement("canvas");
@@ -86,33 +164,34 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
       bestScore = score;
     }
   }
-  if (!best) throw new Error("Não encontrei o cartão azul. Deixe o cartão inteiro visível, sem reflexo e no mesmo plano do dedo.");
+  const detectedByColor = Boolean(best);
+  if (!best) best = findCardByEdges(pixels, work.width, work.height);
+  if (!best) throw new Error("Não encontrei o cartão bancário. Deixe as quatro bordas inteiras visíveis, evite reflexo e fotografe de cima.");
 
-  const points: Array<[number, number]> = [];
-  for (let y = best.minY; y <= best.maxY; y++) {
-    for (let x = best.minX; x <= best.maxX; x++) {
-      if (mask[y * work.width + x]) points.push([x, y]);
+  let axisA = best.maxX - best.minX + 1;
+  let axisB = best.maxY - best.minY + 1;
+  if (detectedByColor) {
+    const points: Array<[number, number]> = [];
+    for (let y = best.minY; y <= best.maxY; y++) {
+      for (let x = best.minX; x <= best.maxX; x++) {
+        if (mask[y * work.width + x]) points.push([x, y]);
+      }
     }
+    const meanX = points.reduce((sum, point) => sum + point[0], 0) / points.length;
+    const meanY = points.reduce((sum, point) => sum + point[1], 0) / points.length;
+    let xx = 0, xy = 0, yy = 0;
+    for (const [x, y] of points) {
+      const dx = x - meanX;
+      const dy = y - meanY;
+      xx += dx * dx; xy += dx * dy; yy += dy * dy;
+    }
+    const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const along = points.map(([x, y]) => (x - meanX) * cos + (y - meanY) * sin);
+    const across = points.map(([x, y]) => -(x - meanX) * sin + (y - meanY) * cos);
+    axisA = percentile(along, 0.995) - percentile(along, 0.005);
+    axisB = percentile(across, 0.995) - percentile(across, 0.005);
   }
-  const meanX = points.reduce((sum, point) => sum + point[0], 0) / points.length;
-  const meanY = points.reduce((sum, point) => sum + point[1], 0) / points.length;
-  let xx = 0;
-  let xy = 0;
-  let yy = 0;
-  for (const [x, y] of points) {
-    const dx = x - meanX;
-    const dy = y - meanY;
-    xx += dx * dx;
-    xy += dx * dy;
-    yy += dy * dy;
-  }
-  const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const along = points.map(([x, y]) => (x - meanX) * cos + (y - meanY) * sin);
-  const across = points.map(([x, y]) => -(x - meanX) * sin + (y - meanY) * cos);
-  const axisA = percentile(along, 0.995) - percentile(along, 0.005);
-  const axisB = percentile(across, 0.995) - percentile(across, 0.005);
   const longPx = Math.max(axisA, axisB) / scale;
   const shortPx = Math.min(axisA, axisB) / scale;
   const longScale = longPx / 85.6;
@@ -122,7 +201,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
 
   return {
     pixelsPerMm: (longScale + shortScale) / 2,
-    confidence: Math.max(55, Math.min(98, Math.round(98 - disagreement * 160))),
+    confidence: Math.max(55, Math.min(detectedByColor ? 98 : 94, Math.round((detectedByColor ? 98 : 94) - disagreement * 160))),
     cardBox: {
       x: best.minX / work.width,
       y: best.minY / work.height,
