@@ -57,14 +57,14 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .torch-button.is-on { border-color: #f2cf73; color: #171109; background: #f2cf73; box-shadow: 0 0 18px #f2cf73aa; }
 .finger-vertical-line { position: absolute; z-index: 7; left: 50%; top: 0; bottom: 0; width: 3px; transform: translateX(-50%); border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px #0009, 0 0 12px #000; pointer-events: none; }
 .finger-vertical-line span { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) rotate(-90deg); width: max-content; padding: 5px 9px; border-radius: 999px; color: #111; background: #fff; font-size: 9px; font-weight: 900; letter-spacing: .05em; }
-.card-alignment { position: absolute; left: 11%; top: 10%; width: 78%; aspect-ratio: 85.6 / 53.98; border: 3px solid #fff; border-radius: 10px; box-shadow: 0 0 0 2px #0008, 0 0 12px #0008; }
-.card-alignment { transition: border-color .18s ease, box-shadow .18s ease; }
-.card-alignment.ready { border-color: #52e0a3; box-shadow: 0 0 0 2px #092118, 0 0 20px #52e0a3cc, inset 0 0 16px #52e0a326; }
+.card-alignment { position: absolute; left: 11%; top: 10%; width: 78%; aspect-ratio: 85.6 / 53.98; border: 0; border-bottom: 4px solid #fff; border-radius: 0; filter: drop-shadow(0 2px 2px #000c); transition: border-color .18s ease, filter .18s ease; }
+.card-alignment.ready { border-bottom-color: #52e0a3; filter: drop-shadow(0 0 8px #52e0a3); }
 .card-alignment.ready span { color: #071b14; background: #52e0a3; }
-.card-alignment::before, .card-alignment::after { display: none; }
-.card-alignment::before { left: 50%; top: 100%; height: 128%; width: 3px; transform: translateX(-50%); }
-.card-alignment::after { left: 0; right: 0; top: 50%; height: 3px; transform: translateY(-50%); }
-.card-alignment span { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); padding: 4px 7px; border-radius: 5px; color: #111; background: #fff; font-size: 9px; font-weight: 900; white-space: nowrap; }
+.card-alignment span { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 5px 8px; border-radius: 5px; color: #111; background: #fff; font-size: 9px; font-weight: 900; white-space: nowrap; }
+.card-alignment i { position: absolute; bottom: -15px; width: 4px; height: 34px; border-radius: 4px; background: #fff; box-shadow: 0 0 0 2px #0008; }
+.card-alignment .live-base-left { left: 0; transform: translateX(-50%); }
+.card-alignment .live-base-right { right: 0; transform: translateX(50%); }
+.card-alignment.ready i { background: #52e0a3; box-shadow: 0 0 0 2px #092118, 0 0 8px #52e0a3; }
 .finger-alignment { position: absolute; left: 37%; top: 51%; width: 26%; height: 39%; border: 3px solid #fff; border-top: 0; border-radius: 0 0 48px 48px; box-shadow: 0 0 0 2px #0005; }
 .finger-alignment span { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); color: #fff; font-size: 10px; font-weight: 900; }
 .guide { position: absolute; inset: 0; }
@@ -193,13 +193,18 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .measurement-stage.is-active { outline: 1px solid #c9a967; }
 .card-detected { position: absolute; z-index: 2; border: 3px solid #f0cd78; pointer-events: none; box-shadow: 0 0 0 1px #0008, inset 0 0 0 1px #0008; }
 .card-detected span { position: absolute; left: 0; top: -24px; padding: 3px 6px; color: #171109; background: #f0cd78; border-radius: 4px; font-size: 10px; font-weight: 900; }
-.card-calibrator { position: absolute; z-index: 5; border: 4px solid #f2cf73; background: #f2cf7315; box-shadow: 0 0 0 2px #16110a, inset 0 0 20px #0005; }
-.card-move { position: absolute; inset: 16% 20%; border: 1px solid #16110a; border-radius: 8px; color: #171109; background: #f2cf73dd; font-size: 11px; font-weight: 900; letter-spacing: .08em; cursor: move; touch-action: none; }
-.card-corner { position: absolute; width: 34px; height: 34px; padding: 0; border: 3px solid #171109; border-radius: 50%; background: #f2cf73; box-shadow: 0 0 0 2px #f7e2a6, 0 3px 12px #000a; touch-action: none; }
-.card-corner.tl { left: 0; top: 0; transform: translate(-50%, -50%); }
-.card-corner.tr { right: 0; top: 0; transform: translate(50%, -50%); }
-.card-corner.bl { left: 0; bottom: 0; transform: translate(-50%, 50%); }
-.card-corner.br { right: 0; bottom: 0; transform: translate(50%, 50%); }
+.card-base-line { position: absolute; z-index: 6; height: 42px; padding: 0; transform: translateY(-50%); border: 0; border-top: 3px solid #f2cf73; color: #171109; background: transparent; cursor: ns-resize; touch-action: none; }
+.card-base-line span { position: absolute; left: 50%; top: 7px; transform: translateX(-50%); padding: 5px 9px; border: 2px solid #171109; border-radius: 999px; color: #171109; background: #f2cf73; box-shadow: 0 3px 10px #000a; font-size: 9px; font-weight: 900; white-space: nowrap; }
+.card-base-line.locked { border-top-color: #52e0a3; filter: drop-shadow(0 0 5px #52e0a3); }
+.card-base-line.locked span { color: #082219; background: #52e0a3; }
+.card-base-endpoint { position: absolute; z-index: 8; width: 36px; height: 86px; padding: 0; transform: translate(-50%, -50%); border: 0; background: transparent; cursor: ew-resize; touch-action: none; }
+.card-base-endpoint::before { content: ""; position: absolute; left: 50%; top: 8px; bottom: 8px; width: 3px; transform: translateX(-50%); border-radius: 3px; background: #f2cf73; box-shadow: 0 0 0 1px #171109; }
+.card-base-endpoint::after { content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%); border: 2px solid #171109; border-radius: 50%; background: #f2cf73; box-shadow: 0 2px 8px #000b; }
+.card-base-endpoint.locked::before, .card-base-endpoint.locked::after { background: #52e0a3; box-shadow: 0 0 0 1px #092118, 0 0 8px #52e0a3; }
+.card-base-status { display: grid; gap: 5px; margin: 0 0 16px; padding: 14px; border: 1px solid #725f38; border-radius: 12px; color: #cfc6b5; text-align: center; }
+.card-base-status strong { color: #f2cf73; }
+.card-base-status.ready { border-color: #328966; background: #16312755; }
+.card-base-status.ready strong { color: #52e0a3; }
 .caliper-line { position: absolute; z-index: 4; width: 34px; height: 32%; padding: 0; transform: translateX(-50%); border: 0; background: transparent; cursor: ew-resize; touch-action: none; }
 .caliper-line::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); border-radius: 2px; background: #f2cf73; box-shadow: 0 0 0 1px #171109, 0 0 5px #000; }
 .caliper-line span, .caliper-line::after { content: ""; position: absolute; left: 50%; width: 14px; height: 5px; transform: translateX(-50%); border: 1px solid #171109; border-radius: 3px; background: #f2cf73; }
