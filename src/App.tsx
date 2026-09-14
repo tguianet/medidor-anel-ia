@@ -354,18 +354,37 @@ export default function App() {
       const calibration = await calibratePhoto(capturedPhoto);
       const detectedLeft = clamp(calibration.cardBox.x * 100, 2, 94);
       const detectedRight = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 6, 98);
-      setCardLeft(Math.min(detectedLeft, detectedRight - 5));
-      setCardRight(Math.max(detectedRight, detectedLeft + 5));
-      setCardBottom(clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 10, 78));
+      const finalLeft = Math.min(detectedLeft, detectedRight - 5);
+      const finalRight = Math.max(detectedRight, detectedLeft + 5);
+      const finalBottom = clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 10, 78);
+      setCardLeft(finalLeft);
+      setCardRight(finalRight);
+      setCardBottom(finalBottom);
       setCardLeftLocked(true);
       setCardRightLocked(true);
-      setCalibrationConfidence(calibration.confidence);
+      activateFingerMeasurement(finalLeft, finalRight, finalBottom, calibration.confidence);
       setError("");
     } catch {
       setError("Não consegui travar a base automaticamente. Arraste as duas linhas para os cantos inferiores do cartão.");
     } finally {
       setAnalyzingCard(false);
     }
+  };
+
+  const activateFingerMeasurement = (baseLeft: number, baseRight: number, baseBottom: number, confidence = 92) => {
+    const widthPx = (baseRight - baseLeft) / 100 * 900;
+    setPixelsPerMm(widthPx / 85.6);
+    setCalibrationConfidence((current) => Math.max(current, confidence));
+    setLeftLine(38);
+    setRightLine(62);
+    setMeasureY(clamp(baseBottom + 17, 42, 76));
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
+    setError("");
+    setPhase("finger");
+    setLeftLocked(false);
+    setRightLocked(false);
   };
 
   const captureHand = () => {
@@ -392,26 +411,6 @@ export default function App() {
     setShowcaseAngle(0);
     stopCamera();
     setStage("hand-review");
-  };
-
-  const confirmCard = () => {
-    const widthPx = (cardRight - cardLeft) / 100 * 900;
-    if (!cardLeftLocked || !cardRightLocked) {
-      setError("Encaixe e solte as duas linhas nos cantos inferiores do cartão antes de continuar.");
-      return;
-    }
-    setPixelsPerMm(widthPx / 85.6);
-    setCalibrationConfidence((current) => Math.max(current, 92));
-    setLeftLine(38);
-    setRightLine(62);
-    setMeasureY(clamp(cardBottom + 17, 42, 76));
-    setZoom(1);
-    setPanX(0);
-    setPanY(0);
-    setError("");
-    setPhase("finger");
-    setLeftLocked(false);
-    setRightLocked(false);
   };
 
   const updateDrag = (clientX: number, clientY: number) => {
@@ -566,11 +565,15 @@ export default function App() {
     if (bestScore < 10) return;
     const snappedPercent = clamp(bestX / source.width * 100, 2, 98);
     if (side === "left") {
-      setCardLeft(Math.min(snappedPercent, cardRight - 5));
+      const nextLeft = Math.min(snappedPercent, cardRight - 5);
+      setCardLeft(nextLeft);
       setCardLeftLocked(true);
+      if (cardRightLocked) activateFingerMeasurement(nextLeft, cardRight, cardBottom);
     } else {
-      setCardRight(Math.max(snappedPercent, cardLeft + 5));
+      const nextRight = Math.max(snappedPercent, cardLeft + 5);
+      setCardRight(nextRight);
       setCardRightLocked(true);
+      if (cardLeftLocked) activateFingerMeasurement(cardLeft, nextRight, cardBottom);
     }
     setError("");
   };
@@ -885,9 +888,7 @@ export default function App() {
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
-            {phase === "card" ? (
-              <button className="primary" type="button" onClick={confirmCard} disabled={analyzingCard || !cardLeftLocked || !cardRightLocked}>{analyzingCard ? "Localizando base..." : "Usar esta base"}</button>
-            ) : (
+            {phase === "finger" && (
               <button className="primary" type="button" disabled>{leftLocked && rightLocked ? "Aro calculado" : "Ajuste as linhas no dedo"}</button>
             )}
           </div>
