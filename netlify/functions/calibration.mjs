@@ -24,7 +24,7 @@ const readRules = async (store) => (await store.get("rules/current", { type: "js
 
 const makeSuggestions = (tests, rules) => {
   const groups = new Map();
-  for (const test of tests) {
+  for (const test of tests.filter((item) => item.measurementType !== "anelimetro")) {
     const bucket = Math.round(test.widthMm * 2) / 2;
     const key = `${test.predictedRing}:${bucket.toFixed(1)}`;
     const group = groups.get(key) || { key, bucket, predictedRing: test.predictedRing, values: [] };
@@ -88,6 +88,7 @@ export default async (request) => {
         finger: String(body.finger || "não informado").slice(0, 30),
         hand: String(body.hand || "não informada").slice(0, 20),
         note: String(body.note || "").slice(0, 180),
+        measurementType: body.measurementType === "anelimetro" ? "anelimetro" : "finger",
       };
       await store.setJSON(`tests/${record.createdAt}-${record.id}`, record, { onlyIfNew: true });
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
