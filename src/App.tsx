@@ -200,21 +200,6 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [stage, cameraOpening]);
 
-  useEffect(() => {
-    if (phase !== "card" || analyzingCard || !cardLeftLocked || !cardRightLocked) return;
-    const baseWidthPx = (cardRight - cardLeft) / 100 * 900;
-    if (baseWidthPx <= 0) return;
-    setPixelsPerMm(baseWidthPx / 85.6);
-    setCalibrationConfidence((current) => Math.max(current, 92));
-    setLeftLine(38);
-    setRightLine(62);
-    setMeasureY(clamp(cardBottom + 17, 42, 76));
-    setLeftLocked(false);
-    setRightLocked(false);
-    setPhase("finger");
-    setError("");
-  }, [phase, analyzingCard, cardLeftLocked, cardRightLocked, cardLeft, cardRight, cardBottom]);
-
   const startCameraStream = async (targetStage: "camera" | "hand-camera") => {
     stopCamera();
     setError("");
@@ -400,9 +385,9 @@ export default function App() {
     }
     setPixelsPerMm(widthPx / 85.6);
     setCalibrationConfidence((current) => Math.max(current, 92));
-    setLeftLine(25);
-    setRightLine(38);
-    setMeasureY(64);
+    setLeftLine(38);
+    setRightLine(62);
+    setMeasureY(clamp(cardBottom + 17, 42, 76));
     setZoom(1);
     setPanX(0);
     setPanY(0);
@@ -805,8 +790,9 @@ export default function App() {
           {analyzingCard && <p className="analysis-loading">Localizando a base e os cantos inferiores do cartão...</p>}
           {phase === "card" && !analyzingCard && (
             <div className={`card-base-status${cardLeftLocked && cardRightLocked ? " ready" : ""}`}>
-              <strong>{cardLeftLocked && cardRightLocked ? "✓ Base travada em 85,60 mm" : "Ajuste os dois cantos inferiores"}</strong>
+              <strong>{cardLeftLocked && cardRightLocked ? "✓ Confira a base antes de continuar" : "Ajuste os dois cantos inferiores"}</strong>
               <span>{cardLeftLocked ? "✓ Esquerdo" : "○ Esquerdo"} · {cardRightLocked ? "✓ Direito" : "○ Direito"}</span>
+              {cardLeftLocked && cardRightLocked && <small>As pontas verdes precisam ficar exatamente nos dois cantos da base do cartão.</small>}
             </div>
           )}
 
@@ -863,7 +849,7 @@ export default function App() {
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
             {phase === "card" ? (
-              <button className="primary" type="button" onClick={confirmCard} disabled={analyzingCard || !cardLeftLocked || !cardRightLocked}>{analyzingCard ? "Localizando base..." : "Travando base..."}</button>
+              <button className="primary" type="button" onClick={confirmCard} disabled={analyzingCard || !cardLeftLocked || !cardRightLocked}>{analyzingCard ? "Localizando base..." : "Usar esta base"}</button>
             ) : (
               <button className="primary" type="button" disabled>{leftLocked && rightLocked ? "Aro calculado" : "Ajuste as linhas no dedo"}</button>
             )}
