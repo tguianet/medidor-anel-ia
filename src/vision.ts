@@ -166,7 +166,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   }
   const detectedByColor = Boolean(best);
   if (!best) best = findCardByEdges(pixels, work.width, work.height);
-  if (!best) throw new Error("Não encontrei o cartão bancário. Deixe as quatro bordas inteiras visíveis, evite reflexo e fotografe de cima.");
+  if (!best) throw new Error("Não encontrei a base do cartão. Deixe a borda inferior e os dois cantos visíveis, evite reflexo e fotografe de cima.");
 
   let axisA = best.maxX - best.minX + 1;
   let axisB = best.maxY - best.minY + 1;
@@ -195,13 +195,12 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   const longPx = Math.max(axisA, axisB) / scale;
   const shortPx = Math.min(axisA, axisB) / scale;
   const longScale = longPx / 85.6;
-  const shortScale = shortPx / 53.98;
-  const disagreement = Math.abs(longScale - shortScale) / ((longScale + shortScale) / 2);
-  if (disagreement > 0.22) throw new Error("O cartão ficou inclinado. Apoie cartão e dedo na mesma superfície e fotografe de cima.");
+  const observedRatio = longPx / Math.max(1, shortPx);
+  const ratioError = Math.abs(observedRatio - 1.586) / 1.586;
 
   return {
-    pixelsPerMm: (longScale + shortScale) / 2,
-    confidence: Math.max(55, Math.min(detectedByColor ? 98 : 94, Math.round((detectedByColor ? 98 : 94) - disagreement * 160))),
+    pixelsPerMm: longScale,
+    confidence: Math.max(70, Math.min(detectedByColor ? 98 : 94, Math.round((detectedByColor ? 98 : 94) - ratioError * 45))),
     cardBox: {
       x: best.minX / work.width,
       y: best.minY / work.height,
