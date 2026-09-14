@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto } from "./vision";
+import AdminCalibration from "./AdminCalibration";
 
 type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-base-left" | "card-base-right" | "card-base-y" | "pan" | "showcase-ring" | "showcase-left" | "showcase-right" | null;
 type RingMetal = "gold" | "silver" | "rose" | "black";
 type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
+type MeasurementMode = "finger" | "anelimetro";
 
 const RING_MODELS: { id: RingStyle; label: string }[] = [
   { id: "classic", label: "Lisa" },
@@ -153,6 +155,7 @@ export default function App() {
   const [showcaseY, setShowcaseY] = useState(55);
   const [showcaseWidth, setShowcaseWidth] = useState(24);
   const [showcaseAngle, setShowcaseAngle] = useState(0);
+  const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
 
   const stopCamera = () => {
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -686,7 +689,8 @@ export default function App() {
             <li>Mantenha cartão, dedos e câmera paralelos.</li>
             <li>Na câmera, mantenha o dedo reto sobre a linha vertical.</li>
           </ul>
-          <button className="primary" onClick={openCamera}>Abrir câmera</button>
+          <button className="primary" onClick={() => { setMeasurementMode("finger"); void openCamera(); }}>Medir meu dedo</button>
+          <button className="secondary" onClick={() => { setMeasurementMode("anelimetro"); void openCamera(); }}>Testar no anelímetro</button>
           {error && <p className="error">{error}</p>}
         </section>
       )}
@@ -730,8 +734,8 @@ export default function App() {
 
       {stage === "review" && (
         <section className="panel review">
-          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : "2. MEÇA O DEDO"}</span>
-          <h1>{phase === "card" ? "Confirme a base do cartão" : "Encaixe as linhas no dedo"}</h1>
+          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : "2. MEÇA O DEDO"}</span>
+          <h1>{phase === "card" ? "Confirme a base do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Encaixe as linhas no dedo"}</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -814,6 +818,14 @@ export default function App() {
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
+          )}
+          {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
+            <AdminCalibration
+              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize }}
+              calibrationConfidence={calibrationConfidence}
+              zoom={zoom}
+              defaultMeasurementType={measurementMode}
+            />
           )}
           {phase === "finger" && !tryOn && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
 
