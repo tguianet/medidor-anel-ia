@@ -115,6 +115,13 @@ const estimateInnerDiameter = (measuredWidthMm: number) => (
   measuredWidthMm * INNER_DIAMETER_SLOPE + INNER_DIAMETER_OFFSET_MM
 );
 
+// Pontos confirmados manualmente em dedo real. Eles representam o ajuste de
+// conforto: a aliança precisa ficar firme, sem risco de cair. Não usamos dados
+// do anelímetro aqui — ele continua apenas como instrumento de validação.
+const REAL_FIT_REFERENCES = [
+  { minWidthMm: 21.45, maxWidthMm: 21.75, ringSize: 24 },
+];
+
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -651,7 +658,13 @@ export default function App() {
     const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
       Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
     );
-    return { widthMm, equivalentDiameterMm, ringSize: closestRing.size };
+    const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
+      widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
+    ));
+    const selectedRing = confirmedFit
+      ? RING_DIAMETER_TABLE.find((ring) => ring.size === confirmedFit.ringSize) || closestRing
+      : closestRing;
+    return { widthMm, equivalentDiameterMm: selectedRing.diameterMm, ringSize: selectedRing.size };
   }, [pixelsPerMm, leftLine, rightLine, measureY, zoom, panX, panY, leftLocked, rightLocked]);
 
   const resetPhoto = () => {
