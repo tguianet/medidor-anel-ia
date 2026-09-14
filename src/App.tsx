@@ -106,40 +106,12 @@ const RING_DIAMETER_TABLE = [
   { size: 31, diameterMm: 22.60 }, { size: 32, diameterMm: 22.92 },
   { size: 33, diameterMm: 23.24 },
 ];
-const DIAMETER_CALIBRATION_POINTS = [
-  { measuredWidthMm: 18.2, innerDiameterMm: 17.83 }, // aro 16
-  { measuredWidthMm: 19.4, innerDiameterMm: 19.10 }, // aro 20
-  { measuredWidthMm: 19.5, innerDiameterMm: 19.10 }, // aro 20
-  { measuredWidthMm: 20.5, innerDiameterMm: 19.42 }, // aro 21
-  { measuredWidthMm: 21.1, innerDiameterMm: 20.37 }, // aro 24
-  { measuredWidthMm: 21.4, innerDiameterMm: 20.37 }, // aro 24
-  { measuredWidthMm: 22.4, innerDiameterMm: 21.04 }, // aro 26
-  { measuredWidthMm: 23.0, innerDiameterMm: 21.68 }, // aro 28
-  { measuredWidthMm: 24.0, innerDiameterMm: 21.68 }, // aro 28
-];
-
-const estimateInnerDiameter = (measuredWidthMm: number) => {
-  const first = DIAMETER_CALIBRATION_POINTS[0];
-  const last = DIAMETER_CALIBRATION_POINTS[DIAMETER_CALIBRATION_POINTS.length - 1];
-
-  if (measuredWidthMm <= first.measuredWidthMm) {
-    return measuredWidthMm * (first.innerDiameterMm / first.measuredWidthMm);
-  }
-  if (measuredWidthMm >= last.measuredWidthMm) {
-    return measuredWidthMm * (last.innerDiameterMm / last.measuredWidthMm);
-  }
-
-  const upperIndex = DIAMETER_CALIBRATION_POINTS.findIndex(
-    (point) => point.measuredWidthMm >= measuredWidthMm,
-  );
-  const lower = DIAMETER_CALIBRATION_POINTS[upperIndex - 1];
-  const upper = DIAMETER_CALIBRATION_POINTS[upperIndex];
-  const progress = (measuredWidthMm - lower.measuredWidthMm)
-    / (upper.measuredWidthMm - lower.measuredWidthMm);
-
-  return lower.innerDiameterMm
-    + progress * (upper.innerDiameterMm - lower.innerDiameterMm);
-};
+// Fórmula ajustada com medições reais feitas usando a calibração da base do cartão.
+const INNER_DIAMETER_SLOPE = 0.72;
+const INNER_DIAMETER_OFFSET_MM = 5.04;
+const estimateInnerDiameter = (measuredWidthMm: number) => (
+  measuredWidthMm * INNER_DIAMETER_SLOPE + INNER_DIAMETER_OFFSET_MM
+);
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
