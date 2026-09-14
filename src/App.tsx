@@ -117,6 +117,9 @@ const RING_DIAMETER_TABLE = [
 // interno confirmado do aro. Não usa estimativa de volume/formato do dedo.
 const INNER_DIAMETER_SLOPE = 0.873;
 const INNER_DIAMETER_OFFSET_MM = 1.73;
+// Margem fixa de conforto: o aro técnico é elevado em um número para que a
+// indicação final não fique apertada no dedo.
+const COMFORT_RING_OFFSET = 1;
 const estimateInnerDiameter = (measuredWidthMm: number) => (
   measuredWidthMm * INNER_DIAMETER_SLOPE + INNER_DIAMETER_OFFSET_MM
 );
@@ -671,9 +674,12 @@ export default function App() {
     const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
       widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
     ));
-    const selectedRing = confirmedFit
+    const technicalRing = confirmedFit
       ? RING_DIAMETER_TABLE.find((ring) => ring.size === confirmedFit.ringSize) || closestRing
       : closestRing;
+    const selectedRing = RING_DIAMETER_TABLE.find((ring) => (
+      ring.size === clamp(technicalRing.size + COMFORT_RING_OFFSET, 1, 40)
+    )) || technicalRing;
     return {
       widthMm,
       equivalentDiameterMm: selectedRing.diameterMm,
