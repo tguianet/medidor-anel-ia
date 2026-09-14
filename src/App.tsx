@@ -131,6 +131,7 @@ const REAL_FIT_REFERENCES = [
 // Teste controlado 2D: nesta faixa a medida marcada é tratada diretamente
 // como diâmetro interno, sem conversão pela fórmula de formato do dedo.
 const TWO_D_DIAMETER_TEST_RANGES = [
+  { minDiameterMm: 21.04, maxDiameterMm: 21.36, ringSize: 26 },
   { minDiameterMm: 21.68, maxDiameterMm: 21.96, ringSize: 28 },
 ];
 
