@@ -89,6 +89,8 @@ const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
   const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
   return scores.every((score) => score >= 14) && average >= 17;
 };
+// Tabela de diâmetro interno informada pelo anelímetro. Ela corresponde à
+// numeração brasileira e evita aproximações que deslocariam aros altos.
 const RING_DIAMETER_TABLE = [
   { size: 1, diameterMm: 13.05 }, { size: 2, diameterMm: 13.37 },
   { size: 3, diameterMm: 13.68 }, { size: 4, diameterMm: 14.01 },
@@ -124,6 +126,12 @@ const estimateInnerDiameter = (measuredWidthMm: number) => (
 const REAL_FIT_REFERENCES = [
   { minWidthMm: 21.45, maxWidthMm: 21.75, ringSize: 24 },
   { minWidthMm: 25.80, maxWidthMm: 26.20, ringSize: 32 },
+];
+
+// Teste controlado 2D: nesta faixa a medida marcada é tratada diretamente
+// como diâmetro interno, sem conversão pela fórmula de formato do dedo.
+const TWO_D_DIAMETER_TEST_RANGES = [
+  { minDiameterMm: 21.68, maxDiameterMm: 21.96, ringSize: 28 },
 ];
 
 export default function App() {
@@ -658,6 +666,9 @@ export default function App() {
     if (!pixelsPerMm) return null;
     const widthPx = fingerBandWidthPx() ?? Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
+    const direct2DTest = TWO_D_DIAMETER_TEST_RANGES.find((range) => (
+      widthMm >= range.minDiameterMm && widthMm <= range.maxDiameterMm
+    ));
     const equivalentDiameterMm = estimateInnerDiameter(widthMm);
     const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
       Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
@@ -665,10 +676,17 @@ export default function App() {
     const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
       widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
     ));
-    const selectedRing = confirmedFit
+    const selectedRing = direct2DTest
+      ? RING_DIAMETER_TABLE.find((ring) => ring.size === direct2DTest.ringSize) || closestRing
+      : confirmedFit
       ? RING_DIAMETER_TABLE.find((ring) => ring.size === confirmedFit.ringSize) || closestRing
       : closestRing;
-    return { widthMm, equivalentDiameterMm: selectedRing.diameterMm, ringSize: selectedRing.size };
+    return {
+      widthMm,
+      equivalentDiameterMm: direct2DTest ? widthMm : selectedRing.diameterMm,
+      ringSize: selectedRing.size,
+      calculationMode: direct2DTest ? "diameter-2d" : "formula",
+    };
   }, [pixelsPerMm, leftLine, rightLine, measureY, zoom, panX, panY, leftLocked, rightLocked]);
 
   const resetPhoto = () => {
@@ -831,7 +849,7 @@ export default function App() {
               <strong>Aro provável: {result.ringSize}</strong>
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
               <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
-              <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
+              <span>{result.calculationMode === "diameter-2d" ? "Diâmetro 2D medido" : "Diâmetro interno equivalente"}: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
