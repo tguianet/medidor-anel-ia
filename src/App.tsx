@@ -223,6 +223,21 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [stage, cameraOpening]);
 
+  useEffect(() => {
+    if (phase !== "card" || analyzingCard || !cardLeftLocked || !cardRightLocked) return;
+    const baseWidthPx = (cardRight - cardLeft) / 100 * 900;
+    if (baseWidthPx <= 0) return;
+    setPixelsPerMm(baseWidthPx / 85.6);
+    setCalibrationConfidence((current) => Math.max(current, 92));
+    setLeftLine(38);
+    setRightLine(62);
+    setMeasureY(clamp(cardBottom + 17, 42, 76));
+    setLeftLocked(false);
+    setRightLocked(false);
+    setPhase("finger");
+    setError("");
+  }, [phase, analyzingCard, cardLeftLocked, cardRightLocked, cardLeft, cardRight, cardBottom]);
+
   const startCameraStream = async (targetStage: "camera" | "hand-camera") => {
     stopCamera();
     setError("");
@@ -736,6 +751,9 @@ export default function App() {
               </>
             )}
             {phase === "finger" && pixelsPerMm && (
+              <div className="card-base-reference" style={{ left: `${cardLeft}%`, top: `${cardBottom}%`, width: `${cardRight - cardLeft}%` }} aria-hidden="true"><span>BASE FIXA · 85,60 mm</span><i className="left" /><i className="right" /></div>
+            )}
+            {phase === "finger" && pixelsPerMm && (
               <>
                 <button className={`caliper-line left${leftLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
                 <button className={`caliper-line right${rightLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
@@ -826,9 +844,9 @@ export default function App() {
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
             {phase === "card" ? (
-              <button className="primary" type="button" onClick={confirmCard} disabled={analyzingCard || !cardLeftLocked || !cardRightLocked}>{analyzingCard ? "Localizando base..." : "Usar esta base"}</button>
+              <button className="primary" type="button" onClick={confirmCard} disabled={analyzingCard || !cardLeftLocked || !cardRightLocked}>{analyzingCard ? "Localizando base..." : "Travando base..."}</button>
             ) : (
-              <button className="primary" type="button" disabled>Base calibrada</button>
+              <button className="primary" type="button" disabled>{leftLocked && rightLocked ? "Aro calculado" : "Ajuste as linhas no dedo"}</button>
             )}
           </div>
           {error && <p className="error">{error}</p>}
