@@ -205,6 +205,11 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .card-base-status strong { color: #f2cf73; }
 .card-base-status.ready { border-color: #328966; background: #16312755; }
 .card-base-status.ready strong { color: #52e0a3; }
+.card-base-reference { position: absolute; z-index: 3; height: 0; border-top: 2px solid #52e0a3; pointer-events: none; filter: drop-shadow(0 0 4px #52e0a3); }
+.card-base-reference span { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); padding: 4px 7px; border: 1px solid #092118; border-radius: 999px; color: #092118; background: #52e0a3; font-size: 8px; font-weight: 900; white-space: nowrap; }
+.card-base-reference i { position: absolute; bottom: -12px; width: 3px; height: 25px; border-radius: 3px; background: #52e0a3; box-shadow: 0 0 0 1px #092118; }
+.card-base-reference i.left { left: 0; transform: translateX(-50%); }
+.card-base-reference i.right { right: 0; transform: translateX(50%); }
 .caliper-line { position: absolute; z-index: 4; width: 34px; height: 32%; padding: 0; transform: translateX(-50%); border: 0; background: transparent; cursor: ew-resize; touch-action: none; }
 .caliper-line::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); border-radius: 2px; background: #f2cf73; box-shadow: 0 0 0 1px #171109, 0 0 5px #000; }
 .caliper-line span, .caliper-line::after { content: ""; position: absolute; left: 50%; width: 14px; height: 5px; transform: translateX(-50%); border: 1px solid #171109; border-radius: 3px; background: #f2cf73; }
