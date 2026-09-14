@@ -94,6 +94,19 @@ export default async (request) => {
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
       return json({ record, tests, rules, suggestions: makeSuggestions(tests, rules) }, 201);
     }
+    if (body.action === "update-test-type") {
+      const measurementType = body.measurementType === "anelimetro" ? "anelimetro" : "finger";
+      const { blobs } = await store.list({ prefix: "tests/" });
+      for (const { key } of blobs) {
+        const record = await store.get(key, { type: "json", consistency: "strong" });
+        if (record?.id !== body.id) continue;
+        const updated = { ...record, measurementType, updatedAt: new Date().toISOString() };
+        await store.setJSON(key, updated);
+        const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
+        return json({ record: updated, tests, rules, suggestions: makeSuggestions(tests, rules) });
+      }
+      return json({ error: "Teste não encontrado." }, 404);
+    }
     if (body.action === "apply-rule") {
       const tests = await readTests(store);
       const rules = await readRules(store);
