@@ -539,7 +539,7 @@ export default function App() {
       if (candidate < 3 || candidate >= source.width - 3) continue;
       let score = 0;
       let samples = 0;
-      for (let y = Math.round(imageY) - 7; y <= Math.round(imageY) + 7; y += 2) {
+      for (let y = Math.round(imageY) - 16; y <= Math.round(imageY) + 16; y += 4) {
         if (y < 0 || y >= source.height) continue;
         const before = colorAt(candidate - 2, y);
         const after = colorAt(candidate + 2, y);
@@ -639,16 +639,57 @@ export default function App() {
     draggingRef.current = null;
   };
 
+  const fingerBandWidthPx = () => {
+    const stage = measureRef.current;
+    const source = photoPixelsRef.current;
+    if (!stage || !source || !leftLocked || !rightLocked) return null;
+    const rect = stage.getBoundingClientRect();
+    const toImageX = (percent: number) => (
+      (((percent / 100 * rect.width) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width
+    );
+    const imageY = (((measureY / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
+    const leftCenter = toImageX(leftLine);
+    const rightCenter = toImageX(rightLine);
+    const searchRadius = Math.max(7, Math.round(18 / zoom));
+    const grayscale = (x: number, y: number) => {
+      const offset = (y * source.width + x) * 4;
+      return source.data[offset] * 0.299 + source.data[offset + 1] * 0.587 + source.data[offset + 2] * 0.114;
+    };
+    const findEdge = (center: number, y: number) => {
+      let bestX = Math.round(center);
+      let bestScore = -Infinity;
+      for (let x = Math.round(center) - searchRadius; x <= Math.round(center) + searchRadius; x++) {
+        if (x < 3 || x >= source.width - 3) continue;
+        const contrast = Math.abs(grayscale(x - 2, y) - grayscale(x + 2, y));
+        const score = contrast - Math.abs(x - center) * 0.7;
+        if (score > bestScore) { bestScore = score; bestX = x; }
+      }
+      return { x: bestX, score: bestScore };
+    };
+    const widths: number[] = [];
+    for (const offset of [-18, -12, -6, 0, 6, 12, 18]) {
+      const y = Math.round(imageY + offset);
+      if (y < 3 || y >= source.height - 3) continue;
+      const leftEdge = findEdge(leftCenter, y);
+      const rightEdge = findEdge(rightCenter, y);
+      if (leftEdge.score < 10 || rightEdge.score < 10 || rightEdge.x <= leftEdge.x) continue;
+      widths.push(rightEdge.x - leftEdge.x);
+    }
+    if (widths.length < 4) return null;
+    widths.sort((a, b) => a - b);
+    return widths[Math.round((widths.length - 1) * 0.65)];
+  };
+
   const result = useMemo(() => {
     if (!pixelsPerMm) return null;
-    const widthPx = Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
+    const widthPx = fingerBandWidthPx() ?? Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
     const equivalentDiameterMm = estimateInnerDiameter(widthMm);
     const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
       Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
     );
     return { widthMm, equivalentDiameterMm, ringSize: closestRing.size };
-  }, [pixelsPerMm, leftLine, rightLine, zoom]);
+  }, [pixelsPerMm, leftLine, rightLine, measureY, zoom, panX, panY, leftLocked, rightLocked]);
 
   const resetPhoto = () => {
     setPhoto("");
@@ -759,6 +800,7 @@ export default function App() {
               <>
                 <button className={`caliper-line left${leftLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
                 <button className={`caliper-line right${rightLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                <div className="measurement-band" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} aria-hidden="true" />
                 <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
                 <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
               </>
