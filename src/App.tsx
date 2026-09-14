@@ -112,6 +112,7 @@ const DIAMETER_CALIBRATION_POINTS = [
   { measuredWidthMm: 21.1, innerDiameterMm: 20.37 }, // aro 24
   { measuredWidthMm: 21.4, innerDiameterMm: 20.37 }, // aro 24
   { measuredWidthMm: 22.4, innerDiameterMm: 21.04 }, // aro 26
+  { measuredWidthMm: 23.0, innerDiameterMm: 21.68 }, // aro 28
   { measuredWidthMm: 24.0, innerDiameterMm: 21.68 }, // aro 28
 ];
 
