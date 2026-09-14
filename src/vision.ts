@@ -13,12 +13,16 @@ const loadImage = async (src: string) => {
   return image;
 };
 
-// Detecta cartões coloridos de qualquer cor. Cartões escuros, brancos ou
-// foscos continuam sendo tratados pelo detector de bordas como alternativa.
+// Detecta cores de cartão sem confundir a madeira ou a pele com o cartão.
+// Cartões escuros, brancos, foscos ou em tons quentes usam o detector de
+// bordas como alternativa.
 const isChromaticCardSurface = (r: number, g: number, b: number) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  return max > 48 && (max - min) / max > 0.24;
+  const saturation = (max - min) / Math.max(1, max);
+  const coolColor = b > r * 1.08 || g > r * 1.08;
+  const vividRed = r > g * 1.55 && r > b * 1.55;
+  return max > 50 && saturation > 0.28 && (coolColor || vividRed);
 };
 
 const percentile = (values: number[], amount: number) => {
