@@ -217,6 +217,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .caliper-line::after { bottom: -4px; }
 .caliper-line.locked::before { background: #52e0a3; box-shadow: 0 0 0 1px #092118, 0 0 7px #52e0a3; }
 .caliper-line.locked span, .caliper-line.locked::after { border-color: #092118; background: #52e0a3; box-shadow: 0 0 10px #52e0a3aa; }
+.measurement-band { position: absolute; z-index: 4; height: 8%; min-height: 32px; transform: translateY(-50%); border-top: 1px dashed #52e0a3aa; border-bottom: 1px dashed #52e0a3aa; background: #52e0a312; pointer-events: none; }
 .measure-cross { position: absolute; z-index: 5; height: 40px; padding: 0; transform: translateY(-50%); border: 0; border-top: 2px solid #52e0a3; color: #071b14; background: transparent; cursor: ns-resize; touch-action: none; }
 .measure-cross::before { content: ""; position: absolute; left: 50%; top: -13px; width: 22px; height: 22px; transform: translateX(-50%); border: 2px solid #092118; border-radius: 50%; background: #52e0a3; box-shadow: 0 0 10px #000; }
 .measure-height-handle { position: absolute; z-index: 7; min-width: 74px; min-height: 36px; padding: 7px 10px; transform: translate(-50%, -50%); border: 2px solid #092118; border-radius: 999px; color: #092118; background: #52e0a3; box-shadow: 0 3px 12px #000b; font-size: 10px; font-weight: 900; cursor: ns-resize; touch-action: none; }
