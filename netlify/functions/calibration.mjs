@@ -53,6 +53,38 @@ const makeSuggestions = (tests, rules) => {
   }).sort((a, b) => a.bucket - b.bucket);
 };
 
+// O anelímetro é um instrumento de conferência, não um dedo. Mantemos a
+// curva dele separada para que seus testes nunca alterem a recomendação ao
+// cliente. Cada ponto reúne as leituras feitas na mesma marca do anelímetro.
+const makeGaugeCurve = (tests) => {
+  const groups = new Map();
+  for (const test of tests.filter((item) => item.measurementType === "anelimetro")) {
+    const key = String(test.actualRing);
+    const group = groups.get(key) || { ringSize: test.actualRing, widths: [], predictions: [] };
+    group.widths.push(test.widthMm);
+    group.predictions.push(test.predictedRing);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => {
+    const averageWidthMm = group.widths.reduce((sum, value) => sum + value, 0) / group.widths.length;
+    const averagePrediction = group.predictions.reduce((sum, value) => sum + value, 0) / group.predictions.length;
+    return {
+      ringSize: group.ringSize,
+      samples: group.widths.length,
+      averageWidthMm: Number(averageWidthMm.toFixed(2)),
+      averagePrediction: Number(averagePrediction.toFixed(1)),
+      averageError: Number((group.ringSize - averagePrediction).toFixed(1)),
+    };
+  }).sort((a, b) => a.ringSize - b.ringSize);
+};
+
+const responseData = (tests, rules) => ({
+  tests,
+  rules,
+  suggestions: makeSuggestions(tests, rules),
+  gaugeCurve: makeGaugeCurve(tests),
+});
+
 export default async (request) => {
   const store = getStore(STORE_NAME);
   if (request.method === "GET") {
@@ -67,7 +99,7 @@ export default async (request) => {
     const body = await request.json();
     if (body.action === "list") {
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
-      return json({ tests, rules, suggestions: makeSuggestions(tests, rules) });
+      return json(responseData(tests, rules));
     }
     if (body.action === "add-test") {
       const widthMm = Number(body.widthMm);
@@ -92,7 +124,7 @@ export default async (request) => {
       };
       await store.setJSON(`tests/${record.createdAt}-${record.id}`, record, { onlyIfNew: true });
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
-      return json({ record, tests, rules, suggestions: makeSuggestions(tests, rules) }, 201);
+      return json({ record, ...responseData(tests, rules) }, 201);
     }
     if (body.action === "update-test-type") {
       const measurementType = body.measurementType === "anelimetro" ? "anelimetro" : "finger";
@@ -103,7 +135,7 @@ export default async (request) => {
         const updated = { ...record, measurementType, updatedAt: new Date().toISOString() };
         await store.setJSON(key, updated);
         const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
-        return json({ record: updated, tests, rules, suggestions: makeSuggestions(tests, rules) });
+        return json({ record: updated, ...responseData(tests, rules) });
       }
       return json({ error: "Teste não encontrado." }, 404);
     }
