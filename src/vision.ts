@@ -13,6 +13,14 @@ const loadImage = async (src: string) => {
   return image;
 };
 
+// Detecta cartões coloridos de qualquer cor. Cartões escuros, brancos ou
+// foscos continuam sendo tratados pelo detector de bordas como alternativa.
+const isChromaticCardSurface = (r: number, g: number, b: number) => {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  return max > 48 && (max - min) / max > 0.24;
+};
+
 const percentile = (values: number[], amount: number) => {
   const ordered = [...values].sort((a, b) => a - b);
   return ordered[Math.max(0, Math.min(ordered.length - 1, Math.round((ordered.length - 1) * amount)))];
@@ -106,9 +114,46 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   const ctx = work.getContext("2d", { willReadFrequently: true })!;
   ctx.drawImage(image, 0, 0, work.width, work.height);
   const pixels = ctx.getImageData(0, 0, work.width, work.height).data;
-  // O cartão pode ter qualquer cor. A referência é localizada pelo formato
-  // retangular e pelas bordas, sem depender de cartão azul.
-  const best = findCardByEdges(pixels, work.width, work.height);
+  const total = work.width * work.height;
+  const mask = new Uint8Array(total);
+  for (let index = 0; index < total; index++) {
+    const offset = index * 4;
+    mask[index] = isChromaticCardSurface(pixels[offset], pixels[offset + 1], pixels[offset + 2]) ? 1 : 0;
+  }
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let colorCandidate: Box | null = null;
+  let colorScore = 0;
+  for (let start = 0; start < total; start++) {
+    if (!mask[start] || visited[start]) continue;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    visited[start] = 1;
+    const box: Box = { minX: work.width, minY: work.height, maxX: 0, maxY: 0, count: 0 };
+    while (head < tail) {
+      const index = queue[head++];
+      const x = index % work.width;
+      const y = (index / work.width) | 0;
+      box.minX = Math.min(box.minX, x); box.maxX = Math.max(box.maxX, x);
+      box.minY = Math.min(box.minY, y); box.maxY = Math.max(box.maxY, y); box.count++;
+      for (const next of [index - 1, index + 1, index - work.width, index + work.width]) {
+        if (next < 0 || next >= total || visited[next] || !mask[next]) continue;
+        if (Math.abs((next % work.width) - x) > 1) continue;
+        visited[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    const width = box.maxX - box.minX + 1;
+    const height = box.maxY - box.minY + 1;
+    const areaShare = width * height / total;
+    const ratio = Math.max(width, height) / Math.max(1, Math.min(width, height));
+    const density = box.count / Math.max(1, width * height);
+    if (areaShare < 0.008 || areaShare > 0.48 || ratio < 1.25 || ratio > 2.15 || density < 0.12) continue;
+    const score = box.count * density * (1 - Math.min(1, Math.abs(ratio - 1.586) / 0.8));
+    if (score > colorScore) { colorCandidate = box; colorScore = score; }
+  }
+  const best = colorCandidate || findCardByEdges(pixels, work.width, work.height);
   if (!best) throw new Error("Não encontrei a base do cartão. Deixe a borda inferior e os dois cantos visíveis, evite reflexo e fotografe de cima.");
 
   let axisA = best.maxX - best.minX + 1;
@@ -121,7 +166,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
 
   return {
     pixelsPerMm: longScale,
-    confidence: Math.max(70, Math.min(96, Math.round(96 - ratioError * 45))),
+    confidence: Math.max(70, Math.min(colorCandidate ? 98 : 96, Math.round((colorCandidate ? 98 : 96) - ratioError * 45))),
     cardBox: {
       x: best.minX / work.width,
       y: best.minY / work.height,
