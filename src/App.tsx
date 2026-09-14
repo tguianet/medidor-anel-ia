@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto } from "./vision";
-import AdminCalibration from "./AdminCalibration";
 
 type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 type MeasurePhase = "card" | "finger";
 type DragTarget = "left" | "right" | "height" | "card-tl" | "card-tr" | "card-bl" | "card-br" | "card-move" | "pan" | "showcase-ring" | "showcase-left" | "showcase-right" | null;
 type RingMetal = "gold" | "silver" | "rose" | "black";
 type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
-type CalibrationRule = { key: string; minWidthMm: number; maxWidthMm: number; predictedRing: number; offset: number };
 
 const RING_MODELS: { id: RingStyle; label: string }[] = [
   { id: "classic", label: "Lisa" },
@@ -91,17 +89,25 @@ const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
   return scores.every((score) => score >= 15) && average >= 18;
 };
 const RING_DIAMETER_TABLE = [
-  { size: 10, diameterMm: 15.0 }, { size: 11, diameterMm: 15.1 },
-  { size: 12, diameterMm: 15.2 }, { size: 13, diameterMm: 16.0 },
-  { size: 14, diameterMm: 16.1 }, { size: 15, diameterMm: 17.0 },
-  { size: 16, diameterMm: 17.1 }, { size: 17, diameterMm: 17.2 },
-  { size: 18, diameterMm: 17.5 }, { size: 19, diameterMm: 18.0 },
-  { size: 20, diameterMm: 18.5 }, { size: 21, diameterMm: 18.8 },
-  { size: 22, diameterMm: 19.0 }, { size: 23, diameterMm: 19.2 },
-  { size: 24, diameterMm: 19.9 }, { size: 25, diameterMm: 20.0 },
-  { size: 26, diameterMm: 20.5 }, { size: 27, diameterMm: 20.8 },
-  { size: 28, diameterMm: 21.1 }, { size: 29, diameterMm: 21.2 },
+  { size: 1, diameterMm: 13.05 }, { size: 2, diameterMm: 13.37 },
+  { size: 3, diameterMm: 13.68 }, { size: 4, diameterMm: 14.01 },
+  { size: 5, diameterMm: 14.32 }, { size: 6, diameterMm: 14.64 },
+  { size: 7, diameterMm: 14.95 }, { size: 8, diameterMm: 15.28 },
+  { size: 9, diameterMm: 15.60 }, { size: 10, diameterMm: 15.92 },
+  { size: 11, diameterMm: 16.24 }, { size: 12, diameterMm: 16.55 },
+  { size: 13, diameterMm: 16.87 }, { size: 14, diameterMm: 17.19 },
+  { size: 15, diameterMm: 17.50 }, { size: 16, diameterMm: 17.83 },
+  { size: 17, diameterMm: 18.14 }, { size: 18, diameterMm: 18.46 },
+  { size: 19, diameterMm: 18.76 }, { size: 20, diameterMm: 19.10 },
+  { size: 21, diameterMm: 19.42 }, { size: 22, diameterMm: 19.77 },
+  { size: 23, diameterMm: 20.05 }, { size: 24, diameterMm: 20.37 },
+  { size: 25, diameterMm: 20.68 }, { size: 26, diameterMm: 21.04 },
+  { size: 27, diameterMm: 21.37 }, { size: 28, diameterMm: 21.68 },
+  { size: 29, diameterMm: 21.96 }, { size: 30, diameterMm: 22.28 },
+  { size: 31, diameterMm: 22.60 }, { size: 32, diameterMm: 22.92 },
+  { size: 33, diameterMm: 23.24 },
 ];
+const FINGER_TO_INNER_DIAMETER_FACTOR = 0.94;
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -142,18 +148,6 @@ export default function App() {
   const [showcaseY, setShowcaseY] = useState(55);
   const [showcaseWidth, setShowcaseWidth] = useState(24);
   const [showcaseAngle, setShowcaseAngle] = useState(0);
-  const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
-
-  const loadCalibrationRules = async () => {
-    try {
-      const response = await fetch("/.netlify/functions/calibration", { cache: "no-store" });
-      if (!response.ok) return;
-      const data = await response.json();
-      setCalibrationRules(Array.isArray(data.rules) ? data.rules : []);
-    } catch {
-      // A medição original continua funcionando se o banco estiver indisponível.
-    }
-  };
 
   const stopCamera = () => {
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -165,7 +159,6 @@ export default function App() {
   };
 
   useEffect(() => () => stopCamera(), []);
-  useEffect(() => { void loadCalibrationRules(); }, []);
   useEffect(() => {
     if (!photo) { photoPixelsRef.current = null; return; }
     const image = new Image();
@@ -538,18 +531,12 @@ export default function App() {
     if (!pixelsPerMm) return null;
     const widthPx = Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
-    const circumferenceMm = Math.PI * widthMm;
+    const equivalentDiameterMm = widthMm * FINGER_TO_INNER_DIAMETER_FACTOR;
     const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
-      Math.abs(candidate.diameterMm - widthMm) < Math.abs(closest.diameterMm - widthMm) ? candidate : closest
+      Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
     );
-    // Ajuste final validado nos testes reais: reduz dois aros do resultado exibido.
-    const originalRingSize = clamp(closestRing.size - 3, 10, 29);
-    const activeRule = calibrationRules.find((rule) =>
-      rule.predictedRing === originalRingSize && widthMm >= rule.minWidthMm && widthMm < rule.maxWidthMm
-    );
-    const ringSize = clamp(originalRingSize + (activeRule?.offset || 0), 1, 40);
-    return { widthMm, circumferenceMm, ringSize, originalRingSize, learnedOffset: activeRule?.offset || 0 };
-  }, [pixelsPerMm, leftLine, rightLine, zoom, calibrationRules]);
+    return { widthMm, equivalentDiameterMm, ringSize: closestRing.size };
+  }, [pixelsPerMm, leftLine, rightLine, zoom]);
 
   const resetPhoto = () => {
     setPhoto("");
@@ -694,20 +681,12 @@ export default function App() {
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
-              <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 5, 40)} a {clamp(result.ringSize + 1, 5, 40)}</span>
+              <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 33)} a {clamp(result.ringSize + 1, 1, 33)}</span>
               <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
-              <span>Circunferência estimada: {result.circumferenceMm.toFixed(1)} mm</span>
+              <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
-          )}
-          {phase === "finger" && result && leftLocked && rightLocked && (
-            <AdminCalibration
-              measurement={{ widthMm: result.widthMm, ringSize: result.originalRingSize }}
-              calibrationConfidence={calibrationConfidence}
-              zoom={zoom}
-              onRulesChanged={loadCalibrationRules}
-            />
           )}
           {phase === "finger" && !tryOn && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
 
