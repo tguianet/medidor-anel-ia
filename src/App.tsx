@@ -106,7 +106,10 @@ const RING_DIAMETER_TABLE = [
   { size: 27, diameterMm: 21.37 }, { size: 28, diameterMm: 21.68 },
   { size: 29, diameterMm: 21.96 }, { size: 30, diameterMm: 22.28 },
   { size: 31, diameterMm: 22.60 }, { size: 32, diameterMm: 22.92 },
-  { size: 33, diameterMm: 23.24 },
+  { size: 33, diameterMm: 23.24 }, { size: 34, diameterMm: 23.55 },
+  { size: 35, diameterMm: 23.87 }, { size: 36, diameterMm: 24.19 },
+  { size: 37, diameterMm: 24.51 }, { size: 38, diameterMm: 24.83 },
+  { size: 39, diameterMm: 25.15 }, { size: 40, diameterMm: 25.46 },
 ];
 // Fórmula ajustada com medições reais feitas usando a calibração da base do cartão.
 const INNER_DIAMETER_SLOPE = 0.72;
@@ -825,7 +828,7 @@ export default function App() {
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
-              <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 33)} a {clamp(result.ringSize + 1, 1, 33)}</span>
+              <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
               <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
