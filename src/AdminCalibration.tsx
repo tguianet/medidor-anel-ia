@@ -12,6 +12,14 @@ type Suggestion = {
   appliedOffset: number | null;
 };
 
+type GaugeCurvePoint = {
+  ringSize: number;
+  samples: number;
+  averageWidthMm: number;
+  averagePrediction: number;
+  averageError: number;
+};
+
 type Props = {
   measurement: { widthMm: number; ringSize: number };
   calibrationConfidence: number;
@@ -31,6 +39,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
   const [note, setNote] = useState("");
   const [measurementType, setMeasurementType] = useState(defaultMeasurementType);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [gaugeCurve, setGaugeCurve] = useState<GaugeCurvePoint[]>([]);
   const [testsCount, setTestsCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -52,6 +61,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
       const data = await request({ action: "list" });
       setAuthenticated(true);
       setSuggestions(data.suggestions || []);
+      setGaugeCurve(data.gaugeCurve || []);
       setTestsCount(data.tests?.length || 0);
       setMessage("Modo administrador liberado.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha no acesso."); }
@@ -74,6 +84,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
         measurementType,
       });
       setSuggestions(data.suggestions || []);
+      setGaugeCurve(data.gaugeCurve || []);
       setTestsCount(data.tests?.length || 0);
       setNote("");
       setMessage(`Teste armazenado: previsto ${measurement.ringSize}, confirmado ${actualRing}.`);
@@ -104,6 +115,15 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
           </div>
           <button className="primary" type="button" disabled={busy || actualRing < 1 || actualRing > 40} onClick={() => void saveTest()}>{busy ? "Armazenando..." : "Armazenar teste"}</button>
           <div className="learning-summary"><strong>{testsCount} testes armazenados</strong><span>Testes de anelímetro validam a leitura. Só testes de dedo entram nas sugestões de correção.</span></div>
+          {gaugeCurve.length > 0 && <section className="gauge-curve">
+            <div><strong>Curva do anelímetro</strong><span>Dados guardados para calibrar depois. Esta curva não altera a medida do dedo.</span></div>
+            <div className="gauge-curve-grid" role="table" aria-label="Curva de calibração do anelímetro">
+              <span role="columnheader">Aro marcado</span><span role="columnheader">Leitura média</span><span role="columnheader">Diferença</span><span role="columnheader">Testes</span>
+              {gaugeCurve.map((point) => <div className="gauge-curve-row" role="row" key={point.ringSize}>
+                <strong role="cell">{point.ringSize}</strong><span role="cell">{point.averagePrediction.toFixed(1)}</span><b role="cell">{point.averageError >= 0 ? "+" : ""}{point.averageError.toFixed(1)}</b><span role="cell">{point.samples}</span>
+              </div>)}
+            </div>
+          </section>}
           {suggestions.length > 0 && <div className="suggestion-list">{suggestions.map((item) => (
             <article key={item.key} className={item.appliedOffset !== null ? "applied" : ""}>
               <div><strong>{item.bucket.toFixed(1)} mm · aro atual {item.predictedRing}</strong><span>{item.samples} teste(s) · média {item.averageOffset >= 0 ? "+" : ""}{item.averageOffset} · confiança {item.confidence}%</span></div>
