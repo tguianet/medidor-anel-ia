@@ -16,12 +16,12 @@ type Props = {
   measurement: { widthMm: number; ringSize: number };
   calibrationConfidence: number;
   zoom: number;
-  onRulesChanged: () => Promise<void>;
+  defaultMeasurementType: "finger" | "anelimetro";
 };
 
 const endpoint = "/.netlify/functions/calibration";
 
-export default function AdminCalibration({ measurement, calibrationConfidence, zoom, onRulesChanged }: Props) {
+export default function AdminCalibration({ measurement, calibrationConfidence, zoom, defaultMeasurementType }: Props) {
   const [open, setOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
@@ -29,6 +29,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
   const [finger, setFinger] = useState("anelar");
   const [hand, setHand] = useState("direita");
   const [note, setNote] = useState("");
+  const [measurementType, setMeasurementType] = useState(defaultMeasurementType);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [testsCount, setTestsCount] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -70,23 +71,13 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
         finger,
         hand,
         note,
+        measurementType,
       });
       setSuggestions(data.suggestions || []);
       setTestsCount(data.tests?.length || 0);
       setNote("");
       setMessage(`Teste armazenado: previsto ${measurement.ringSize}, confirmado ${actualRing}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao armazenar."); }
-    finally { setBusy(false); }
-  };
-
-  const applyRule = async (key: string) => {
-    setBusy(true); setMessage("");
-    try {
-      const data = await request({ action: "apply-rule", key });
-      setSuggestions(data.suggestions || []);
-      await onRulesChanged();
-      setMessage("Correção aprovada e aplicada ao cálculo.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao aplicar."); }
     finally { setBusy(false); }
   };
 
@@ -106,17 +97,18 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
           <div className="admin-current"><span>Leitura atual</span><strong>{measurement.widthMm.toFixed(1)} mm · aro {measurement.ringSize}</strong></div>
           <div className="admin-fields">
             <label>Aro real confirmado<input type="number" min="1" max="40" value={actualRing} onChange={(event) => setActualRing(Number(event.target.value))} /></label>
+            <label>Tipo de teste<select value={measurementType} onChange={(event) => setMeasurementType(event.target.value as "finger" | "anelimetro")}><option value="finger">Dedo real</option><option value="anelimetro">Anelímetro padrão</option></select></label>
             <label>Dedo<select value={finger} onChange={(event) => setFinger(event.target.value)}><option>anelar</option><option>médio</option><option>indicador</option><option>mínimo</option><option>polegar</option></select></label>
             <label>Mão<select value={hand} onChange={(event) => setHand(event.target.value)}><option>direita</option><option>esquerda</option></select></label>
             <label className="wide">Observação opcional<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Ex.: medido com aneleira" /></label>
           </div>
           <button className="primary" type="button" disabled={busy || actualRing < 1 || actualRing > 40} onClick={() => void saveTest()}>{busy ? "Armazenando..." : "Armazenar teste"}</button>
-          <div className="learning-summary"><strong>{testsCount} testes armazenados</strong><span>As sugestões ficam separadas por aro calculado e faixa de 0,5 mm.</span></div>
+          <div className="learning-summary"><strong>{testsCount} testes armazenados</strong><span>Testes de anelímetro validam a leitura. Só testes de dedo entram nas sugestões de correção.</span></div>
           {suggestions.length > 0 && <div className="suggestion-list">{suggestions.map((item) => (
             <article key={item.key} className={item.appliedOffset !== null ? "applied" : ""}>
               <div><strong>{item.bucket.toFixed(1)} mm · aro atual {item.predictedRing}</strong><span>{item.samples} teste(s) · média {item.averageOffset >= 0 ? "+" : ""}{item.averageOffset} · confiança {item.confidence}%</span></div>
               <b>Sugestão: {item.suggestedOffset >= 0 ? "+" : ""}{item.suggestedOffset} aro(s)</b>
-              {item.appliedOffset === item.suggestedOffset ? <em>Aplicada</em> : <button type="button" disabled={busy} onClick={() => void applyRule(item.key)}>Aplicar</button>}
+              <em>Guardar para revisão</em>
             </article>
           ))}</div>}
         </>
