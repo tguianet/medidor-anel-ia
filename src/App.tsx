@@ -123,6 +123,7 @@ const estimateInnerDiameter = (measuredWidthMm: number) => (
 // do anelímetro aqui — ele continua apenas como instrumento de validação.
 const REAL_FIT_REFERENCES = [
   { minWidthMm: 21.45, maxWidthMm: 21.75, ringSize: 24 },
+  { minWidthMm: 25.80, maxWidthMm: 26.20, ringSize: 32 },
 ];
 
 export default function App() {
