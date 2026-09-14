@@ -26,6 +26,67 @@ const percentile = (values: number[], amount: number) => {
   return ordered[Math.max(0, Math.min(ordered.length - 1, Math.round((ordered.length - 1) * amount)))];
 };
 
+// Procura um retângulo de cartão pelas faixas coloridas horizontais. É mais
+// confiável do que usar apenas um bloco de cor conectado quando há objetos
+// coloridos, reflexos ou a mão logo abaixo do cartão.
+const findCardByChromaticRuns = (pixels: Uint8ClampedArray, width: number, height: number): Box | null => {
+  type Row = { y: number; left: number; right: number; center: number; runWidth: number };
+  const rows: Row[] = [];
+
+  for (let y = 0; y < height; y += 2) {
+    let bestStart = -1;
+    let bestEnd = -1;
+    let start = -1;
+    let lastColor = -1;
+    // Letras e logotipos criam pequenos espaços na cor do cartão; eles não
+    // devem quebrar uma mesma faixa.
+    const gapAllowance = Math.max(5, Math.round(width * 0.018));
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      if (isChromaticCardSurface(pixels[offset], pixels[offset + 1], pixels[offset + 2])) {
+        if (start < 0) start = x;
+        lastColor = x;
+      } else if (start >= 0 && x - lastColor > gapAllowance) {
+        if (lastColor - start > bestEnd - bestStart) { bestStart = start; bestEnd = lastColor; }
+        start = -1;
+        lastColor = -1;
+      }
+    }
+    if (start >= 0 && lastColor - start > bestEnd - bestStart) { bestStart = start; bestEnd = lastColor; }
+    const runWidth = bestEnd - bestStart + 1;
+    if (runWidth < width * 0.28 || runWidth > width * 0.94) continue;
+    rows.push({ y, left: bestStart, right: bestEnd, center: (bestStart + bestEnd) / 2, runWidth });
+  }
+
+  let best: Box | null = null;
+  let bestScore = 0;
+  for (let start = 0; start < rows.length; start++) {
+    const group = [rows[start]];
+    for (let next = start + 1; next < rows.length; next++) {
+      const previous = group[group.length - 1];
+      const candidate = rows[next];
+      if (candidate.y - previous.y > 6) break;
+      if (Math.abs(candidate.center - previous.center) > width * 0.1 || Math.abs(candidate.runWidth - previous.runWidth) > width * 0.16) break;
+      group.push(candidate);
+    }
+    if (group.length < 8) continue;
+    const boxWidth = percentile(group.map((row) => row.runWidth), 0.5);
+    const boxHeight = group[group.length - 1].y - group[0].y + 2;
+    const ratio = boxWidth / Math.max(1, boxHeight);
+    if (ratio < 1.2 || ratio > 2.15) continue;
+    const averageCenter = group.reduce((sum, row) => sum + row.center, 0) / group.length;
+    const left = Math.round(averageCenter - boxWidth / 2);
+    const top = group[0].y;
+    const ratioQuality = 1 - Math.min(1, Math.abs(ratio - 1.586) / 0.45);
+    const score = group.length * boxWidth * (0.35 + ratioQuality * 0.65);
+    if (score > bestScore) {
+      best = { minX: Math.max(0, left), maxX: Math.min(width - 1, left + boxWidth - 1), minY: top, maxY: Math.min(height - 1, top + boxHeight - 1), count: group.length * boxWidth };
+      bestScore = score;
+    }
+  }
+  return best;
+};
+
 const findCardByEdges = (pixels: Uint8ClampedArray, width: number, height: number): Box | null => {
   const total = width * height;
   const gray = new Uint8Array(total);
@@ -153,7 +214,8 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
     const score = box.count * density * (1 - Math.min(1, Math.abs(ratio - 1.586) / 0.8));
     if (score > colorScore) { colorCandidate = box; colorScore = score; }
   }
-  const best = colorCandidate || findCardByEdges(pixels, work.width, work.height);
+  const runCandidate = findCardByChromaticRuns(pixels, work.width, work.height);
+  const best = runCandidate || colorCandidate || findCardByEdges(pixels, work.width, work.height);
   if (!best) throw new Error("Não encontrei a base do cartão. Deixe a borda inferior e os dois cantos visíveis, evite reflexo e fotografe de cima.");
 
   let axisA = best.maxX - best.minX + 1;
@@ -166,7 +228,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
 
   return {
     pixelsPerMm: longScale,
-    confidence: Math.max(70, Math.min(colorCandidate ? 98 : 96, Math.round((colorCandidate ? 98 : 96) - ratioError * 45))),
+    confidence: Math.max(70, Math.min(runCandidate || colorCandidate ? 98 : 96, Math.round((runCandidate || colorCandidate ? 98 : 96) - ratioError * 45))),
     cardBox: {
       x: best.minX / work.width,
       y: best.minY / work.height,
