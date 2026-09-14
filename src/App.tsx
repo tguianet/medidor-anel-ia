@@ -109,6 +109,8 @@ const RING_DIAMETER_TABLE = [
 const DIAMETER_CALIBRATION_POINTS = [
   { measuredWidthMm: 18.2, innerDiameterMm: 17.83 }, // aro 16
   { measuredWidthMm: 20.5, innerDiameterMm: 19.42 }, // aro 21
+  { measuredWidthMm: 21.1, innerDiameterMm: 20.37 }, // aro 24
+  { measuredWidthMm: 21.4, innerDiameterMm: 20.37 }, // aro 24
   { measuredWidthMm: 22.4, innerDiameterMm: 21.04 }, // aro 26
   { measuredWidthMm: 24.0, innerDiameterMm: 21.68 }, // aro 28
 ];
