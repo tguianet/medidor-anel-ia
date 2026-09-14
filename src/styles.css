@@ -143,6 +143,15 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .hand-result-summary strong { color: #f0cf80; }
 .admin-entry { width: 100%; margin: 0 0 18px; padding: 11px 14px; border: 1px dashed #6f604c; border-radius: 11px; color: #9d9282; background: #17130f; font-size: 12px; font-weight: 800; cursor: pointer; }
 .admin-calibration { display: grid; gap: 13px; margin: 0 0 18px; padding: 16px; border: 1px solid #8d7444; border-radius: 14px; background: linear-gradient(145deg, #292219, #15110d); }
+.gauge-curve { display: grid; gap: 10px; padding: 13px; border: 1px solid rgba(83, 222, 170, .45); border-radius: 12px; background: rgba(22, 69, 52, .22); }
+.gauge-curve > div:first-child { display: grid; gap: 3px; }
+.gauge-curve > div:first-child strong { color: #64e5b1; }
+.gauge-curve > div:first-child span { color: #d3cdc1; font-size: .84rem; line-height: 1.35; }
+.gauge-curve-grid { display: grid; grid-template-columns: 1.25fr 1.25fr 1fr .75fr; gap: 1px; overflow: hidden; border-radius: 8px; background: rgba(232, 213, 169, .2); }
+.gauge-curve-grid > span { padding: 8px 6px; background: #221c15; color: #ddc37d; font-size: .72rem; font-weight: 700; text-align: center; }
+.gauge-curve-row { display: contents; }
+.gauge-curve-row > * { padding: 8px 6px; background: rgba(20, 17, 13, .94); color: #f5f0e7; font-size: .83rem; text-align: center; font-style: normal; }
+.gauge-curve-row b { color: #64e5b1; }
 .admin-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .admin-title div { display: grid; gap: 2px; }
 .admin-title span { color: #d3b36f; font-size: 9px; font-weight: 900; letter-spacing: .15em; }
