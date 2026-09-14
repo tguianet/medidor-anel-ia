@@ -107,7 +107,35 @@ const RING_DIAMETER_TABLE = [
   { size: 31, diameterMm: 22.60 }, { size: 32, diameterMm: 22.92 },
   { size: 33, diameterMm: 23.24 },
 ];
-const FINGER_TO_INNER_DIAMETER_FACTOR = 0.94;
+const DIAMETER_CALIBRATION_POINTS = [
+  { measuredWidthMm: 18.2, innerDiameterMm: 17.83 }, // aro 16
+  { measuredWidthMm: 20.5, innerDiameterMm: 19.42 }, // aro 21
+  { measuredWidthMm: 22.4, innerDiameterMm: 21.04 }, // aro 26
+  { measuredWidthMm: 24.0, innerDiameterMm: 21.68 }, // aro 28
+];
+
+const estimateInnerDiameter = (measuredWidthMm: number) => {
+  const first = DIAMETER_CALIBRATION_POINTS[0];
+  const last = DIAMETER_CALIBRATION_POINTS[DIAMETER_CALIBRATION_POINTS.length - 1];
+
+  if (measuredWidthMm <= first.measuredWidthMm) {
+    return measuredWidthMm * (first.innerDiameterMm / first.measuredWidthMm);
+  }
+  if (measuredWidthMm >= last.measuredWidthMm) {
+    return measuredWidthMm * (last.innerDiameterMm / last.measuredWidthMm);
+  }
+
+  const upperIndex = DIAMETER_CALIBRATION_POINTS.findIndex(
+    (point) => point.measuredWidthMm >= measuredWidthMm,
+  );
+  const lower = DIAMETER_CALIBRATION_POINTS[upperIndex - 1];
+  const upper = DIAMETER_CALIBRATION_POINTS[upperIndex];
+  const progress = (measuredWidthMm - lower.measuredWidthMm)
+    / (upper.measuredWidthMm - lower.measuredWidthMm);
+
+  return lower.innerDiameterMm
+    + progress * (upper.innerDiameterMm - lower.innerDiameterMm);
+};
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -531,7 +559,7 @@ export default function App() {
     if (!pixelsPerMm) return null;
     const widthPx = Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
     const widthMm = widthPx / pixelsPerMm;
-    const equivalentDiameterMm = widthMm * FINGER_TO_INNER_DIAMETER_FACTOR;
+    const equivalentDiameterMm = estimateInnerDiameter(widthMm);
     const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
       Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
     );
