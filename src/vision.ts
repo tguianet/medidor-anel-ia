@@ -4,7 +4,7 @@ export type CardCalibration = {
   cardBox: { x: number; y: number; width: number; height: number };
 };
 
-type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
+export type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
 
 const loadImage = async (src: string) => {
   const image = new Image();
@@ -16,7 +16,7 @@ const loadImage = async (src: string) => {
 // Cor não é uma regra de calibração. Esta leitura existe somente como plano B
 // quando as bordas estiverem pouco visíveis; o critério principal é o formato
 // retangular padrão do cartão.
-const isChromaticCardSurface = (r: number, g: number, b: number) => {
+export const isChromaticCardSurface = (r: number, g: number, b: number) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const saturation = (max - min) / Math.max(1, max);
@@ -25,7 +25,7 @@ const isChromaticCardSurface = (r: number, g: number, b: number) => {
   return max > 50 && saturation > 0.28 && (coolColor || vividRed);
 };
 
-const percentile = (values: number[], amount: number) => {
+export const percentile = (values: number[], amount: number) => {
   const ordered = [...values].sort((a, b) => a - b);
   return ordered[Math.max(0, Math.min(ordered.length - 1, Math.round((ordered.length - 1) * amount)))];
 };
@@ -170,7 +170,7 @@ const findCardByEdges = (pixels: Uint8ClampedArray, width: number, height: numbe
 
 // A câmera já pede que o cartão ocupe quase toda a largura da guia. Portanto,
 // um trecho curto de texto, logotipo ou brilho nunca pode virar a base.
-const scoreCardShape = (box: Box, imageWidth: number, imageHeight: number) => {
+export const scoreCardShape = (box: Box, imageWidth: number, imageHeight: number) => {
   const boxWidth = box.maxX - box.minX + 1;
   const boxHeight = box.maxY - box.minY + 1;
   const widthShare = boxWidth / imageWidth;
