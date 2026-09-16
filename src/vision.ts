@@ -13,9 +13,9 @@ const loadImage = async (src: string) => {
   return image;
 };
 
-// Detecta cores de cartão sem confundir a madeira ou a pele com o cartão.
-// Cartões escuros, brancos, foscos ou em tons quentes usam o detector de
-// bordas como alternativa.
+// Cor não é uma regra de calibração. Esta leitura existe somente como plano B
+// quando as bordas estiverem pouco visíveis; o critério principal é o formato
+// retangular padrão do cartão.
 const isChromaticCardSurface = (r: number, g: number, b: number) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
@@ -30,9 +30,8 @@ const percentile = (values: number[], amount: number) => {
   return ordered[Math.max(0, Math.min(ordered.length - 1, Math.round((ordered.length - 1) * amount)))];
 };
 
-// Procura um retângulo de cartão pelas faixas coloridas horizontais. É mais
-// confiável do que usar apenas um bloco de cor conectado quando há objetos
-// coloridos, reflexos ou a mão logo abaixo do cartão.
+// Plano B para imagens de pouco contraste. Mesmo aqui, só aceitamos algo com
+// proporção de cartão; a tonalidade nunca define se o cartão é válido.
 const findCardByChromaticRuns = (pixels: Uint8ClampedArray, width: number, height: number): Box | null => {
   type Row = { y: number; left: number; right: number; center: number; runWidth: number };
   const rows: Row[] = [];
@@ -219,7 +218,11 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
     if (score > colorScore) { colorCandidate = box; colorScore = score; }
   }
   const runCandidate = findCardByChromaticRuns(pixels, work.width, work.height);
-  const best = runCandidate || colorCandidate || findCardByEdges(pixels, work.width, work.height);
+  // Primeiro localizamos a geometria: bordas + proporção 85,60 × 53,98.
+  // A cor entra apenas como contingência para manter a leitura possível em
+  // fotos com pouca separação entre cartão e fundo.
+  const edgeCandidate = findCardByEdges(pixels, work.width, work.height);
+  const best = edgeCandidate || runCandidate || colorCandidate;
   if (!best) throw new Error("Não encontrei a base do cartão. Deixe a borda inferior e os dois cantos visíveis, evite reflexo e fotografe de cima.");
 
   let axisA = best.maxX - best.minX + 1;
@@ -232,7 +235,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
 
   return {
     pixelsPerMm: longScale,
-    confidence: Math.max(70, Math.min(runCandidate || colorCandidate ? 98 : 96, Math.round((runCandidate || colorCandidate ? 98 : 96) - ratioError * 45))),
+    confidence: Math.max(70, Math.min(edgeCandidate ? 98 : 94, Math.round((edgeCandidate ? 98 : 94) - ratioError * 45))),
     cardBox: {
       x: best.minX / work.width,
       y: best.minY / work.height,
