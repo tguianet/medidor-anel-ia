@@ -2,9 +2,14 @@ import { getStore } from "@netlify/blobs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 
 const STORE_NAME = "ring-calibration-learning";
-const json = (data, status = 200) => new Response(JSON.stringify(data), {
+// Limita tentativas de PIN por IP para dificultar força bruta. O contador
+// vive no mesmo Blobs store (funções são stateless entre chamadas) e é
+// resetado a cada login bem-sucedido ou quando a janela de tempo expira.
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const json = (data, status = 200, extraHeaders = {}) => new Response(JSON.stringify(data), {
   status,
-  headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+  headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extraHeaders },
 });
 
 const authorized = (request) => {
@@ -12,6 +17,31 @@ const authorized = (request) => {
   const received = request.headers.get("x-admin-pin") || "";
   if (!expected || expected.length !== received.length) return false;
   return timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+};
+
+const getClientIp = (request, context) => (
+  context?.ip
+  || request.headers.get("x-nf-client-connection-ip")
+  || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+  || "unknown"
+);
+
+const rateLimitKey = (ip) => `ratelimit/${ip}`;
+
+const readRateLimit = async (store, ip) => {
+  const record = await store.get(rateLimitKey(ip), { type: "json", consistency: "strong" });
+  if (!record || Date.now() - record.windowStart > RATE_LIMIT_WINDOW_MS) {
+    return { windowStart: Date.now(), attempts: 0 };
+  }
+  return record;
+};
+
+const registerFailedAttempt = async (store, ip, record) => {
+  await store.setJSON(rateLimitKey(ip), { windowStart: record.windowStart, attempts: record.attempts + 1 });
+};
+
+const clearRateLimit = async (store, ip) => {
+  await store.delete(rateLimitKey(ip));
 };
 
 const readTests = async (store) => {
@@ -85,7 +115,7 @@ const responseData = (tests, rules) => ({
   gaugeCurve: makeGaugeCurve(tests),
 });
 
-export default async (request) => {
+export default async (request, context) => {
   const store = getStore(STORE_NAME);
   if (request.method === "GET") {
     const rules = await readRules(store);
@@ -93,7 +123,18 @@ export default async (request) => {
   }
   if (request.method !== "POST") return json({ error: "Método não permitido." }, 405);
   if (!process.env.CALIBRATION_ADMIN_PIN) return json({ error: "Defina CALIBRATION_ADMIN_PIN no Netlify antes de usar o modo administrador." }, 503);
-  if (!authorized(request)) return json({ error: "PIN administrativo incorreto." }, 401);
+
+  const clientIp = getClientIp(request, context);
+  const rateLimit = await readRateLimit(store, clientIp);
+  if (rateLimit.attempts >= RATE_LIMIT_MAX_ATTEMPTS) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((rateLimit.windowStart + RATE_LIMIT_WINDOW_MS - Date.now()) / 1000));
+    return json({ error: "Muitas tentativas de PIN incorreto. Tente novamente mais tarde." }, 429, { "retry-after": String(retryAfterSeconds) });
+  }
+  if (!authorized(request)) {
+    await registerFailedAttempt(store, clientIp, rateLimit);
+    return json({ error: "PIN administrativo incorreto." }, 401);
+  }
+  await clearRateLimit(store, clientIp);
 
   try {
     const body = await request.json();
