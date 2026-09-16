@@ -168,6 +168,22 @@ const findCardByEdges = (pixels: Uint8ClampedArray, width: number, height: numbe
   return best;
 };
 
+// A câmera já pede que o cartão ocupe quase toda a largura da guia. Portanto,
+// um trecho curto de texto, logotipo ou brilho nunca pode virar a base.
+const scoreCardShape = (box: Box, imageWidth: number, imageHeight: number) => {
+  const boxWidth = box.maxX - box.minX + 1;
+  const boxHeight = box.maxY - box.minY + 1;
+  const widthShare = boxWidth / imageWidth;
+  const heightShare = boxHeight / imageHeight;
+  const ratio = boxWidth / Math.max(1, boxHeight);
+  const ratioQuality = 1 - Math.min(1, Math.abs(ratio - 1.586) / 0.42);
+  const guideWidthQuality = 1 - Math.min(1, Math.abs(widthShare - 0.78) / 0.36);
+  const center = (box.minX + box.maxX) / 2 / imageWidth;
+  const centerQuality = 1 - Math.min(1, Math.abs(center - 0.5) / 0.36);
+  const heightQuality = heightShare >= 0.14 && heightShare <= 0.62 ? 1 : 0.35;
+  return ratioQuality * 0.52 + guideWidthQuality * 0.34 + centerQuality * 0.1 + heightQuality * 0.04;
+};
+
 export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   const image = await loadImage(photo);
   const work = document.createElement("canvas");
@@ -218,12 +234,14 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
     if (score > colorScore) { colorCandidate = box; colorScore = score; }
   }
   const runCandidate = findCardByChromaticRuns(pixels, work.width, work.height);
-  // Primeiro localizamos a geometria: bordas + proporção 85,60 × 53,98.
-  // A cor entra apenas como contingência para manter a leitura possível em
-  // fotos com pouca separação entre cartão e fundo.
+  // Selecionamos somente o retângulo que parece o cartão inteiro na guia.
+  // Isso impede que um trecho de logotipo, texto ou reflexo seja usado como
+  // se fosse a base de 85,60 mm.
   const edgeCandidate = findCardByEdges(pixels, work.width, work.height);
-  const best = edgeCandidate || runCandidate || colorCandidate;
-  if (!best) throw new Error("Não encontrei a base do cartão. Deixe a borda inferior e os dois cantos visíveis, evite reflexo e fotografe de cima.");
+  const candidates = [edgeCandidate, runCandidate, colorCandidate].filter((candidate): candidate is Box => candidate !== null);
+  const best = candidates.sort((a, b) => scoreCardShape(b, work.width, work.height) - scoreCardShape(a, work.width, work.height))[0];
+  const bestWidthShare = best ? (best.maxX - best.minX + 1) / work.width : 0;
+  if (!best || bestWidthShare < 0.42) throw new Error("Não encontrei a base inteira do cartão. Deixe os dois cantos inferiores visíveis e alinhe o cartão na guia.");
 
   let axisA = best.maxX - best.minX + 1;
   let axisB = best.maxY - best.minY + 1;
@@ -235,7 +253,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
 
   return {
     pixelsPerMm: longScale,
-    confidence: Math.max(70, Math.min(edgeCandidate ? 98 : 94, Math.round((edgeCandidate ? 98 : 94) - ratioError * 45))),
+    confidence: Math.max(70, Math.min(98, Math.round(98 - ratioError * 45))),
     cardBox: {
       x: best.minX / work.width,
       y: best.minY / work.height,
