@@ -4,6 +4,78 @@ export type CardCalibration = {
   cardBox: { x: number; y: number; width: number; height: number };
 };
 
+// Checagem em tempo real (sobre o preview da câmera) para acender o guia
+// verde quando o cartão está alinhado. Independente do pipeline de
+// calibração usado após a captura da foto.
+export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
+  if (!video.videoWidth || !video.videoHeight) return false;
+  const canvas = document.createElement("canvas");
+  canvas.width = 300;
+  canvas.height = 400;
+  const targetRatio = canvas.width / canvas.height;
+  const sourceRatio = video.videoWidth / video.videoHeight;
+  let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+  if (sourceRatio > targetRatio) {
+    sw = video.videoHeight * targetRatio;
+    sx = (video.videoWidth - sw) / 2;
+  } else {
+    sh = video.videoWidth / targetRatio;
+    sy = (video.videoHeight - sh) / 2;
+  }
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const grayAt = (x: number, y: number) => {
+    const offset = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+    return pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114;
+  };
+  const left = canvas.width * 0.11;
+  const right = canvas.width * 0.89;
+  const top = canvas.height * 0.1;
+  const bottom = top + (canvas.width * 0.78) / 1.586;
+  const verticalScore = (x: number, insideDirection: number) => {
+    let total = 0;
+    let count = 0;
+    let continuous = 0;
+    for (let y = top + 12; y <= bottom - 12; y += 5) {
+      const difference = Math.abs(grayAt(x + insideDirection * 4, y) - grayAt(x - insideDirection * 4, y));
+      total += difference;
+      if (difference >= 12) continuous++;
+      count++;
+    }
+    const average = total / Math.max(1, count);
+    const coverage = continuous / Math.max(1, count);
+    return average * (0.35 + coverage * 0.65);
+  };
+  const horizontalScore = (y: number, insideDirection: number) => {
+    let total = 0;
+    let count = 0;
+    let continuous = 0;
+    for (let x = left + 14; x <= right - 14; x += 5) {
+      const difference = Math.abs(grayAt(x, y + insideDirection * 4) - grayAt(x, y - insideDirection * 4));
+      total += difference;
+      if (difference >= 12) continuous++;
+      count++;
+    }
+    const average = total / Math.max(1, count);
+    const coverage = continuous / Math.max(1, count);
+    return average * (0.35 + coverage * 0.65);
+  };
+  const bestNear = (position: number, score: (value: number) => number) => {
+    let best = 0;
+    for (let shift = -9; shift <= 9; shift += 3) best = Math.max(best, score(position + shift));
+    return best;
+  };
+  const scores = [
+    bestNear(left, (value) => verticalScore(value, 1)),
+    bestNear(right, (value) => verticalScore(value, -1)),
+    bestNear(bottom, (value) => horizontalScore(value, -1)),
+  ];
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return scores.every((score) => score >= 14) && average >= 17;
+};
+
 export type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
 
 const loadImage = async (src: string) => {
