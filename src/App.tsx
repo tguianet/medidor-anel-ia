@@ -1023,14 +1023,25 @@ export default function App() {
             {phase === "finger" && pixelsPerMm && (
               <>
                 {(["left","right"] as FingerSide[]).map((side)=>{
-                  const line=fingerLines[side];
                   const locked=side==="left"?leftLocked:rightLocked;
+                  const center=side==="left"?leftLine:rightLine;
+                  const tilt=side==="left"?leftFingerTilt:rightFingerTilt;
+                  if(!locked){
+                    return <button
+                      key={side}
+                      className={`caliper-line ${side}${tryOn ? " ring-adjust" : ""}`}
+                      style={{ left: `${center}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${tilt.toFixed(2)}deg)` }}
+                      onPointerDown={(event)=>startDrag(side,event)}
+                      aria-label={side==="left"?"Aproximar linha esquerda para o ímã":"Aproximar linha direita para o ímã"}
+                    ><span /></button>;
+                  }
+                  const line=fingerLines[side];
                   return <svg
                     key={side}
-                    className={`finger-line-overlay ${side}${locked?" locked":""}${tryOn?" ring-adjust":""}`}
+                    className={`finger-line-overlay ${side} locked${tryOn?" ring-adjust":""}`}
                     viewBox="0 0 100 100"
                     preserveAspectRatio="none"
-                    aria-label={side==="left"?"Ajustar linha esquerda do dedo":"Ajustar linha direita do dedo"}
+                    aria-label={side==="left"?"Refinar linha esquerda do dedo":"Refinar linha direita do dedo"}
                   >
                     <line className="finger-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
                       onPointerDown={(e)=>startFingerLineDrag(side,null,e)} />
@@ -1139,7 +1150,7 @@ export default function App() {
             />
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
-            <strong>{leftLocked && rightLocked ? "Bordas magnéticas ajustadas" : "Aproxime e solte cada linha na borda"}</strong>
+            <strong>{leftLocked && rightLocked ? "Ímã concluído — faça o ajuste fino" : "1. Primeiro deixe o ímã pegar as duas bordas"}</strong>
             <span>
               {leftLocked ? (leftManualRefined ? `✓ Esquerda refinada manualmente` : `✓ Esquerda magnética ${leftMagnetConfidence}%`) : "○ Falta a esquerda"}
               {" · "}
@@ -1168,7 +1179,7 @@ export default function App() {
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
-          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Aproxime e solte para usar o ímã. Depois, arraste a linha inteira ou cada bolinha da ponta para refinar posição e inclinação."}</p>
+          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Primeiro aproxime e solte cada linha para o ímã travar no dedo. Só depois aparecem as duas bolinhas para o ajuste fino manual."}</p>
         </section>
       )}
 
