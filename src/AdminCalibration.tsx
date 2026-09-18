@@ -33,7 +33,8 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
   const [open, setOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
-  const [actualRing, setActualRing] = useState(measurement.ringSize);\n  const [actualDiameterMm, setActualDiameterMm] = useState("");
+  const [actualRing, setActualRing] = useState(measurement.ringSize);
+  const [actualDiameterMm, setActualDiameterMm] = useState("");
   const [finger, setFinger] = useState("anelar");
   const [hand, setHand] = useState("direita");
   const [note, setNote] = useState("");
@@ -109,7 +110,8 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
           <div className="admin-fields">
             <label>Aro real confirmado<input type="number" min="1" max="40" value={actualRing} onChange={(event) => setActualRing(Number(event.target.value))} /></label>
             <label>Tipo de teste<select value={measurementType} onChange={(event) => setMeasurementType(event.target.value as "finger" | "anelimetro")}><option value="finger">Dedo real</option><option value="anelimetro">Anelímetro padrão</option></select></label>
-            {measurementType === "anelimetro" && <label>Diâmetro real (paquímetro, mm)<input type="number" min="10" max="40" step="0.01" value={actualDiameterMm} onChange={(event) => setActualDiameterMm(event.target.value)} placeholder="Ex.: 21.68" /></label>}\n            <label>Dedo<select value={finger} onChange={(event) => setFinger(event.target.value)}><option>anelar</option><option>médio</option><option>indicador</option><option>mínimo</option><option>polegar</option></select></label>
+            {measurementType === "anelimetro" && <label>Diâmetro real (paquímetro, mm)<input type="number" min="10" max="40" step="0.01" value={actualDiameterMm} onChange={(event) => setActualDiameterMm(event.target.value)} placeholder="Ex.: 21.68" /></label>}
+            <label>Dedo<select value={finger} onChange={(event) => setFinger(event.target.value)}><option>anelar</option><option>médio</option><option>indicador</option><option>mínimo</option><option>polegar</option></select></label>
             <label>Mão<select value={hand} onChange={(event) => setHand(event.target.value)}><option>direita</option><option>esquerda</option></select></label>
             <label className="wide">Observação opcional<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Ex.: medido com aneleira" /></label>
           </div>
