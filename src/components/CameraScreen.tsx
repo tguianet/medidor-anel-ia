@@ -14,7 +14,7 @@ type Props = {
 };
 
 export default function CameraScreen({
-  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, cameraOpening, error, onClose, onCapture, onRetry,
+  videoRef, torchOn, torchSupported, onToggleTorch, cameraOpening, error, onClose, onCapture, onRetry,
 }: Props) {
   return (
     <section className="camera-screen">
@@ -25,18 +25,11 @@ export default function CameraScreen({
       <div className="viewport">
         <video ref={videoRef} playsInline muted autoPlay />
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
-        <div className={`card-alignment${cardReady ? " ready" : ""}`} aria-hidden="true">
-          <span>{cardReady ? "✓ BASE ALINHADA" : "ALINHE O CARTÃO"}</span>
-          <i className="live-base-left" />
-          <i className="live-base-right" />
-          <i className="finger-target-left" />
-          <i className="finger-target-right" />
-        </div>
-        <div className="finger-vertical-line" aria-hidden="true"><span>DEDO ESCOLHIDO</span></div>
+        <div className="photo-guide" aria-hidden="true"><span>CARTÃO + DEDO VISÍVEIS</span></div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{cardReady ? "Base verde: cartão horizontal e dedo escolhido entre as duas marcas" : torchOn ? "Luz ligada • alinhe o cartão na horizontal e centralize o dedo" : "Alinhe a base do cartão e deixe o dedo escolhido entre as duas marcas"}</p>
-      <button className={`shutter${cardReady ? " ready" : ""}`} onClick={onCapture} aria-label="Tirar fotografia"><span /></button>
+      <p>{torchOn ? "Luz ligada • fotografe de cima deixando o cartão e o dedo totalmente visíveis" : "Fotografe de cima. O alinhamento fino será feito depois com 4 linhas independentes."}</p>
+      <button className="shutter ready" onClick={onCapture} aria-label="Tirar fotografia"><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
   );
