@@ -503,8 +503,8 @@ export default function App() {
     // Depois que o ímã encontrou a borda, tocar/arrastar a mesma linha entra
     // em refinamento manual. Ao soltar, não puxamos de volta para o ímã.
     fingerRefineDragRef.current =
-      target === "left" && leftLocked ? "left" :
-      target === "right" && rightLocked ? "right" :
+      leftLocked && rightLocked && target === "left" ? "left" :
+      leftLocked && rightLocked && target === "right" ? "right" :
       null;
     draggingRef.current = target;
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
@@ -1024,17 +1024,24 @@ export default function App() {
               <>
                 {(["left","right"] as FingerSide[]).map((side)=>{
                   const locked=side==="left"?leftLocked:rightLocked;
+                  const bothLocked=leftLocked&&rightLocked;
                   const center=side==="left"?leftLine:rightLine;
                   const tilt=side==="left"?leftFingerTilt:rightFingerTilt;
-                  if(!locked){
+
+                  // Etapa 1: enquanto as DUAS bordas ainda não estiverem verdes,
+                  // mostramos somente a linha magnética simples, sem bolinhas.
+                  if(!bothLocked){
                     return <button
                       key={side}
-                      className={`caliper-line ${side}${tryOn ? " ring-adjust" : ""}`}
+                      className={`caliper-line ${side}${locked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`}
                       style={{ left: `${center}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${tilt.toFixed(2)}deg)` }}
                       onPointerDown={(event)=>startDrag(side,event)}
-                      aria-label={side==="left"?"Aproximar linha esquerda para o ímã":"Aproximar linha direita para o ímã"}
+                      aria-label={side==="left"?"Alinhar linha esquerda com o ímã":"Alinhar linha direita com o ímã"}
                     ><span /></button>;
                   }
+
+                  // Etapa 2: somente depois das duas bordas magnéticas estarem
+                  // travadas em verde aparecem as duas bolinhas para refinamento.
                   const line=fingerLines[side];
                   return <svg
                     key={side}
@@ -1150,11 +1157,11 @@ export default function App() {
             />
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
-            <strong>{leftLocked && rightLocked ? "Ímã concluído — faça o ajuste fino" : "1. Primeiro deixe o ímã pegar as duas bordas"}</strong>
+            <strong>{leftLocked && rightLocked ? "2. Ímã concluído — agora ajuste pelas bolinhas" : "1. Alinhe as duas linhas até ficarem verdes"}</strong>
             <span>
-              {leftLocked ? (leftManualRefined ? `✓ Esquerda refinada manualmente` : `✓ Esquerda magnética ${leftMagnetConfidence}%`) : "○ Falta a esquerda"}
+              {leftLocked ? (leftLocked&&rightLocked&&leftManualRefined ? `✓ Esquerda refinada manualmente` : `✓ Esquerda magnética ${leftMagnetConfidence}%`) : "○ Falta a esquerda"}
               {" · "}
-              {rightLocked ? (rightManualRefined ? `✓ Direita refinada manualmente` : `✓ Direita magnética ${rightMagnetConfidence}%`) : "○ Falta a direita"}
+              {rightLocked ? (leftLocked&&rightLocked&&rightManualRefined ? `✓ Direita refinada manualmente` : `✓ Direita magnética ${rightMagnetConfidence}%`) : "○ Falta a direita"}
             </span>
           </div>}
 
@@ -1179,7 +1186,7 @@ export default function App() {
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
-          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Primeiro aproxime e solte cada linha para o ímã travar no dedo. Só depois aparecem as duas bolinhas para o ajuste fino manual."}</p>
+          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Primeiro alinhe as duas linhas no dedo e solte para o ímã travar em verde. As bolinhas só aparecem depois que esquerda e direita estiverem verdes."}</p>
         </section>
       )}
 
