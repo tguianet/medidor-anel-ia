@@ -81,6 +81,12 @@ export const INNER_DIAMETER_OFFSET_MM = 1.73;
 // Margem fixa de conforto: o aro técnico é elevado em um número para que a
 // indicação final não fique apertada no dedo.
 export const COMFORT_RING_OFFSET = 1;
+
+// Zona morta na largura medida do dedo. Quando a leitura cai muito perto
+// da fronteira entre dois aros vizinhos, evitamos trocar de aro por poucos
+// décimos de milímetro. Dentro da zona escolhemos o aro maior (mais seguro
+// para não apertar) e sinalizamos que o resultado está no limite.
+export const RING_BOUNDARY_DEAD_ZONE_MM = 0.15;
 export const estimateInnerDiameter = (measuredWidthMm: number) => (
   measuredWidthMm * INNER_DIAMETER_SLOPE + INNER_DIAMETER_OFFSET_MM
 );
@@ -112,6 +118,9 @@ export type RingResult = {
   ringSize: number;
   calculationMode: "formula";
   appliedRuleOffset: number | null;
+  nearBoundary: boolean;
+  boundaryNeighborRingSize: number | null;
+  boundaryDistanceMm: number | null;
 };
 
 const findRingBySize = (size: number) => (
@@ -128,9 +137,34 @@ export const computeRingResult = (
   // habilitada pelo modo anelímetro.
   const widthMm = applyBenchCalibration ? calibrateMeasuredWidthMm(rawWidthMm) : rawWidthMm;
   const equivalentDiameterMm = estimateInnerDiameter(widthMm);
-  const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
+
+  // Descobre a fronteira entre os dois aros técnicos vizinhos no domínio da
+  // largura medida. Isso permite aplicar a zona morta em mm reais do dedo,
+  // antes da margem de conforto.
+  let closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
     Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
   );
+  let nearBoundary = false;
+  let boundaryNeighborRingSize: number | null = null;
+  let boundaryDistanceMm: number | null = null;
+
+  for (let i = 0; i < RING_DIAMETER_TABLE.length - 1; i++) {
+    const lower = RING_DIAMETER_TABLE[i];
+    const upper = RING_DIAMETER_TABLE[i + 1];
+    const boundaryDiameter = (lower.diameterMm + upper.diameterMm) / 2;
+    const boundaryWidthMm = (boundaryDiameter - INNER_DIAMETER_OFFSET_MM) / INNER_DIAMETER_SLOPE;
+    const distanceMm = Math.abs(widthMm - boundaryWidthMm);
+
+    if (distanceMm <= RING_BOUNDARY_DEAD_ZONE_MM) {
+      nearBoundary = true;
+      boundaryDistanceMm = distanceMm;
+      // Dentro da zona morta preferimos o aro técnico maior. Depois a margem
+      // de conforto continua sendo aplicada normalmente.
+      closestRing = upper;
+      boundaryNeighborRingSize = lower.size + COMFORT_RING_OFFSET;
+      break;
+    }
+  }
   const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
     widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
   ));
@@ -154,5 +188,10 @@ export const computeRingResult = (
     ringSize: selectedRing.size,
     calculationMode: "formula",
     appliedRuleOffset: matchingRule?.offset ?? null,
+    nearBoundary,
+    boundaryNeighborRingSize: nearBoundary
+      ? clamp(boundaryNeighborRingSize ?? selectedRing.size - 1, 1, 40)
+      : null,
+    boundaryDistanceMm,
   };
 };
