@@ -29,6 +29,7 @@ export default function App() {
   const [cardCorners, setCardCorners] = useState<[Point, Point, Point, Point]>([{x:15,y:28},{x:85,y:28},{x:85,y:58},{x:15,y:58}]);
   const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [cardCornerLocked, setCardCornerLocked] = useState<[boolean, boolean, boolean, boolean]>([false,false,false,false]);
+  const [selectedCardCorner, setSelectedCardCorner] = useState<number | null>(null);
   const [cardLeftLocked, setCardLeftLocked] = useState(false);
   const [cardRightLocked, setCardRightLocked] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
@@ -181,7 +182,7 @@ export default function App() {
       setCardRightLocked(true);
       camera.setError("Confira as quatro bordas do cartão e toque em Confirmar perspectiva.");
     } catch {
-      camera.setError("Não consegui travar a base automaticamente. Arraste as duas linhas para os cantos inferiores do cartão.");
+      camera.setError("Não consegui localizar o cartão automaticamente. Ajuste manualmente os 4 pontos nas bordas do cartão.");
     } finally {
       setAnalyzingCard(false);
     }
@@ -196,7 +197,11 @@ export default function App() {
       const measured = distance(map(quad[0]), map(quad[1]));
       if (Math.abs(measured - 85.6) > 0.15) throw new Error("perspectiva");
       setPerspectiveReady(true);
-      activateFingerMeasurement(cardCorners[3].x, cardCorners[2].x, (cardCorners[2].y + cardCorners[3].y) / 2, calibrationConfidence || 92);
+      const bottomY = (cardCorners[2].y + cardCorners[3].y) / 2;
+      setCardLeft(cardCorners[3].x);
+      setCardRight(cardCorners[2].x);
+      setCardBottom(bottomY);
+      activateFingerMeasurement(cardCorners[3].x, cardCorners[2].x, bottomY, calibrationConfidence || 92);
     } catch { camera.setError("As quatro bordas não formam um cartão válido. Ajuste os cantos e tente novamente."); }
   };
 
@@ -256,13 +261,19 @@ export default function App() {
   const updateDrag = (clientX: number, clientY: number) => {
     if (!draggingRef.current || !measureRef.current) return;
     const rect = measureRef.current.getBoundingClientRect();
-    const x = clamp(((clientX - rect.left) / rect.width) * 100, 2, 98);
-    const y = clamp(((clientY - rect.top) / rect.height) * 100, 8, 92);
+    const rawX = ((clientX - rect.left) / rect.width) * 100;
+    const rawY = ((clientY - rect.top) / rect.height) * 100;
+    const imageX = (((clientX - rect.left) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * 100;
+    const imageY = (((clientY - rect.top) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * 100;
+    const x = clamp(rawX, 2, 98);
+    const y = clamp(rawY, 8, 92);
     const target = draggingRef.current;
     if (typeof target === "string" && target.startsWith("card-corner-")) {
       const index = Number(target.slice(-1));
+      setSelectedCardCorner(index);
       setPerspectiveReady(false);
-      setCardCorners((current) => current.map((p,i) => i === index ? {x,y} : p) as [Point,Point,Point,Point]);
+      setCardCornerLocked((current) => current.map((value,i) => i === index ? false : value) as [boolean,boolean,boolean,boolean]);
+      setCardCorners((current) => current.map((p,i) => i === index ? {x:clamp(imageX,2,98),y:clamp(imageY,4,96)} : p) as [Point,Point,Point,Point]);
       return;
     }
     if (target === "showcase-ring") {
@@ -633,20 +644,29 @@ export default function App() {
           >
             {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && (
-              <>
-                <svg className="card-perspective-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Quatro bordas do cartão">
-                  <polygon points={cardCorners.map(p => `${p.x},${p.y}`).join(" ")} />
-                  {cardCorners.map((p,i) => <circle className={cardCornerLocked[i] ? "locked" : ""} key={i} cx={p.x} cy={p.y} r="1.6" onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = (`card-corner-${i}` as DragTarget); e.currentTarget.setPointerCapture(e.pointerId); }} />)}
-                </svg>
-                <button
-                  className={`card-base-line${cardLeftLocked && cardRightLocked ? " locked" : ""}`}
-                  style={{ left: `${cardLeft}%`, top: `${cardBottom}%`, width: `${cardRight - cardLeft}%` }}
-                  onPointerDown={(event) => startDrag("card-base-y", event)}
-                  aria-label="Mover linha para a base do cartão"
-                ><span>BASE 85,60 mm</span></button>
-                <button className={`card-base-endpoint left${cardLeftLocked ? " locked" : ""}`} style={{ left: `${cardLeft}%`, top: `${cardBottom}%` }} onPointerDown={(event) => startDrag("card-base-left", event)} aria-label="Ajustar canto inferior esquerdo" />
-                <button className={`card-base-endpoint right${cardRightLocked ? " locked" : ""}`} style={{ left: `${cardRight}%`, top: `${cardBottom}%` }} onPointerDown={(event) => startDrag("card-base-right", event)} aria-label="Ajustar canto inferior direito" />
-              </>
+              <svg
+                className="card-perspective-overlay"
+                style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                aria-label="Quatro bordas ajustáveis do cartão"
+              >
+                <polygon points={cardCorners.map(p => `${p.x},${p.y}`).join(" ")} />
+                {cardCorners.map((p,i) => (
+                  <g key={i}>
+                    <circle className="corner-hit" cx={p.x} cy={p.y} r="4.4"
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedCardCorner(i);
+                        draggingRef.current = (`card-corner-${i}` as DragTarget);
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      }}
+                    />
+                    <circle className={`corner-dot${cardCornerLocked[i] ? " locked" : ""}${selectedCardCorner === i ? " selected" : ""}`} cx={p.x} cy={p.y} r="1.7" />
+                  </g>
+                ))}
+              </svg>
             )}
             {phase === "finger" && pixelsPerMm && (
               <div className="card-base-reference" style={{ left: `${cardLeft}%`, top: `${cardBottom}%`, width: `${cardRight - cardLeft}%` }} aria-hidden="true"><span>BASE FIXA · 85,60 mm</span><i className="left" /><i className="right" /></div>
@@ -682,14 +702,14 @@ export default function App() {
             )}
           </div>
 
-          {analyzingCard && <p className="analysis-loading">Localizando a base e os cantos inferiores do cartão...</p>}
+          {analyzingCard && <p className="analysis-loading">Localizando o cartão e preparando os 4 pontos...</p>}
           {phase === "card" && !analyzingCard && <div className="card-corner-status">{cardCornerLocked.map((v,i)=><span key={i} className={v ? "locked" : ""}>{v ? "✓" : "○"} Canto {i+1}</span>)}</div>}
           {phase === "card" && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar perspectiva do cartão</button>}
           {phase === "card" && !analyzingCard && (
-            <div className={`card-base-status${cardLeftLocked && cardRightLocked ? " ready" : ""}`}>
-              <strong>{cardLeftLocked && cardRightLocked ? "✓ Confira a base antes de continuar" : "Ajuste os dois cantos inferiores"}</strong>
-              <span>{cardLeftLocked ? "✓ Esquerdo" : "○ Esquerdo"} · {cardRightLocked ? "✓ Direito" : "○ Direito"}</span>
-              {cardLeftLocked && cardRightLocked && <small>As pontas verdes precisam ficar exatamente nos dois cantos da base do cartão.</small>}
+            <div className="card-base-status">
+              <strong>Ajuste somente os 4 pontos do cartão</strong>
+              <span>Arraste cada ponto até o encontro das duas bordas retas. Ao soltar, o ímã procura o canto automaticamente.</span>
+              <small>As linhas antigas da base foram removidas desta etapa.</small>
             </div>
           )}
 
