@@ -45,6 +45,10 @@ export default function App() {
   const [panY, setPanY] = useState(0);
   const [leftLocked, setLeftLocked] = useState(false);
   const [rightLocked, setRightLocked] = useState(false);
+  const [leftFingerTilt, setLeftFingerTilt] = useState(0);
+  const [rightFingerTilt, setRightFingerTilt] = useState(0);
+  const [leftMagnetConfidence, setLeftMagnetConfidence] = useState(0);
+  const [rightMagnetConfidence, setRightMagnetConfidence] = useState(0);
   const [cardReady, setCardReady] = useState(false);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
@@ -116,6 +120,10 @@ export default function App() {
     setPanY(0);
     setLeftLocked(false);
     setRightLocked(false);
+    setLeftFingerTilt(0);
+    setRightFingerTilt(0);
+    setLeftMagnetConfidence(0);
+    setRightMagnetConfidence(0);
     setCardReady(false);
     setStage("camera");
     await camera.startCameraStream();
@@ -165,6 +173,10 @@ export default function App() {
     setPanY(0);
     setLeftLocked(false);
     setRightLocked(false);
+    setLeftFingerTilt(0);
+    setRightFingerTilt(0);
+    setLeftMagnetConfidence(0);
+    setRightMagnetConfidence(0);
     camera.stopCamera();
     setStage("review");
     camera.setError("");
@@ -276,6 +288,10 @@ export default function App() {
     setJointWidthMm(null);
     setLeftLocked(false);
     setRightLocked(false);
+    setLeftFingerTilt(0);
+    setRightFingerTilt(0);
+    setLeftMagnetConfidence(0);
+    setRightMagnetConfidence(0);
   };
 
   const captureHand = () => {
@@ -358,8 +374,18 @@ export default function App() {
       setShowcaseWidth(nextRight - fixedLeft);
       return;
     }
-    if (target === "left") { setLeftLocked(false); setLeftLine(Math.min(x, rightLine - 3)); }
-    if (target === "right") { setRightLocked(false); setRightLine(Math.max(x, leftLine + 3)); }
+    if (target === "left") {
+      setLeftLocked(false);
+      setLeftMagnetConfidence(0);
+      setLeftFingerTilt(0);
+      setLeftLine(Math.min(x, rightLine - 3));
+    }
+    if (target === "right") {
+      setRightLocked(false);
+      setRightMagnetConfidence(0);
+      setRightFingerTilt(0);
+      setRightLine(Math.max(x, leftLine + 3));
+    }
     if (target === "height") {
       setLeftLocked(false);
       setRightLocked(false);
@@ -417,6 +443,10 @@ export default function App() {
     setZoom(value);
     setLeftLocked(false);
     setRightLocked(false);
+    setLeftFingerTilt(0);
+    setRightFingerTilt(0);
+    setLeftMagnetConfidence(0);
+    setRightMagnetConfidence(0);
     if (value === 1) { setPanX(0); setPanY(0); }
   };
 
@@ -429,36 +459,89 @@ export default function App() {
     const screenY = measureY / 100 * rect.height;
     const imageX = ((screenX - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width;
     const imageY = ((screenY - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
-    const radius = Math.max(8, Math.round(18 / zoom));
-    let bestX = Math.round(imageX);
-    let bestScore = 0;
-    const colorAt = (x: number, y: number) => {
-      const offset = (y * source.width + x) * 4;
-      return [source.data[offset], source.data[offset + 1], source.data[offset + 2]];
+    const radius = Math.max(8, Math.round(20 / zoom));
+    const grayscale = (x:number,y:number) => {
+      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
+      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
+      const offset=(iy*source.width+ix)*4;
+      return source.data[offset]*0.299+source.data[offset+1]*0.587+source.data[offset+2]*0.114;
     };
-    for (let candidate = Math.round(imageX) - radius; candidate <= Math.round(imageX) + radius; candidate++) {
-      if (candidate < 3 || candidate >= source.width - 3) continue;
-      let score = 0;
-      let samples = 0;
-      for (let y = Math.round(imageY) - 16; y <= Math.round(imageY) + 16; y += 4) {
-        if (y < 0 || y >= source.height) continue;
-        const before = colorAt(candidate - 2, y);
-        const after = colorAt(candidate + 2, y);
-        score += Math.abs(before[0] - after[0]) + Math.abs(before[1] - after[1]) + Math.abs(before[2] - after[2]);
-        samples++;
+    const findEdgeAt = (center:number,y:number) => {
+      let bestX=Math.round(center);
+      let best=-Infinity;
+      for(let candidate=Math.round(center)-radius;candidate<=Math.round(center)+radius;candidate++){
+        if(candidate<3||candidate>=source.width-3) continue;
+        const contrast=Math.abs(grayscale(candidate-2,y)-grayscale(candidate+2,y));
+        const score=contrast-Math.abs(candidate-center)*0.52;
+        if(score>best){best=score;bestX=candidate;}
       }
-      score /= Math.max(samples, 1);
-      const distancePenalty = Math.abs(candidate - imageX) * 1.2;
-      if (score - distancePenalty > bestScore) { bestScore = score - distancePenalty; bestX = candidate; }
+      return {x:bestX,score:best};
+    };
+
+    // Ímã multiponto: procura a mesma borda em várias alturas próximas e
+    // ajusta uma reta robusta. Dobras/sombras isoladas deixam de mandar na linha.
+    const points:{x:number;y:number;score:number}[]=[];
+    for(const offset of [-42,-32,-22,-12,0,12,22,32,42]){
+      const y=Math.round(imageY+offset/Math.max(1,zoom));
+      if(y<4||y>=source.height-4) continue;
+      const edge=findEdgeAt(imageX,y);
+      if(edge.score>=9) points.push({x:edge.x,y,score:edge.score});
     }
-    if (bestScore < 24) {
-      if (side === "left") setLeftLocked(false); else setRightLocked(false);
-      return;
+
+    const unlock=()=>{
+      if(side==="left"){
+        setLeftLocked(false); setLeftMagnetConfidence(0); setLeftFingerTilt(0);
+      }else{
+        setRightLocked(false); setRightMagnetConfidence(0); setRightFingerTilt(0);
+      }
+    };
+    if(points.length<5){ unlock(); return; }
+
+    const median=(values:number[])=>{
+      const ordered=[...values].sort((a,b)=>a-b);
+      return ordered[Math.floor(ordered.length/2)];
+    };
+    const medianX=median(points.map(p=>p.x));
+    const filtered=points.filter(p=>Math.abs(p.x-medianX)<=Math.max(5,radius*0.72));
+    if(filtered.length<5){ unlock(); return; }
+
+    const cy=filtered.reduce((s,p)=>s+p.y,0)/filtered.length;
+    const cx=filtered.reduce((s,p)=>s+p.x,0)/filtered.length;
+    let yy=0,yx=0;
+    for(const p of filtered){
+      const dy=p.y-cy;
+      yy+=dy*dy;
+      yx+=dy*(p.x-cx);
     }
-    const snappedScreenX = rect.width / 2 + (bestX / source.width * rect.width - rect.width / 2) * zoom + panX;
-    const snappedPercent = clamp(snappedScreenX / rect.width * 100, 2, 98);
-    if (side === "left") { setLeftLine(Math.min(snappedPercent, rightLine - 3)); setLeftLocked(true); }
-    else { setRightLine(Math.max(snappedPercent, leftLine + 3)); setRightLocked(true); }
+    const slope=yy>1?yx/yy:0; // x = cx + slope * (y-cy)
+    const predictedCenterX=cx+slope*(imageY-cy);
+    const residuals=filtered.map(p=>Math.abs(p.x-(cx+slope*(p.y-cy))));
+    const residual=median(residuals);
+    const avgScore=filtered.reduce((s,p)=>s+p.score,0)/filtered.length;
+    const coverage=filtered.length/9;
+    const confidence=Math.round(clamp(
+      52 + coverage*28 + Math.min(18,avgScore*0.45) - residual*5.5,
+      0, 99,
+    ));
+
+    if(confidence<68 || residual>3.8){ unlock(); return; }
+
+    const snappedScreenX=rect.width/2+(predictedCenterX/source.width*rect.width-rect.width/2)*zoom+panX;
+    const snappedPercent=clamp(snappedScreenX/rect.width*100,2,98);
+    // Converte a inclinação no espaço da imagem para o ângulo visual da linha.
+    const tiltDeg=clamp(Math.atan(slope)*180/Math.PI,-12,12);
+
+    if(side==="left"){
+      setLeftLine(Math.min(snappedPercent,rightLine-3));
+      setLeftFingerTilt(tiltDeg);
+      setLeftMagnetConfidence(confidence);
+      setLeftLocked(true);
+    }else{
+      setRightLine(Math.max(snappedPercent,leftLine+3));
+      setRightFingerTilt(tiltDeg);
+      setRightMagnetConfidence(confidence);
+      setRightLocked(true);
+    }
   };
 
   const snapCardLine = (edge:CardEdge) => {
@@ -535,6 +618,8 @@ export default function App() {
     const imageY = (((measureY / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
     const leftCenter = toImageX(leftLine);
     const rightCenter = toImageX(rightLine);
+    const leftSlope = Math.tan(leftFingerTilt * Math.PI / 180);
+    const rightSlope = Math.tan(rightFingerTilt * Math.PI / 180);
     const searchRadius = Math.max(7, Math.round(18 / zoom));
     const grayscale = (x: number, y: number) => {
       const offset = (y * source.width + x) * 4;
@@ -559,8 +644,10 @@ export default function App() {
     for (const offset of [-24, -18, -12, -6, 0, 6, 12, 18, 24]) {
       const y = Math.round(imageY + offset);
       if (y < 3 || y >= source.height - 3) continue;
-      const leftEdge = findEdge(leftCenter, y);
-      const rightEdge = findEdge(rightCenter, y);
+      const leftPredicted = leftCenter + leftSlope * (y - imageY);
+      const rightPredicted = rightCenter + rightSlope * (y - imageY);
+      const leftEdge = findEdge(leftPredicted, y);
+      const rightEdge = findEdge(rightPredicted, y);
       if (leftEdge.score < 10 || rightEdge.score < 10 || rightEdge.x <= leftEdge.x) continue;
       samples.push({left:leftEdge.x,right:rightEdge.x,y,width:rightEdge.x-leftEdge.x});
     }
@@ -655,7 +742,7 @@ export default function App() {
     );
     if(cardBottomPx<=0) return null;
     return fallbackSample.width/cardBottomPx*85.6;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardQuad,cardLines]);
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,cardQuad,cardLines]);
 
   const confirmRestMeasurement = () => {
     if (liveWidthMm === null) return;
@@ -663,6 +750,10 @@ export default function App() {
     setFingerMeasureStep("joint");
     setLeftLocked(false);
     setRightLocked(false);
+    setLeftFingerTilt(0);
+    setRightFingerTilt(0);
+    setLeftMagnetConfidence(0);
+    setRightMagnetConfidence(0);
   };
 
   const confirmJointMeasurement = () => {
@@ -693,6 +784,10 @@ export default function App() {
     setPanY(0);
     setLeftLocked(false);
     setRightLocked(false);
+    setLeftFingerTilt(0);
+    setRightFingerTilt(0);
+    setLeftMagnetConfidence(0);
+    setRightMagnetConfidence(0);
     camera.setError("");
     setHandPhoto("");
     void openCamera();
@@ -790,8 +885,8 @@ export default function App() {
             )}
             {phase === "finger" && pixelsPerMm && (
               <>
-                <button className={`caliper-line left${leftLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
-                <button className={`caliper-line right${rightLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                <button className={`caliper-line left${leftLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${leftFingerTilt.toFixed(2)}deg)` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
+                <button className={`caliper-line right${rightLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${rightFingerTilt.toFixed(2)}deg)` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
                 <div className="measurement-band" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} aria-hidden="true" />
                 <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
                 <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
@@ -888,7 +983,14 @@ export default function App() {
               defaultMeasurementType={measurementMode}
             />
           )}
-          {phase === "finger" && !tryOn && (!leftLocked || !rightLocked) && <div className="edge-status"><strong>Aproxime e solte cada linha na borda</strong><span>{leftLocked ? "✓ Esquerda travada" : "○ Falta a esquerda"} · {rightLocked ? "✓ Direita travada" : "○ Falta a direita"}</span></div>}
+          {phase === "finger" && !tryOn && <div className="edge-status">
+            <strong>{leftLocked && rightLocked ? "Bordas magnéticas ajustadas" : "Aproxime e solte cada linha na borda"}</strong>
+            <span>
+              {leftLocked ? `✓ Esquerda magnética ${leftMagnetConfidence}%` : "○ Falta a esquerda"}
+              {" · "}
+              {rightLocked ? `✓ Direita magnética ${rightMagnetConfidence}%` : "○ Falta a direita"}
+            </span>
+          </div>}
 
           {tryOn && result && (
             <TryOnPanel
