@@ -629,7 +629,7 @@ export default function App() {
       ? restWidthMm !== null && jointWidthMm !== null ? Math.max(restWidthMm, jointWidthMm) : null
       : liveWidthMm;
     if (widthMm === null) return null;
-    return computeRingResult(widthMm, calibrationRules);
+    return computeRingResult(widthMm, calibrationRules, measurementMode === "anelimetro");
   }, [liveWidthMm, measurementMode, restWidthMm, jointWidthMm, calibrationRules]);
 
   const resetPhoto = () => {
@@ -819,8 +819,14 @@ export default function App() {
               <strong>Aro provável: {result.ringSize}</strong>
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
               <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
-              <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
-              <span>Correção aplicada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
+              {measurementMode === "anelimetro" ? (
+                <>
+                  <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
+                  <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
+                </>
+              ) : (
+                <span>Modo dedo: curva do anelímetro não aplicada</span>
+              )}
               {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
