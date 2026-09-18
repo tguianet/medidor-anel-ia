@@ -118,8 +118,15 @@ const findRingBySize = (size: number) => (
   RING_DIAMETER_TABLE.find((ring) => ring.size === size)
 );
 
-export const computeRingResult = (rawWidthMm: number, rules: CalibrationRule[] = []): RingResult => {
-  const widthMm = calibrateMeasuredWidthMm(rawWidthMm);
+export const computeRingResult = (
+  rawWidthMm: number,
+  rules: CalibrationRule[] = [],
+  applyBenchCalibration = true,
+): RingResult => {
+  // A curva MA -> PQ foi obtida com anelímetro rígido. Em dedo real ela
+  // supercorrigiu os testes iniciais, então só é aplicada quando explicitamente
+  // habilitada pelo modo anelímetro.
+  const widthMm = applyBenchCalibration ? calibrateMeasuredWidthMm(rawWidthMm) : rawWidthMm;
   const equivalentDiameterMm = estimateInnerDiameter(widthMm);
   const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
     Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
