@@ -36,6 +36,65 @@ export const homographyFromQuad = (quad: [Point, Point, Point, Point], width = 8
 
 export const distance = (a:Point,b:Point)=>Math.hypot(a.x-b.x,a.y-b.y);
 
+
+export type CardGeometryAssessment = {
+  valid: boolean;
+  confidence: number;
+  widthPerspective: number;
+  heightPerspective: number;
+  aspectError: number;
+  reason: string | null;
+};
+
+export const assessCardQuadGeometry = (
+  quad: [Point, Point, Point, Point],
+  expectedWidth = 85.6,
+  expectedHeight = 53.98,
+): CardGeometryAssessment => {
+  const [tl, tr, br, bl] = quad;
+  const top = distance(tl, tr);
+  const bottom = distance(bl, br);
+  const left = distance(tl, bl);
+  const right = distance(tr, br);
+  const averageWidth = (top + bottom) / 2;
+  const averageHeight = (left + right) / 2;
+  const expectedAspect = expectedWidth / expectedHeight;
+  const observedAspect = averageWidth / Math.max(1e-6, averageHeight);
+  const widthPerspective = Math.abs(top - bottom) / Math.max(1e-6, averageWidth);
+  const heightPerspective = Math.abs(left - right) / Math.max(1e-6, averageHeight);
+  const aspectError = Math.abs(observedAspect - expectedAspect) / expectedAspect;
+
+  const cross = (a: Point, b: Point, c: Point) =>
+    (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+  const crosses = [
+    cross(tl, tr, br),
+    cross(tr, br, bl),
+    cross(br, bl, tl),
+    cross(bl, tl, tr),
+  ];
+  const convex = crosses.every((value) => value > 0) || crosses.every((value) => value < 0);
+  const edgesHealthy = Math.min(top, bottom, left, right) > 8;
+
+  // O cartão pode ter alguma perspectiva, mas quando as bordas opostas
+  // divergem demais a escala fica sensível a poucos pixels. Nessa situação
+  // preferimos pedir outra calibração em vez de devolver um aro instável.
+  const valid = convex
+    && edgesHealthy
+    && widthPerspective <= 0.16
+    && heightPerspective <= 0.16
+    && aspectError <= 0.24;
+
+  let reason: string | null = null;
+  if (!convex || !edgesHealthy) reason = "As quatro linhas não formam um cartão válido.";
+  else if (widthPerspective > 0.16 || heightPerspective > 0.16) reason = "O cartão está inclinado demais. Deixe-o mais paralelo à câmera e calibre novamente.";
+  else if (aspectError > 0.24) reason = "A proporção do cartão ficou fora do esperado. Reencaixe as quatro bordas.";
+
+  const penalty = Math.max(widthPerspective, heightPerspective) * 105 + aspectError * 42;
+  const confidence = Math.max(72, Math.min(98, Math.round(98 - penalty)));
+
+  return { valid, confidence, widthPerspective, heightPerspective, aspectError, reason };
+};
+
 export const localMmPerPixel = (quad:[Point,Point,Point,Point], p:Point) => {
   const map=homographyFromQuad(quad);
   return distance(map(p),map({x:p.x+1,y:p.y}));
