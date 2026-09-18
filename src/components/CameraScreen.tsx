@@ -25,18 +25,22 @@ export default function CameraScreen({
       <div className="viewport">
         <video ref={videoRef} playsInline muted autoPlay />
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
-        <div className={`card-alignment${cardReady ? " ready" : ""}`} aria-hidden="true">
-          <span>{cardReady ? "✓ BASE ALINHADA" : "ALINHE O CARTÃO"}</span>
-          <i className="live-base-left" />
-          <i className="live-base-right" />
-          <i className="finger-target-left" />
-          <i className="finger-target-right" />
+        <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
+          <div className="live-card-frame">
+            <span>{cardReady ? "✓ CARTÃO ALINHADO" : "ENCAIXE O CARTÃO"}</span>
+            <i className="card-guide-corner tl" />
+            <i className="card-guide-corner tr" />
+            <i className="card-guide-corner br" />
+            <i className="card-guide-corner bl" />
+          </div>
+          <div className="live-finger-axis">
+            <span>ALINHE O DEDO</span>
+          </div>
         </div>
-        <div className="finger-vertical-line" aria-hidden="true"><span>DEDO ESCOLHIDO</span></div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{cardReady ? "Base verde: cartão horizontal e dedo escolhido entre as duas marcas" : torchOn ? "Luz ligada • alinhe o cartão na horizontal e centralize o dedo" : "Alinhe a base do cartão e deixe o dedo escolhido entre as duas marcas"}</p>
-      <button className={`shutter${cardReady ? " ready" : ""}`} onClick={onCapture} aria-label="Tirar fotografia"><span /></button>
+      <p>{cardReady ? "Cartão encaixado na referência. Mantenha o dedo sobre a linha central e tire a foto." : torchOn ? "Luz ligada • aproxime ou afaste até o cartão encaixar na moldura" : "Aproxime ou afaste a câmera até o cartão encaixar na moldura e alinhe o dedo na linha central."}</p>
+      <button className="shutter ready" onClick={onCapture} aria-label="Tirar fotografia"><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
   );

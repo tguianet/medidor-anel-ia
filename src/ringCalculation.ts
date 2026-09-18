@@ -1,5 +1,54 @@
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+
+export type MeasurementCalibrationPoint = {
+  rawMm: number;
+  calibratedMm: number;
+};
+
+// Curva-base MA -> PQ medida em bancada com anelímetro + paquímetro.
+// Entre os pontos usamos interpolação linear para evitar degraus.
+// Fora da faixa medida mantemos a correção do ponto extremo até haver
+// novos dados de calibração confiáveis.
+export const MEASUREMENT_CALIBRATION_POINTS: MeasurementCalibrationPoint[] = [
+  { rawMm: 15.5, calibratedMm: 15.4 },
+  { rawMm: 16.2, calibratedMm: 16.5 },
+  { rawMm: 16.9, calibratedMm: 17.4 },
+  { rawMm: 17.7, calibratedMm: 18.2 },
+  { rawMm: 18.4, calibratedMm: 19.0 },
+  { rawMm: 19.1, calibratedMm: 19.8 },
+  { rawMm: 19.6, calibratedMm: 20.6 },
+  { rawMm: 20.1, calibratedMm: 21.4 },
+  { rawMm: 20.8, calibratedMm: 22.0 },
+  { rawMm: 21.7, calibratedMm: 22.7 },
+];
+
+export const calibrateMeasuredWidthMm = (rawMm: number) => {
+  const points = MEASUREMENT_CALIBRATION_POINTS;
+  if (!Number.isFinite(rawMm)) return rawMm;
+
+  if (rawMm <= points[0].rawMm) {
+    const correction = points[0].calibratedMm - points[0].rawMm;
+    return rawMm + correction;
+  }
+
+  const last = points[points.length - 1];
+  if (rawMm >= last.rawMm) {
+    const correction = last.calibratedMm - last.rawMm;
+    return rawMm + correction;
+  }
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (rawMm < a.rawMm || rawMm > b.rawMm) continue;
+    const t = (rawMm - a.rawMm) / (b.rawMm - a.rawMm);
+    return a.calibratedMm + t * (b.calibratedMm - a.calibratedMm);
+  }
+
+  return rawMm;
+};
+
 // Tabela de diâmetro interno informada pelo anelímetro. Ela corresponde à
 // numeração brasileira e evita aproximações que deslocariam aros altos.
 export const RING_DIAMETER_TABLE = [
@@ -56,7 +105,9 @@ export type CalibrationRule = {
 };
 
 export type RingResult = {
+  rawWidthMm: number;
   widthMm: number;
+  measurementCorrectionMm: number;
   equivalentDiameterMm: number;
   ringSize: number;
   calculationMode: "formula";
@@ -67,7 +118,15 @@ const findRingBySize = (size: number) => (
   RING_DIAMETER_TABLE.find((ring) => ring.size === size)
 );
 
-export const computeRingResult = (widthMm: number, rules: CalibrationRule[] = []): RingResult => {
+export const computeRingResult = (
+  rawWidthMm: number,
+  rules: CalibrationRule[] = [],
+  applyBenchCalibration = true,
+): RingResult => {
+  // A curva MA -> PQ foi obtida com anelímetro rígido. Em dedo real ela
+  // supercorrigiu os testes iniciais, então só é aplicada quando explicitamente
+  // habilitada pelo modo anelímetro.
+  const widthMm = applyBenchCalibration ? calibrateMeasuredWidthMm(rawWidthMm) : rawWidthMm;
   const equivalentDiameterMm = estimateInnerDiameter(widthMm);
   const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
     Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
@@ -88,7 +147,9 @@ export const computeRingResult = (widthMm: number, rules: CalibrationRule[] = []
     : comfortRing;
 
   return {
+    rawWidthMm,
     widthMm,
+    measurementCorrectionMm: widthMm - rawWidthMm,
     equivalentDiameterMm: selectedRing.diameterMm,
     ringSize: selectedRing.size,
     calculationMode: "formula",

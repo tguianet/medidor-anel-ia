@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto, cardMatchesLiveGuide } from "./vision";
 import AdminCalibration from "./AdminCalibration";
 import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
+import { homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
-import type { DragTarget, FingerMeasureStep, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
+import type { CardEdge, DragTarget, FingerMeasureStep, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
 import IntroScreen from "./components/IntroScreen";
 import CameraScreen from "./components/CameraScreen";
@@ -16,6 +17,7 @@ export default function App() {
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
+  const cardLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
@@ -25,8 +27,16 @@ export default function App() {
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
-  const [cardLeftLocked, setCardLeftLocked] = useState(false);
-  const [cardRightLocked, setCardRightLocked] = useState(false);
+  const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
+    top: { a:{x:10,y:28}, b:{x:90,y:28} },
+    right: { a:{x:85,y:22}, b:{x:85,y:64} },
+    bottom: { a:{x:10,y:58}, b:{x:90,y:58} },
+    left: { a:{x:15,y:22}, b:{x:15,y:64} },
+  });
+  const [cardQuad, setCardQuad] = useState<[Point,Point,Point,Point]>([{x:15,y:28},{x:85,y:28},{x:85,y:58},{x:15,y:58}]);
+  const [cardLineLocked, setCardLineLocked] = useState<Record<CardEdge, boolean>>({top:false,right:false,bottom:false,left:false});
+  const [selectedCardLine, setSelectedCardLine] = useState<CardEdge | null>(null);
+  const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
   const [rightLine, setRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(50);
@@ -119,10 +129,6 @@ export default function App() {
   const capture = async () => {
     const video = camera.videoRef.current;
     if (!video?.videoWidth) return;
-    if (!cardReady) {
-      camera.setError("Alinhe a base e as laterais do cartão até a régua ficar verde antes de tirar a foto.");
-      return;
-    }
     const canvas = document.createElement("canvas");
     canvas.width = 900;
     canvas.height = 1200;
@@ -145,8 +151,12 @@ export default function App() {
     setCardLeft(11);
     setCardRight(89);
     setCardBottom(47);
-    setCardLeftLocked(false);
-    setCardRightLocked(false);
+    setCardLines({
+      top:{a:{x:7,y:22},b:{x:93,y:22}}, right:{a:{x:89,y:16},b:{x:89,y:58}},
+      bottom:{a:{x:7,y:47},b:{x:93,y:47}}, left:{a:{x:11,y:16},b:{x:11,y:58}},
+    });
+    setCardLineLocked({top:false,right:false,bottom:false,left:false});
+    setSelectedCardLine(null);
     setLeftLine(37);
     setRightLine(63);
     setMeasureY(64);
@@ -169,24 +179,87 @@ export default function App() {
       setCardLeft(finalLeft);
       setCardRight(finalRight);
       setCardBottom(finalBottom);
-      setCardLeftLocked(true);
-      setCardRightLocked(true);
-      activateFingerMeasurement(finalLeft, finalRight, finalBottom, calibration.confidence);
-      camera.setError("");
+      const top = clamp(finalBottom - (finalRight - finalLeft) * (53.98 / 85.6) * 0.75, 4, finalBottom - 5);
+      const padX = Math.min(8, Math.max(3, (finalRight-finalLeft)*0.08));
+      const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
+      setCardLines({
+        top:{a:{x:clamp(finalLeft-padX,1,99),y:top},b:{x:clamp(finalRight+padX,1,99),y:top}},
+        right:{a:{x:finalRight,y:clamp(top-padY,1,99)},b:{x:finalRight,y:clamp(finalBottom+padY,1,99)}},
+        bottom:{a:{x:clamp(finalLeft-padX,1,99),y:finalBottom},b:{x:clamp(finalRight+padX,1,99),y:finalBottom}},
+        left:{a:{x:finalLeft,y:clamp(top-padY,1,99)},b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)}},
+      });
+      setCardLineLocked({top:false,right:false,bottom:false,left:false});
+      setSelectedCardLine(null);
+      setPerspectiveReady(false);
+      setCalibrationConfidence(calibration.confidence);
+      camera.setError("Ajuste as quatro linhas nas bordas retas do cartão. Elas podem inclinar independentemente.");
     } catch {
-      camera.setError("Não consegui travar a base automaticamente. Arraste as duas linhas para os cantos inferiores do cartão.");
+      camera.setError("Não consegui localizar o cartão automaticamente. Ajuste manualmente as 4 linhas nas bordas retas.");
     } finally {
       setAnalyzingCard(false);
     }
   };
 
-  const activateFingerMeasurement = (baseLeft: number, baseRight: number, baseBottom: number, confidence = 92) => {
-    const widthPx = (baseRight - baseLeft) / 100 * 900;
-    setPixelsPerMm(widthPx / 85.6);
-    setCalibrationConfidence((current) => Math.max(current, confidence));
+  const cardQuadFromCurrentLines = () => {
+    const source = photoPixelsRef.current;
+    if (!source) throw new Error("foto");
+    const pxLines = Object.fromEntries((["top","right","bottom","left"] as CardEdge[]).map((edge) => {
+      const line = cardLines[edge];
+      return [edge, {
+        a:{x:line.a.x/100*source.width,y:line.a.y/100*source.height},
+        b:{x:line.b.x/100*source.width,y:line.b.y/100*source.height},
+      }];
+    })) as Record<CardEdge, Line>;
+    const quadPx = quadFromLines(pxLines);
+    const area = Math.abs(quadPx.reduce((sum,p,i) => {
+      const q=quadPx[(i+1)%4];
+      return sum + p.x*q.y-q.x*p.y;
+    },0))/2;
+    if (!quadPx.every((p)=>Number.isFinite(p.x)&&Number.isFinite(p.y)) || area < source.width*source.height*0.015) {
+      throw new Error("quadrilatero");
+    }
+    return {
+      px: quadPx,
+      percent: quadPx.map((p)=>({x:p.x/source.width*100,y:p.y/source.height*100})) as [Point,Point,Point,Point],
+    };
+  };
+
+  const confirmPerspective = () => {
+    try {
+      const quad = cardQuadFromCurrentLines();
+      homographyFromQuad(quad.px);
+      setCardQuad(quad.percent);
+      setPerspectiveReady(true);
+      const bottomY=(quad.percent[2].y+quad.percent[3].y)/2;
+      setCardLeft(quad.percent[3].x);
+      setCardRight(quad.percent[2].x);
+      setCardBottom(bottomY);
+      activateFingerMeasurement(quad.percent[3].x,quad.percent[2].x,bottomY,calibrationConfidence||92,quad.percent);
+    } catch {
+      camera.setError("As linhas não formam um cartão válido. Ajuste cada borda e confirme novamente.");
+    }
+  };
+
+  const activateFingerMeasurement = (
+    baseLeft:number, baseRight:number, baseBottom:number, confidence=92,
+    quadPercent:[Point,Point,Point,Point]=cardQuad,
+  ) => {
+    const source=photoPixelsRef.current;
+    if(source){
+      // UI scale only. The actual MA calculation below uses the card itself as
+      // the metric reference and never the full photo/canvas width.
+      const bottomWidthPx=Math.hypot(
+        (quadPercent[2].x-quadPercent[3].x)/100*source.width,
+        (quadPercent[2].y-quadPercent[3].y)/100*source.height,
+      );
+      setPixelsPerMm(bottomWidthPx/85.6);
+    } else {
+      setPixelsPerMm(1);
+    }
+    setCalibrationConfidence((current)=>Math.max(current,confidence));
     setLeftLine(38);
     setRightLine(62);
-    setMeasureY(clamp(baseBottom + 17, 42, 76));
+    setMeasureY(clamp(baseBottom+17,42,76));
     setZoom(1);
     setPanX(0);
     setPanY(0);
@@ -228,9 +301,36 @@ export default function App() {
   const updateDrag = (clientX: number, clientY: number) => {
     if (!draggingRef.current || !measureRef.current) return;
     const rect = measureRef.current.getBoundingClientRect();
-    const x = clamp(((clientX - rect.left) / rect.width) * 100, 2, 98);
-    const y = clamp(((clientY - rect.top) / rect.height) * 100, 8, 92);
+    const rawX = ((clientX - rect.left) / rect.width) * 100;
+    const rawY = ((clientY - rect.top) / rect.height) * 100;
+    const imageX = (((clientX - rect.left) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * 100;
+    const imageY = (((clientY - rect.top) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * 100;
+    const x = clamp(rawX, 2, 98);
+    const y = clamp(rawY, 8, 92);
     const target = draggingRef.current;
+    if (typeof target === "string" && target.startsWith("card-line-")) {
+      const match=/^card-line-(top|right|bottom|left)(?:-(a|b))?$/.exec(target);
+      if(match){
+        const edge=match[1] as CardEdge;
+        const endpoint=match[2] as "a"|"b"|undefined;
+        setSelectedCardLine(edge);
+        setPerspectiveReady(false);
+        setCardLineLocked((current)=>({...current,[edge]:false}));
+        if(endpoint){
+          setCardLines((current)=>({...current,[edge]:{...current[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}}}));
+        } else {
+          const start=cardLineDragStartRef.current;
+          if(start){
+            const dx=imageX-start.pointer.x, dy=imageY-start.pointer.y;
+            setCardLines((current)=>({...current,[edge]:{
+              a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
+              b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
+            }}));
+          }
+        }
+        return;
+      }
+    }
     if (target === "showcase-ring") {
       const dx = ((clientX - dragStartRef.current.x) / rect.width) * 100;
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
@@ -260,13 +360,6 @@ export default function App() {
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
       setMeasureY(clamp(dragStartRef.current.right + dy, 18, 76));
     }
-    if (target === "card-base-left") { setCardLeftLocked(false); setCardLeft(Math.min(x, cardRight - 5)); }
-    if (target === "card-base-right") { setCardRightLocked(false); setCardRight(Math.max(x, cardLeft + 5)); }
-    if (target === "card-base-y") {
-      setCardLeftLocked(false);
-      setCardRightLocked(false);
-      setCardBottom(y);
-    }
     if (target === "pan") {
       setLeftLocked(false);
       setRightLocked(false);
@@ -282,11 +375,25 @@ export default function App() {
     draggingRef.current = target;
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (target !== "height" && target !== "card-base-y") updateDrag(event.clientX, event.clientY);
+    if (target !== "height") updateDrag(event.clientX, event.clientY);
+  };
+
+  const startCardLineDrag = (edge:CardEdge, endpoint:"a"|"b"|null, event:React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const stage=measureRef.current;
+    if(!stage) return;
+    const rect=stage.getBoundingClientRect();
+    const imageX=(((event.clientX-rect.left)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+    const imageY=(((event.clientY-rect.top)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+    draggingRef.current=(endpoint ? `card-line-${edge}-${endpoint}` : `card-line-${edge}`) as DragTarget;
+    cardLineDragStartRef.current={pointer:{x:imageX,y:imageY},line:{a:{...cardLines[edge].a},b:{...cardLines[edge].b}}};
+    setSelectedCardLine(edge);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const startPan = (event: React.PointerEvent) => {
-    if (phase !== "finger" || zoom <= 1 || tryOn) return;
+    if (zoom <= 1 || tryOn) return;
     draggingRef.current = "pan";
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: panX, top: panY, right: 0, bottom: 0 };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -300,7 +407,7 @@ export default function App() {
   };
 
   const changeZoom = (nextZoom: number) => {
-    const value = clamp(nextZoom, 1, 4);
+    const value = clamp(nextZoom, 1, phase === "card" ? 8 : 4);
     setZoom(value);
     setLeftLocked(false);
     setRightLocked(false);
@@ -348,90 +455,70 @@ export default function App() {
     else { setRightLine(Math.max(snappedPercent, leftLine + 3)); setRightLocked(true); }
   };
 
-  const snapCardBaseEndpoint = (side: "left" | "right", clientX: number) => {
-    const stage = measureRef.current;
-    const source = photoPixelsRef.current;
-    if (!stage || !source) return;
-    const rect = stage.getBoundingClientRect();
-    const imageX = (clientX - rect.left) / rect.width * source.width;
-    const imageY = cardBottom / 100 * source.height;
-    const radius = Math.max(12, Math.round(source.width * 0.035));
-    let bestX = Math.round(imageX);
-    let bestScore = 0;
-    const grayAt = (x: number, y: number) => {
-      const offset = (y * source.width + x) * 4;
-      return source.data[offset] * 0.299 + source.data[offset + 1] * 0.587 + source.data[offset + 2] * 0.114;
+  const snapCardLine = (edge:CardEdge) => {
+    const source=photoPixelsRef.current;
+    if(!source) return;
+    const line=cardLines[edge];
+    const a={x:line.a.x/100*source.width,y:line.a.y/100*source.height};
+    const b={x:line.b.x/100*source.width,y:line.b.y/100*source.height};
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const len=Math.hypot(dx,dy);
+    if(len<12) return;
+    const ux=dx/len, uy=dy/len, nx=-uy, ny=ux;
+    const gray=(x:number,y:number)=>{
+      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
+      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
+      const o=(iy*source.width+ix)*4;
+      return source.data[o]*.299+source.data[o+1]*.587+source.data[o+2]*.114;
     };
-    for (let candidate = Math.round(imageX) - radius; candidate <= Math.round(imageX) + radius; candidate++) {
-      if (candidate < 3 || candidate >= source.width - 3) continue;
-      let score = 0;
-      let samples = 0;
-      for (let y = Math.round(imageY) - 12; y <= Math.round(imageY) + 4; y += 2) {
-        if (y < 0 || y >= source.height) continue;
-        score += Math.abs(grayAt(candidate - 2, y) - grayAt(candidate + 2, y));
-        samples++;
+    const radius=Math.max(7,Math.round(Math.min(source.width,source.height)*0.018/Math.max(zoom,1)));
+    const points:Point[]=[];
+    let totalScore=0;
+    for(let i=1;i<=18;i++){
+      const t=i/19;
+      const px=a.x+dx*t, py=a.y+dy*t;
+      let bestOffset=0, best=-Infinity;
+      for(let off=-radius;off<=radius;off+=1){
+        const qx=px+nx*off, qy=py+ny*off;
+        const contrast=Math.abs(gray(qx+nx*2,qy+ny*2)-gray(qx-nx*2,qy-ny*2));
+        const score=contrast-Math.abs(off)*0.35;
+        if(score>best){best=score;bestOffset=off;}
       }
-      score = score / Math.max(samples, 1) - Math.abs(candidate - imageX) * 0.35;
-      if (score > bestScore) { bestScore = score; bestX = candidate; }
+      if(best>7){ points.push({x:px+nx*bestOffset,y:py+ny*bestOffset}); totalScore+=best; }
     }
-    if (bestScore < 10) return;
-    const snappedPercent = clamp(bestX / source.width * 100, 2, 98);
-    if (side === "left") {
-      const nextLeft = Math.min(snappedPercent, cardRight - 5);
-      setCardLeft(nextLeft);
-      setCardLeftLocked(true);
-      if (cardRightLocked) activateFingerMeasurement(nextLeft, cardRight, cardBottom);
-    } else {
-      const nextRight = Math.max(snappedPercent, cardLeft + 5);
-      setCardRight(nextRight);
-      setCardRightLocked(true);
-      if (cardLeftLocked) activateFingerMeasurement(cardLeft, nextRight, cardBottom);
+    if(points.length<8 || totalScore/points.length<9){
+      setCardLineLocked((current)=>({...current,[edge]:false}));
+      return;
     }
-    camera.setError("");
-  };
-
-  const snapCardBaseY = (clientY: number) => {
-    const stage = measureRef.current;
-    const source = photoPixelsRef.current;
-    if (!stage || !source) return;
-    const rect = stage.getBoundingClientRect();
-    const imageY = (clientY - rect.top) / rect.height * source.height;
-    const startX = Math.round(cardLeft / 100 * source.width);
-    const endX = Math.round(cardRight / 100 * source.width);
-    const radius = Math.max(10, Math.round(source.height * 0.025));
-    let bestY = Math.round(imageY);
-    let bestScore = 0;
-    const grayAt = (x: number, y: number) => {
-      const offset = (y * source.width + x) * 4;
-      return source.data[offset] * 0.299 + source.data[offset + 1] * 0.587 + source.data[offset + 2] * 0.114;
+    const cx=points.reduce((s,p)=>s+p.x,0)/points.length;
+    const cy=points.reduce((s,p)=>s+p.y,0)/points.length;
+    let xx=0,xy=0,yy=0;
+    for(const p of points){const x=p.x-cx,y=p.y-cy;xx+=x*x;xy+=x*y;yy+=y*y;}
+    let theta=.5*Math.atan2(2*xy,xx-yy);
+    let fx=Math.cos(theta),fy=Math.sin(theta);
+    if(fx*ux+fy*uy<0){fx=-fx;fy=-fy;}
+    const ta=(a.x-cx)*fx+(a.y-cy)*fy;
+    const tb=(b.x-cx)*fx+(b.y-cy)*fy;
+    const snapped:Line={
+      a:{x:clamp((cx+fx*ta)/source.width*100,1,99),y:clamp((cy+fy*ta)/source.height*100,1,99)},
+      b:{x:clamp((cx+fx*tb)/source.width*100,1,99),y:clamp((cy+fy*tb)/source.height*100,1,99)},
     };
-    for (let candidate = Math.round(imageY) - radius; candidate <= Math.round(imageY) + radius; candidate++) {
-      if (candidate < 3 || candidate >= source.height - 3) continue;
-      let score = 0;
-      let samples = 0;
-      const step = Math.max(4, Math.round((endX - startX) / 36));
-      for (let x = startX + 8; x <= endX - 8; x += step) {
-        score += Math.abs(grayAt(x, candidate - 2) - grayAt(x, candidate + 2));
-        samples++;
-      }
-      score = score / Math.max(samples, 1) - Math.abs(candidate - imageY) * 0.25;
-      if (score > bestScore) { bestScore = score; bestY = candidate; }
+    setCardLines((current)=>({...current,[edge]:snapped}));
+    setCardLineLocked((current)=>({...current,[edge]:true}));
+  };
+
+  const finishDrag = (event:React.PointerEvent) => {
+    const target=draggingRef.current;
+    if(target==="left"||target==="right") snapBoundary(target,event.clientX);
+    if(typeof target==="string"&&target.startsWith("card-line-")){
+      const match=/^card-line-(top|right|bottom|left)/.exec(target);
+      if(match) snapCardLine(match[1] as CardEdge);
     }
-    if (bestScore < 8) return;
-    setCardBottom(clamp(bestY / source.height * 100, 8, 92));
-    camera.setError("");
+    draggingRef.current=null;
+    cardLineDragStartRef.current=null;
   };
 
-  const finishDrag = (event: React.PointerEvent) => {
-    const target = draggingRef.current;
-    if (target === "left" || target === "right") snapBoundary(target, event.clientX);
-    if (target === "card-base-left") snapCardBaseEndpoint("left", event.clientX);
-    if (target === "card-base-right") snapCardBaseEndpoint("right", event.clientX);
-    if (target === "card-base-y") snapCardBaseY(event.clientY);
-    draggingRef.current = null;
-  };
-
-  const fingerBandWidthPx = () => {
+  const fingerBandEdgesPx = () => {
     const stage = measureRef.current;
     const source = photoPixelsRef.current;
     if (!stage || !source || !leftLocked || !rightLocked) return null;
@@ -458,25 +545,70 @@ export default function App() {
       }
       return { x: bestX, score: bestScore };
     };
-    const widths: number[] = [];
+    const widths: {left:number;right:number;y:number;width:number}[] = [];
     for (const offset of [-18, -12, -6, 0, 6, 12, 18]) {
       const y = Math.round(imageY + offset);
       if (y < 3 || y >= source.height - 3) continue;
       const leftEdge = findEdge(leftCenter, y);
       const rightEdge = findEdge(rightCenter, y);
       if (leftEdge.score < 10 || rightEdge.score < 10 || rightEdge.x <= leftEdge.x) continue;
-      widths.push(rightEdge.x - leftEdge.x);
+      widths.push({left:leftEdge.x,right:rightEdge.x,y,width:rightEdge.x-leftEdge.x});
     }
     if (widths.length < 4) return null;
-    widths.sort((a, b) => a - b);
-    return widths[Math.round((widths.length - 1) * 0.65)];
+    widths.sort((a,b)=>a.width-b.width);
+    return widths[Math.round((widths.length-1)*0.65)];
+  };
+
+  const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
+    const toPx=(line:Line):Line=>({
+      a:{x:line.a.x/100*sourceWidth,y:line.a.y/100*sourceHeight},
+      b:{x:line.b.x/100*sourceWidth,y:line.b.y/100*sourceHeight},
+    });
+    const xAtY=(line:Line,y:number)=>{
+      const dy=line.b.y-line.a.y;
+      if(Math.abs(dy)<1e-6) return null;
+      const t=(y-line.a.y)/dy;
+      return line.a.x+(line.b.x-line.a.x)*t;
+    };
+    const leftX=xAtY(toPx(cardLines.left),imageY);
+    const rightX=xAtY(toPx(cardLines.right),imageY);
+    if(leftX===null||rightX===null||!Number.isFinite(leftX)||!Number.isFinite(rightX)) return null;
+    const width=Math.abs(rightX-leftX);
+    return width>1?width:null;
   };
 
   const liveWidthMm = useMemo(() => {
-    if (!pixelsPerMm || !leftLocked || !rightLocked) return null;
-    const widthPx = fingerBandWidthPx() ?? Math.abs(rightLine - leftLine) / 100 * 900 / zoom;
-    return widthPx / pixelsPerMm;
-  }, [pixelsPerMm, leftLine, rightLine, measureY, zoom, panX, panY, leftLocked, rightLocked]);
+    if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
+    const source=photoPixelsRef.current;
+    const stage=measureRef.current;
+    if(!source||!stage) return null;
+
+    const rect=stage.getBoundingClientRect();
+    const edge=fingerBandEdgesPx();
+    const toImageX=(percent:number)=>((((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width);
+    const imageY=(((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height;
+    const leftPx=edge?.left??toImageX(leftLine);
+    const rightPx=edge?.right??toImageX(rightLine);
+    const yPx=edge?.y??imageY;
+    const fingerWidthPx=Math.abs(rightPx-leftPx);
+
+    // MA is now normalized only by the card's projected width at the same
+    // image height. Moving the camera closer/farther changes both values by
+    // the same factor, so the ratio remains stable.
+    const cardReferencePx=cardWidthAtImageY(yPx,source.width,source.height);
+    if(cardReferencePx && cardReferencePx>0){
+      return fingerWidthPx/cardReferencePx*85.6;
+    }
+
+    // Defensive fallback: use the confirmed bottom edge of the physical card,
+    // never the complete image width.
+    const cardBottomPx=Math.hypot(
+      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
+      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
+    );
+    if(cardBottomPx<=0) return null;
+    return fingerWidthPx/cardBottomPx*85.6;
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardQuad,cardLines]);
 
   const confirmRestMeasurement = () => {
     if (liveWidthMm === null) return;
@@ -497,7 +629,7 @@ export default function App() {
       ? restWidthMm !== null && jointWidthMm !== null ? Math.max(restWidthMm, jointWidthMm) : null
       : liveWidthMm;
     if (widthMm === null) return null;
-    return computeRingResult(widthMm, calibrationRules);
+    return computeRingResult(widthMm, calibrationRules, measurementMode === "anelimetro");
   }, [liveWidthMm, measurementMode, restWidthMm, jointWidthMm, calibrationRules]);
 
   const resetPhoto = () => {
@@ -566,7 +698,7 @@ export default function App() {
       {stage === "review" && (
         <section className="panel review">
           <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : fingerMeasureStep === "rest" ? "2. MEÇA ONDE O ANEL FICA" : fingerMeasureStep === "joint" ? "3. MEÇA A JUNTA" : "MEDIÇÃO CONCLUÍDA"}</span>
-          <h1>{phase === "card" ? "Confirme a base do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : fingerMeasureStep === "rest" ? "Meça onde o anel vai ficar" : fingerMeasureStep === "joint" ? "Agora meça a junta mais grossa" : "Usamos a maior medida do dedo"}</h1>
+          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : fingerMeasureStep === "rest" ? "Meça onde o anel vai ficar" : fingerMeasureStep === "joint" ? "Agora meça a junta mais grossa" : "Usamos a maior medida do dedo"}</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -575,21 +707,39 @@ export default function App() {
             onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; }}
           >
-            {photo && <img className={phase === "finger" ? "zoomable-photo" : ""} style={phase === "finger" ? { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` } : undefined} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && (
-              <>
-                <button
-                  className={`card-base-line${cardLeftLocked && cardRightLocked ? " locked" : ""}`}
-                  style={{ left: `${cardLeft}%`, top: `${cardBottom}%`, width: `${cardRight - cardLeft}%` }}
-                  onPointerDown={(event) => startDrag("card-base-y", event)}
-                  aria-label="Mover linha para a base do cartão"
-                ><span>BASE 85,60 mm</span></button>
-                <button className={`card-base-endpoint left${cardLeftLocked ? " locked" : ""}`} style={{ left: `${cardLeft}%`, top: `${cardBottom}%` }} onPointerDown={(event) => startDrag("card-base-left", event)} aria-label="Ajustar canto inferior esquerdo" />
-                <button className={`card-base-endpoint right${cardRightLocked ? " locked" : ""}`} style={{ left: `${cardRight}%`, top: `${cardBottom}%` }} onPointerDown={(event) => startDrag("card-base-right", event)} aria-label="Ajustar canto inferior direito" />
-              </>
-            )}
-            {phase === "finger" && pixelsPerMm && (
-              <div className="card-base-reference" style={{ left: `${cardLeft}%`, top: `${cardBottom}%`, width: `${cardRight - cardLeft}%` }} aria-hidden="true"><span>BASE FIXA · 85,60 mm</span><i className="left" /><i className="right" /></div>
+              <svg
+                className="card-lines-overlay"
+                style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                aria-label="Quatro linhas independentes do cartão"
+              >
+                {(Object.keys(cardLines) as CardEdge[]).map((edge)=>{
+                  const line=cardLines[edge];
+                  const locked=cardLineLocked[edge];
+                  const selected=selectedCardLine===edge;
+                  return <g key={edge} className={`card-edge${locked?" locked":""}${selected?" selected":""}`}>
+                    <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                      onPointerDown={(e)=>startCardLineDrag(edge,null,e)} />
+                    <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    {(["a","b"] as const).map((point)=><g key={point}>
+                      <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="4.6"
+                        onPointerDown={(e)=>startCardLineDrag(edge,point,e)} />
+                      <circle className="card-line-handle" cx={line[point].x} cy={line[point].y} r="1.45" />
+                    </g>)}
+                  </g>;
+                })}
+                {(()=>{try{
+                  const q=quadFromLines(cardLines);
+                  return q.map((p,i)=><g key={i} className="virtual-corner">
+                    <circle cx={p.x} cy={p.y} r="1.05" />
+                    <line x1={p.x-1.8} y1={p.y} x2={p.x+1.8} y2={p.y} />
+                    <line x1={p.x} y1={p.y-1.8} x2={p.x} y2={p.y+1.8} />
+                  </g>);
+                }catch{return null;}})()}
+              </svg>
             )}
             {phase === "finger" && pixelsPerMm && (
               <>
@@ -622,20 +772,26 @@ export default function App() {
             )}
           </div>
 
-          {analyzingCard && <p className="analysis-loading">Localizando a base e os cantos inferiores do cartão...</p>}
+          {analyzingCard && <p className="analysis-loading">Localizando o cartão e preparando as 4 linhas...</p>}
+          {phase === "card" && !analyzingCard && <div className="card-line-status">
+            {(Object.keys(cardLines) as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
+              {cardLineLocked[edge] ? "✓" : "○"} {edge==="top"?"Superior":edge==="bottom"?"Inferior":edge==="left"?"Esquerda":"Direita"}
+            </span>)}
+          </div>}
+          {phase === "card" && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar linhas e medir o dedo</button>}
           {phase === "card" && !analyzingCard && (
-            <div className={`card-base-status${cardLeftLocked && cardRightLocked ? " ready" : ""}`}>
-              <strong>{cardLeftLocked && cardRightLocked ? "✓ Confira a base antes de continuar" : "Ajuste os dois cantos inferiores"}</strong>
-              <span>{cardLeftLocked ? "✓ Esquerdo" : "○ Esquerdo"} · {cardRightLocked ? "✓ Direito" : "○ Direito"}</span>
-              {cardLeftLocked && cardRightLocked && <small>As pontas verdes precisam ficar exatamente nos dois cantos da base do cartão.</small>}
+            <div className="card-base-status">
+              <strong>Ajuste as 4 linhas nas bordas retas</strong>
+              <span>Arraste a linha inteira para mover. Arraste as bolinhas das pontas para inclinar. Ao soltar, o ímã procura a borda.</span>
+              <small>Os cruzamentos das linhas definem os 4 cantos usados na correção de perspectiva.</small>
             </div>
           )}
 
-          {phase === "finger" && !tryOn && (
+          {(phase === "card" || phase === "finger") && !tryOn && (
             <div className="zoom-controls" aria-label="Controles de zoom">
               <button onClick={() => changeZoom(zoom - 0.5)} disabled={zoom <= 1} aria-label="Diminuir zoom">−</button>
               <strong>{zoom.toFixed(1)}×</strong>
-              <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= 4} aria-label="Aumentar zoom">+</button>
+              <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= (phase === "card" ? 8 : 4)} aria-label="Aumentar zoom">+</button>
               <button className="zoom-reset" onClick={() => { setZoom(1); setPanX(0); setPanY(0); }}>Redefinir</button>
             </div>
           )}
@@ -662,7 +818,15 @@ export default function App() {
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
-              <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
+              <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
+              {measurementMode === "anelimetro" ? (
+                <>
+                  <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
+                  <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
+                </>
+              ) : (
+                <span>Modo dedo: curva do anelímetro não aplicada</span>
+              )}
               {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>

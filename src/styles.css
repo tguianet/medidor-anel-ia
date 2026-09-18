@@ -257,3 +257,150 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   .measurement-stage { margin-inline: -2px; width: calc(100% + 4px); }
   .caliper-line { width: 42px; }
 }
+
+.card-perspective-overlay { position:absolute; inset:0; z-index:9; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.card-perspective-overlay polygon { fill:#52e0a315; stroke:#52e0a3; stroke-width:.55; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 3px #52e0a3); }
+.card-perspective-overlay circle { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:all; cursor:move; touch-action:none; }
+.confirm-perspective { width:100%; margin:-5px 0 14px; }
+
+.card-perspective-overlay circle.locked { fill:#52e0a3; filter:drop-shadow(0 0 2px #52e0a3); }
+.card-corner-status { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:0 0 10px; }
+.card-corner-status span { padding:7px 9px; border:1px solid #725f38; border-radius:8px; color:#cfc6b5; font-size:11px; text-align:center; }
+.card-corner-status span.locked { border-color:#328966; color:#52e0a3; background:#16312755; }
+
+.card-perspective-overlay { transform-origin:center; will-change:transform; }
+.card-perspective-overlay .corner-hit { fill:transparent; stroke:transparent; pointer-events:all; cursor:grab; touch-action:none; }
+.card-perspective-overlay .corner-hit:active { cursor:grabbing; }
+.card-perspective-overlay .corner-dot { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:none; }
+.card-perspective-overlay .corner-dot.locked { fill:#52e0a3; filter:drop-shadow(0 0 2px #52e0a3); }
+.card-perspective-overlay .corner-dot.selected { stroke:#fff; stroke-width:.8; filter:drop-shadow(0 0 4px #fff); }
+
+.photo-guide { position:absolute; z-index:5; inset:7% 7% 9%; border:2px dashed #ffffffa8; border-radius:18px; pointer-events:none; }
+.photo-guide span { position:absolute; left:50%; top:10px; transform:translateX(-50%); padding:5px 9px; border-radius:999px; color:#171109; background:#f0cf80; font-size:9px; font-weight:900; white-space:nowrap; }
+
+.card-lines-overlay { position:absolute; inset:0; z-index:10; width:100%; height:100%; overflow:visible; pointer-events:none; transform-origin:center; will-change:transform; }
+.card-edge .card-line-visible { stroke:#f2cf73; stroke-width:.62; vector-effect:non-scaling-stroke; pointer-events:none; filter:drop-shadow(0 0 2px #000); }
+.card-edge.locked .card-line-visible { stroke:#52e0a3; filter:drop-shadow(0 0 4px #52e0a3); }
+.card-edge.selected .card-line-visible { stroke:#fff0b6; stroke-width:.85; }
+.card-line-hit { stroke:transparent; stroke-width:7; vector-effect:non-scaling-stroke; pointer-events:stroke; cursor:grab; touch-action:none; }
+.card-line-hit:active { cursor:grabbing; }
+.card-line-handle-hit { fill:transparent; stroke:transparent; pointer-events:all; cursor:move; touch-action:none; }
+.card-line-handle { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:none; }
+.card-edge.locked .card-line-handle { fill:#52e0a3; filter:drop-shadow(0 0 3px #52e0a3); }
+.card-edge.selected .card-line-handle { stroke:#fff; stroke-width:.75; }
+.virtual-corner { pointer-events:none; }
+.virtual-corner circle { fill:#fff; stroke:#081a13; stroke-width:.35; vector-effect:non-scaling-stroke; }
+.virtual-corner line { stroke:#fff; stroke-width:.45; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 2px #000); }
+.card-line-status { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:0 0 10px; }
+.card-line-status span { padding:8px 9px; border:1px solid #725f38; border-radius:9px; color:#cfc6b5; background:#17130f; font-size:11px; font-weight:800; text-align:center; }
+.card-line-status span.locked { border-color:#328966; color:#52e0a3; background:#16312755; }
+
+
+/* Fixed capture standard: the guide never moves. Detection only changes it
+   to the magnetic/locked state when the real card reaches the reference. */
+.capture-standard-guide { position:absolute; inset:0; z-index:6; pointer-events:none; }
+.live-card-frame {
+  position:absolute;
+  left:11%;
+  top:10%;
+  width:78%;
+  height:36.9%;
+  box-sizing:border-box;
+  border:2px solid #f2cf73;
+  border-radius:13px;
+  box-shadow:0 0 0 1px #171109aa, 0 0 8px #f2cf7360;
+  transition:border-color .16s ease, box-shadow .16s ease;
+}
+.live-card-frame::before,
+.live-card-frame::after {
+  content:"";
+  position:absolute;
+  left:50%;
+  width:18px;
+  height:2px;
+  transform:translateX(-50%);
+  border-radius:2px;
+  background:#f2cf73;
+  box-shadow:0 0 5px #000;
+}
+.live-card-frame::before { top:-2px; }
+.live-card-frame::after { bottom:-2px; }
+.live-card-frame > span {
+  position:absolute;
+  left:50%;
+  top:8px;
+  transform:translateX(-50%);
+  width:max-content;
+  max-width:90%;
+  padding:5px 9px;
+  border:1px solid #171109;
+  border-radius:999px;
+  color:#171109;
+  background:#f2cf73;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.035em;
+  white-space:nowrap;
+}
+.card-guide-corner { position:absolute; width:18px; height:18px; border-color:#fff; opacity:.9; }
+.card-guide-corner.tl { left:-3px; top:-3px; border-left:3px solid; border-top:3px solid; border-radius:7px 0 0 0; }
+.card-guide-corner.tr { right:-3px; top:-3px; border-right:3px solid; border-top:3px solid; border-radius:0 7px 0 0; }
+.card-guide-corner.br { right:-3px; bottom:-3px; border-right:3px solid; border-bottom:3px solid; border-radius:0 0 7px 0; }
+.card-guide-corner.bl { left:-3px; bottom:-3px; border-left:3px solid; border-bottom:3px solid; border-radius:0 0 0 7px; }
+
+.live-finger-axis {
+  position:absolute;
+  left:50%;
+  top:8%;
+  bottom:7%;
+  width:0;
+  transform:translateX(-50%);
+  border-left:2px solid #f2cf73;
+  filter:drop-shadow(0 0 3px #171109);
+  transition:border-color .16s ease, filter .16s ease;
+}
+.live-finger-axis::before,
+.live-finger-axis::after {
+  content:"";
+  position:absolute;
+  left:50%;
+  width:18px;
+  height:3px;
+  transform:translateX(-50%);
+  border-radius:3px;
+  background:#f2cf73;
+}
+.live-finger-axis::before { top:0; }
+.live-finger-axis::after { bottom:0; }
+.live-finger-axis span {
+  position:absolute;
+  left:50%;
+  top:52%;
+  transform:translate(-50%,-50%);
+  padding:4px 7px;
+  border:1px solid #171109;
+  border-radius:999px;
+  color:#171109;
+  background:#f2cf73;
+  font-size:8px;
+  font-weight:900;
+  white-space:nowrap;
+}
+
+.capture-standard-guide.ready .live-card-frame {
+  border-color:#52e0a3;
+  box-shadow:0 0 0 1px #092118, 0 0 14px #52e0a3bb;
+}
+.capture-standard-guide.ready .live-card-frame::before,
+.capture-standard-guide.ready .live-card-frame::after,
+.capture-standard-guide.ready .live-card-frame > span,
+.capture-standard-guide.ready .live-finger-axis::before,
+.capture-standard-guide.ready .live-finger-axis::after,
+.capture-standard-guide.ready .live-finger-axis span {
+  background:#52e0a3;
+  color:#071b14;
+}
+.capture-standard-guide.ready .live-finger-axis {
+  border-left-color:#52e0a3;
+  filter:drop-shadow(0 0 5px #52e0a3);
+}

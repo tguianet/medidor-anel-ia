@@ -34,6 +34,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
   const [pin, setPin] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
   const [actualRing, setActualRing] = useState(measurement.ringSize);
+  const [actualDiameterMm, setActualDiameterMm] = useState("");
   const [finger, setFinger] = useState("anelar");
   const [hand, setHand] = useState("direita");
   const [note, setNote] = useState("");
@@ -109,18 +110,19 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
           <div className="admin-fields">
             <label>Aro real confirmado<input type="number" min="1" max="40" value={actualRing} onChange={(event) => setActualRing(Number(event.target.value))} /></label>
             <label>Tipo de teste<select value={measurementType} onChange={(event) => setMeasurementType(event.target.value as "finger" | "anelimetro")}><option value="finger">Dedo real</option><option value="anelimetro">Anelímetro padrão</option></select></label>
+            {measurementType === "anelimetro" && <label>Diâmetro real (paquímetro, mm)<input type="number" min="10" max="40" step="0.01" value={actualDiameterMm} onChange={(event) => setActualDiameterMm(event.target.value)} placeholder="Ex.: 21.68" /></label>}
             <label>Dedo<select value={finger} onChange={(event) => setFinger(event.target.value)}><option>anelar</option><option>médio</option><option>indicador</option><option>mínimo</option><option>polegar</option></select></label>
             <label>Mão<select value={hand} onChange={(event) => setHand(event.target.value)}><option>direita</option><option>esquerda</option></select></label>
             <label className="wide">Observação opcional<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Ex.: medido com aneleira" /></label>
           </div>
-          <button className="primary" type="button" disabled={busy || actualRing < 1 || actualRing > 40} onClick={() => void saveTest()}>{busy ? "Armazenando..." : "Armazenar teste"}</button>
+          <button className="primary" type="button" disabled={busy || actualRing < 1 || actualRing > 40 || (measurementType === "anelimetro" && (!actualDiameterMm || Number(actualDiameterMm) < 10))} onClick={() => void saveTest()}>{busy ? "Armazenando..." : "Armazenar teste"}</button>
           <div className="learning-summary"><strong>{testsCount} testes armazenados</strong><span>Testes de anelímetro validam a leitura. Só testes de dedo entram nas sugestões de correção.</span></div>
           {gaugeCurve.length > 0 && <section className="gauge-curve">
             <div><strong>Curva do anelímetro</strong><span>Dados guardados para calibrar depois. Esta curva não altera a medida do dedo.</span></div>
             <div className="gauge-curve-grid" role="table" aria-label="Curva de calibração do anelímetro">
-              <span role="columnheader">Aro marcado</span><span role="columnheader">Leitura média</span><span role="columnheader">Diferença</span><span role="columnheader">Testes</span>
+              <span role="columnheader">Aro marcado</span><span role="columnheader">Diâmetro real</span><span role="columnheader">Leitura média</span><span role="columnheader">Diferença</span><span role="columnheader">Testes</span>
               {gaugeCurve.map((point) => <div className="gauge-curve-row" role="row" key={point.ringSize}>
-                <strong role="cell">{point.ringSize}</strong><span role="cell">{point.averagePrediction.toFixed(1)}</span><b role="cell">{point.averageError >= 0 ? "+" : ""}{point.averageError.toFixed(1)}</b><span role="cell">{point.samples}</span>
+                <strong role="cell">{point.ringSize}</strong><span role="cell">{point.averageDiameterMm != null ? `${point.averageDiameterMm.toFixed(2)} mm` : "—"}</span><span role="cell">{point.averagePrediction.toFixed(1)}</span><b role="cell">{point.averageError >= 0 ? "+" : ""}{point.averageError.toFixed(1)}</b><span role="cell">{point.samples}</span>
               </div>)}
             </div>
           </section>}
