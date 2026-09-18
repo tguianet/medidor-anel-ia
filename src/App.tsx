@@ -28,6 +28,7 @@ export default function App() {
   const [cardBottom, setCardBottom] = useState(58);
   const [cardCorners, setCardCorners] = useState<[Point, Point, Point, Point]>([{x:15,y:28},{x:85,y:28},{x:85,y:58},{x:15,y:58}]);
   const [perspectiveReady, setPerspectiveReady] = useState(false);
+  const [cardCornerLocked, setCardCornerLocked] = useState<[boolean, boolean, boolean, boolean]>([false,false,false,false]);
   const [cardLeftLocked, setCardLeftLocked] = useState(false);
   const [cardRightLocked, setCardRightLocked] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
@@ -175,6 +176,7 @@ export default function App() {
       const top = clamp(finalBottom - (finalRight - finalLeft) * (53.98 / 85.6) * 0.75, 4, finalBottom - 5);
       setCardCorners([{x:finalLeft,y:top},{x:finalRight,y:top},{x:finalRight,y:finalBottom},{x:finalLeft,y:finalBottom}]);
       setPerspectiveReady(false);
+      setCardCornerLocked([false,false,false,false]);
       setCardLeftLocked(true);
       setCardRightLocked(true);
       camera.setError("Confira as quatro bordas do cartão e toque em Confirmar perspectiva.");
@@ -318,7 +320,7 @@ export default function App() {
   };
 
   const startPan = (event: React.PointerEvent) => {
-    if (phase !== "finger" || zoom <= 1 || tryOn) return;
+    if (zoom <= 1 || tryOn) return;
     draggingRef.current = "pan";
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: panX, top: panY, right: 0, bottom: 0 };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -332,7 +334,7 @@ export default function App() {
   };
 
   const changeZoom = (nextZoom: number) => {
-    const value = clamp(nextZoom, 1, 4);
+    const value = clamp(nextZoom, 1, phase === "card" ? 8 : 4);
     setZoom(value);
     setLeftLocked(false);
     setRightLocked(false);
@@ -454,12 +456,34 @@ export default function App() {
     camera.setError("");
   };
 
+  const snapCardCorner = (index: number) => {
+    const source = photoPixelsRef.current;
+    if (!source) return;
+    const current = cardCorners[index];
+    const cx = Math.round(current.x / 100 * source.width);
+    const cy = Math.round(current.y / 100 * source.height);
+    const radius = Math.max(8, Math.round(Math.min(source.width, source.height) * 0.018));
+    const gray = (x:number,y:number) => { const o=(y*source.width+x)*4; return source.data[o]*.299+source.data[o+1]*.587+source.data[o+2]*.114; };
+    let best={x:cx,y:cy,score:0};
+    for(let y=cy-radius;y<=cy+radius;y+=2) for(let x=cx-radius;x<=cx+radius;x+=2){
+      if(x<3||y<3||x>=source.width-3||y>=source.height-3) continue;
+      const gx=Math.abs(gray(x+2,y)-gray(x-2,y));
+      const gy=Math.abs(gray(x,y+2)-gray(x,y-2));
+      const corner=Math.min(gx,gy)+0.35*Math.max(gx,gy)-Math.hypot(x-cx,y-cy)*.22;
+      if(corner>best.score) best={x,y,score:corner};
+    }
+    if(best.score<12){ setCardCornerLocked(v=>v.map((b,i)=>i===index?false:b) as [boolean,boolean,boolean,boolean]); return; }
+    setCardCorners(v=>v.map((p,i)=>i===index?{x:best.x/source.width*100,y:best.y/source.height*100}:p) as [Point,Point,Point,Point]);
+    setCardCornerLocked(v=>v.map((b,i)=>i===index?true:b) as [boolean,boolean,boolean,boolean]);
+  };
+
   const finishDrag = (event: React.PointerEvent) => {
     const target = draggingRef.current;
     if (target === "left" || target === "right") snapBoundary(target, event.clientX);
     if (target === "card-base-left") snapCardBaseEndpoint("left", event.clientX);
     if (target === "card-base-right") snapCardBaseEndpoint("right", event.clientX);
     if (target === "card-base-y") snapCardBaseY(event.clientY);
+    if (typeof target === "string" && target.startsWith("card-corner-")) snapCardCorner(Number(target.slice(-1)));
     draggingRef.current = null;
   };
 
@@ -598,7 +622,7 @@ export default function App() {
       {stage === "review" && (
         <section className="panel review">
           <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : fingerMeasureStep === "rest" ? "2. MEÇA ONDE O ANEL FICA" : fingerMeasureStep === "joint" ? "3. MEÇA A JUNTA" : "MEDIÇÃO CONCLUÍDA"}</span>
-          <h1>{phase === "card" ? "Confirme a base do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : fingerMeasureStep === "rest" ? "Meça onde o anel vai ficar" : fingerMeasureStep === "joint" ? "Agora meça a junta mais grossa" : "Usamos a maior medida do dedo"}</h1>
+          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : fingerMeasureStep === "rest" ? "Meça onde o anel vai ficar" : fingerMeasureStep === "joint" ? "Agora meça a junta mais grossa" : "Usamos a maior medida do dedo"}</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -607,12 +631,12 @@ export default function App() {
             onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; }}
           >
-            {photo && <img className={phase === "finger" ? "zoomable-photo" : ""} style={phase === "finger" ? { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` } : undefined} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className="zoomable-photo" style= { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && (
               <>
                 <svg className="card-perspective-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Quatro bordas do cartão">
                   <polygon points={cardCorners.map(p => `${p.x},${p.y}`).join(" ")} />
-                  {cardCorners.map((p,i) => <circle key={i} cx={p.x} cy={p.y} r="1.6" onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = (`card-corner-${i}` as DragTarget); e.currentTarget.setPointerCapture(e.pointerId); }} />)}
+                  {cardCorners.map((p,i) => <circle className={cardCornerLocked[i] ? "locked" : ""} key={i} cx={p.x} cy={p.y} r="1.6" onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = (`card-corner-${i}` as DragTarget); e.currentTarget.setPointerCapture(e.pointerId); }} />)}
                 </svg>
                 <button
                   className={`card-base-line${cardLeftLocked && cardRightLocked ? " locked" : ""}`}
@@ -659,6 +683,7 @@ export default function App() {
           </div>
 
           {analyzingCard && <p className="analysis-loading">Localizando a base e os cantos inferiores do cartão...</p>}
+          {phase === "card" && !analyzingCard && <div className="card-corner-status">{cardCornerLocked.map((v,i)=><span key={i} className={v ? "locked" : ""}>{v ? "✓" : "○"} Canto {i+1}</span>)}</div>}
           {phase === "card" && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar perspectiva do cartão</button>}
           {phase === "card" && !analyzingCard && (
             <div className={`card-base-status${cardLeftLocked && cardRightLocked ? " ready" : ""}`}>
@@ -668,11 +693,11 @@ export default function App() {
             </div>
           )}
 
-          {phase === "finger" && !tryOn && (
+          {(phase === "card" || phase === "finger") && !tryOn && (
             <div className="zoom-controls" aria-label="Controles de zoom">
               <button onClick={() => changeZoom(zoom - 0.5)} disabled={zoom <= 1} aria-label="Diminuir zoom">−</button>
               <strong>{zoom.toFixed(1)}×</strong>
-              <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= 4} aria-label="Aumentar zoom">+</button>
+              <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= (phase === "card" ? 8 : 4)} aria-label="Aumentar zoom">+</button>
               <button className="zoom-reset" onClick={() => { setZoom(1); setPanX(0); setPanY(0); }}>Redefinir</button>
             </div>
           )}
