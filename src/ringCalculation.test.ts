@@ -60,6 +60,21 @@ describe("computeRingResult", () => {
     expect(adjusted.appliedRuleOffset).toBe(2);
   });
 
+  it("corrige apenas o modo dedo na faixa confirmada de 18,0 mm: aro 16 -> 17", () => {
+    const finger = computeRingResult(18.0, [], false);
+    const gauge = computeRingResult(18.0, [], true);
+    expect(finger.ringSize).toBe(17);
+    expect(finger.fingerFitOffset).toBe(1);
+    expect(gauge.fingerFitOffset).toBe(0);
+  });
+
+  it("não aplica a correção de dedo fora da faixa estreita", () => {
+    const below = computeRingResult(17.5, [], false);
+    const above = computeRingResult(18.5, [], false);
+    expect(below.fingerFitOffset).toBe(0);
+    expect(above.fingerFitOffset).toBe(0);
+  });
+
   it("ignora regras de calibração fora da faixa de largura medida", () => {
     const baseline = computeRingResult(15);
     const rules = [{
