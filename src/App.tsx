@@ -1180,6 +1180,9 @@ export default function App() {
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
+              {result.nearBoundary && result.boundaryNeighborRingSize !== null && (
+                <span>Próximo da fronteira com o aro {result.boundaryNeighborRingSize}; mantido no aro maior por estabilidade.</span>
+              )}
               <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
               {measurementMode === "anelimetro" ? (
                 <>
