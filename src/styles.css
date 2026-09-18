@@ -262,3 +262,8 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .card-perspective-overlay polygon { fill:#52e0a315; stroke:#52e0a3; stroke-width:.55; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 3px #52e0a3); }
 .card-perspective-overlay circle { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:all; cursor:move; touch-action:none; }
 .confirm-perspective { width:100%; margin:-5px 0 14px; }
+
+.card-perspective-overlay circle.locked { fill:#52e0a3; filter:drop-shadow(0 0 2px #52e0a3); }
+.card-corner-status { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:0 0 10px; }
+.card-corner-status span { padding:7px 9px; border:1px solid #725f38; border-radius:8px; color:#cfc6b5; font-size:11px; text-align:center; }
+.card-corner-status span.locked { border-color:#328966; color:#52e0a3; background:#16312755; }
