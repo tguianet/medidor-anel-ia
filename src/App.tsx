@@ -631,7 +631,7 @@ export default function App() {
             onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; }}
           >
-            {photo && <img className="zoomable-photo" style= { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && (
               <>
                 <svg className="card-perspective-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Quatro bordas do cartão">
