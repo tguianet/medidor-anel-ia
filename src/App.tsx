@@ -4,7 +4,7 @@ import AdminCalibration from "./AdminCalibration";
 import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
 import { assessCardQuadGeometry, homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
-import type { CardEdge, DragTarget, FingerMeasureStep, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
+import type { CardEdge, DragTarget, FingerMeasureStep, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
 import IntroScreen from "./components/IntroScreen";
 import CameraScreen from "./components/CameraScreen";
@@ -52,6 +52,11 @@ export default function App() {
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
+  const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
+  const [fingerLines, setFingerLines] = useState<Record<FingerSide, Line>>({
+    left: { a:{x:25,y:34}, b:{x:25,y:66} },
+    right: { a:{x:38,y:34}, b:{x:38,y:66} },
+  });
   const [cardReady, setCardReady] = useState(false);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
@@ -284,7 +289,12 @@ export default function App() {
     setCalibrationConfidence((current)=>Math.max(current,confidence));
     setLeftLine(38);
     setRightLine(62);
-    setMeasureY(clamp(baseBottom+17,42,76));
+    const nextMeasureY=clamp(baseBottom+17,42,76);
+    setMeasureY(nextMeasureY);
+    setFingerLines({
+      left:{a:{x:38,y:clamp(nextMeasureY-16,4,96)},b:{x:38,y:clamp(nextMeasureY+16,4,96)}},
+      right:{a:{x:62,y:clamp(nextMeasureY-16,4,96)},b:{x:62,y:clamp(nextMeasureY+16,4,96)}},
+    });
     setZoom(1);
     setPanX(0);
     setPanY(0);
@@ -301,6 +311,50 @@ export default function App() {
     setRightMagnetConfidence(0);
     setLeftManualRefined(false);
     setRightManualRefined(false);
+  };
+
+  const setFingerLineFromCenterTilt = (side:FingerSide, centerX:number, tiltDeg:number) => {
+    const half=16;
+    const slope=Math.tan(tiltDeg*Math.PI/180);
+    const line:Line={
+      a:{x:clamp(centerX-slope*half,2,98),y:clamp(measureY-half,4,96)},
+      b:{x:clamp(centerX+slope*half,2,98),y:clamp(measureY+half,4,96)},
+    };
+    setFingerLines((current)=>({...current,[side]:line}));
+  };
+
+  const syncFingerLineState = (side:FingerSide, line:Line) => {
+    const dy=line.b.y-line.a.y;
+    const dx=line.b.x-line.a.x;
+    const yTarget=measureY;
+    const t=Math.abs(dy)<1e-6 ? 0.5 : clamp((yTarget-line.a.y)/dy,0,1);
+    const centerX=line.a.x+dx*t;
+    const tiltDeg=clamp(Math.atan2(dx,dy)*180/Math.PI,-18,18);
+    if(side==="left"){
+      setLeftLine(Math.min(centerX,rightLine-3));
+      setLeftFingerTilt(tiltDeg);
+      setLeftLocked(true);
+      setLeftManualRefined(true);
+    }else{
+      setRightLine(Math.max(centerX,leftLine+3));
+      setRightFingerTilt(tiltDeg);
+      setRightLocked(true);
+      setRightManualRefined(true);
+    }
+  };
+
+  const startFingerLineDrag = (side:FingerSide, endpoint:"a"|"b"|null, event:React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const stage=measureRef.current;
+    if(!stage) return;
+    const rect=stage.getBoundingClientRect();
+    const imageX=(((event.clientX-rect.left)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+    const imageY=(((event.clientY-rect.top)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+    const line=fingerLines[side];
+    draggingRef.current=(endpoint ? `finger-line-${side}-${endpoint}` : `finger-line-${side}`) as DragTarget;
+    fingerLineDragStartRef.current={pointer:{x:imageX,y:imageY},line:{a:{...line.a},b:{...line.b}}};
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const captureHand = () => {
@@ -358,6 +412,29 @@ export default function App() {
               b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
             }}));
           }
+        }
+        return;
+      }
+    }
+    if (typeof target === "string" && target.startsWith("finger-line-")) {
+      const match=/^finger-line-(left|right)(?:-(a|b))?$/.exec(target);
+      if(match){
+        const side=match[1] as FingerSide;
+        const endpoint=match[2] as "a"|"b"|undefined;
+        const start=fingerLineDragStartRef.current;
+        if(start){
+          let next:Line;
+          if(endpoint){
+            next={...start.line,[endpoint]:{x:clamp(imageX,2,98),y:clamp(imageY,4,96)}};
+          }else{
+            const dx=imageX-start.pointer.x, dy=imageY-start.pointer.y;
+            next={
+              a:{x:clamp(start.line.a.x+dx,2,98),y:clamp(start.line.a.y+dy,4,96)},
+              b:{x:clamp(start.line.b.x+dx,2,98),y:clamp(start.line.b.y+dy,4,96)},
+            };
+          }
+          setFingerLines((current)=>({...current,[side]:next}));
+          syncFingerLineState(side,next);
         }
         return;
       }
@@ -564,12 +641,14 @@ export default function App() {
       setLeftMagnetConfidence(confidence);
       setLeftManualRefined(false);
       setLeftLocked(true);
+      setFingerLineFromCenterTilt("left",Math.min(snappedPercent,rightLine-3),tiltDeg);
     }else{
       setRightLine(Math.max(snappedPercent,leftLine+3));
       setRightFingerTilt(tiltDeg);
       setRightMagnetConfidence(confidence);
       setRightManualRefined(false);
       setRightLocked(true);
+      setFingerLineFromCenterTilt("right",Math.max(snappedPercent,leftLine+3),tiltDeg);
     }
   };
 
@@ -643,12 +722,21 @@ export default function App() {
         snapBoundary(target,event.clientX);
       }
     }
+    if(typeof target==="string"&&target.startsWith("finger-line-")){
+      const match=/^finger-line-(left|right)/.exec(target);
+      if(match){
+        const side=match[1] as FingerSide;
+        const line=fingerLines[side];
+        syncFingerLineState(side,line);
+      }
+    }
     if(typeof target==="string"&&target.startsWith("card-line-")){
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match) snapCardLine(match[1] as CardEdge);
     }
     draggingRef.current=null;
     fingerRefineDragRef.current=null;
+    fingerLineDragStartRef.current=null;
     cardLineDragStartRef.current=null;
   };
 
@@ -934,8 +1022,26 @@ export default function App() {
             )}
             {phase === "finger" && pixelsPerMm && (
               <>
-                <button className={`caliper-line left${leftLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${leftFingerTilt.toFixed(2)}deg)` }} onPointerDown={(event) => startDrag("left", event)} aria-label="Mover linha esquerda"><span /></button>
-                <button className={`caliper-line right${rightLocked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`} style={{ left: `${rightLine}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${rightFingerTilt.toFixed(2)}deg)` }} onPointerDown={(event) => startDrag("right", event)} aria-label="Mover linha direita"><span /></button>
+                {(["left","right"] as FingerSide[]).map((side)=>{
+                  const line=fingerLines[side];
+                  const locked=side==="left"?leftLocked:rightLocked;
+                  return <svg
+                    key={side}
+                    className={`finger-line-overlay ${side}${locked?" locked":""}${tryOn?" ring-adjust":""}`}
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    aria-label={side==="left"?"Ajustar linha esquerda do dedo":"Ajustar linha direita do dedo"}
+                  >
+                    <line className="finger-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                      onPointerDown={(e)=>startFingerLineDrag(side,null,e)} />
+                    <line className="finger-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    {(["a","b"] as const).map((point)=><g key={point}>
+                      <circle className="finger-line-handle-hit" cx={line[point].x} cy={line[point].y} r="4.8"
+                        onPointerDown={(e)=>startFingerLineDrag(side,point,e)} />
+                      <circle className="finger-line-handle" cx={line[point].x} cy={line[point].y} r="1.55" />
+                    </g>)}
+                  </svg>;
+                })}
                 <div className="measurement-band" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} aria-hidden="true" />
                 <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
                 <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
@@ -1062,7 +1168,7 @@ export default function App() {
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
-          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Aproxime e solte para usar o ímã. Depois que travar em verde, arraste novamente a linha para fazer o ajuste fino manual."}</p>
+          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Aproxime e solte para usar o ímã. Depois, arraste a linha inteira ou cada bolinha da ponta para refinar posição e inclinação."}</p>
         </section>
       )}
 
