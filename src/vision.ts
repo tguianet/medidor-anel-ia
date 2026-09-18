@@ -70,6 +70,7 @@ export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
   const scores = [
     bestNear(left, (value) => verticalScore(value, 1)),
     bestNear(right, (value) => verticalScore(value, -1)),
+    bestNear(top, (value) => horizontalScore(value, 1)),
     bestNear(bottom, (value) => horizontalScore(value, -1)),
   ];
   const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
