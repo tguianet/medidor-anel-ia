@@ -12,6 +12,9 @@ import HandCameraScreen from "./components/HandCameraScreen";
 import HandReviewScreen from "./components/HandReviewScreen";
 import TryOnPanel from "./components/TryOnPanel";
 
+const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
+const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
+
 export default function App() {
   const camera = useCameraStream();
   const measureRef = useRef<HTMLDivElement>(null);
@@ -257,6 +260,11 @@ export default function App() {
         camera.setError(geometry.reason || "A calibração do cartão ficou instável. Ajuste as quatro bordas e confirme novamente.");
         return;
       }
+      if (geometry.confidence < MIN_CARD_CALIBRATION_CONFIDENCE) {
+        setCalibrationConfidence(geometry.confidence);
+        camera.setError(`Calibração do cartão insuficiente (${geometry.confidence}%). Ajuste novamente as 4 bordas. É necessário pelo menos ${MIN_CARD_CALIBRATION_CONFIDENCE}% para medir o dedo.`);
+        return;
+      }
       setCardQuad(quad.percent);
       setPerspectiveReady(true);
       setCalibrationConfidence(geometry.confidence);
@@ -286,7 +294,7 @@ export default function App() {
     } else {
       setPixelsPerMm(1);
     }
-    setCalibrationConfidence((current)=>Math.max(current,confidence));
+    setCalibrationConfidence(confidence);
     setLeftLine(38);
     setRightLine(62);
     const nextMeasureY=clamp(baseBottom+17,42,76);
@@ -897,13 +905,43 @@ export default function App() {
     setFingerMeasureStep("complete");
   };
 
+  const finalMeasurementConfidence = useMemo(() => {
+    const edgeConfidence = leftLocked && rightLocked
+      ? Math.round((leftMagnetConfidence + rightMagnetConfidence) / 2)
+      : 0;
+    if (!edgeConfidence) return calibrationConfidence;
+    return Math.min(
+      calibrationConfidence,
+      Math.round(calibrationConfidence * 0.75 + edgeConfidence * 0.25),
+    );
+  }, [calibrationConfidence, leftLocked, rightLocked, leftMagnetConfidence, rightMagnetConfidence]);
+
+  const calibrationQualityLabel =
+    finalMeasurementConfidence >= HIGH_CARD_CALIBRATION_CONFIDENCE ? "alta" :
+    finalMeasurementConfidence >= MIN_CARD_CALIBRATION_CONFIDENCE ? "aceitável" :
+    "baixa";
+
+  const recalibrateCard = () => {
+    setPhase("card");
+    setPerspectiveReady(false);
+    setFingerMeasureStep("rest");
+    setRestWidthMm(null);
+    setJointWidthMm(null);
+    setLeftLocked(false);
+    setRightLocked(false);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
+    setTryOn(false);
+    camera.setError("Reajuste as quatro linhas do cartão. A medição só será liberada com calibração de 90% ou mais.");
+  };
+
   const result = useMemo(() => {
     const widthMm = measurementMode === "finger"
       ? restWidthMm !== null && jointWidthMm !== null ? Math.max(restWidthMm, jointWidthMm) : null
       : liveWidthMm;
-    if (widthMm === null) return null;
+    if (widthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     return computeRingResult(widthMm, calibrationRules, measurementMode === "anelimetro");
-  }, [liveWidthMm, measurementMode, restWidthMm, jointWidthMm, calibrationRules]);
+  }, [liveWidthMm, measurementMode, restWidthMm, jointWidthMm, calibrationRules, calibrationConfidence]);
 
   const resetPhoto = () => {
     setPhoto("");
@@ -1098,7 +1136,16 @@ export default function App() {
             <div className="card-base-status">
               <strong>Ajuste as 4 linhas nas bordas retas</strong>
               <span>Arraste a linha inteira para mover. Arraste as bolinhas das pontas para inclinar. Ao soltar, o ímã procura a borda.</span>
-              <small>Os 4 cantos corrigem a perspectiva. Se o cartão estiver inclinado demais, a medição é bloqueada para evitar variar o aro.</small>
+              <small>Os 4 cantos corrigem a perspectiva. A base inferior é a referência principal de escala; a geometria completa valida a perspectiva.</small>
+              <small>O dedo só é liberado com calibração confirmada de {MIN_CARD_CALIBRATION_CONFIDENCE}% ou mais.</small>
+            </div>
+          )}
+
+          {phase === "finger" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE && (
+            <div className="calibration-warning" role="alert">
+              <strong>Calibração do cartão insuficiente: {calibrationConfidence}%</strong>
+              <span>O aro foi bloqueado para evitar resultado instável.</span>
+              <button className="secondary" type="button" onClick={recalibrateCard}>Recalibrar cartão</button>
             </div>
           )}
 
@@ -1145,6 +1192,7 @@ export default function App() {
               {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
+              <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>
               {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
           )}
