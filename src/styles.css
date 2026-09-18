@@ -274,3 +274,23 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .card-perspective-overlay .corner-dot { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:none; }
 .card-perspective-overlay .corner-dot.locked { fill:#52e0a3; filter:drop-shadow(0 0 2px #52e0a3); }
 .card-perspective-overlay .corner-dot.selected { stroke:#fff; stroke-width:.8; filter:drop-shadow(0 0 4px #fff); }
+
+.photo-guide { position:absolute; z-index:5; inset:7% 7% 9%; border:2px dashed #ffffffa8; border-radius:18px; pointer-events:none; }
+.photo-guide span { position:absolute; left:50%; top:10px; transform:translateX(-50%); padding:5px 9px; border-radius:999px; color:#171109; background:#f0cf80; font-size:9px; font-weight:900; white-space:nowrap; }
+
+.card-lines-overlay { position:absolute; inset:0; z-index:10; width:100%; height:100%; overflow:visible; pointer-events:none; transform-origin:center; will-change:transform; }
+.card-edge .card-line-visible { stroke:#f2cf73; stroke-width:.62; vector-effect:non-scaling-stroke; pointer-events:none; filter:drop-shadow(0 0 2px #000); }
+.card-edge.locked .card-line-visible { stroke:#52e0a3; filter:drop-shadow(0 0 4px #52e0a3); }
+.card-edge.selected .card-line-visible { stroke:#fff0b6; stroke-width:.85; }
+.card-line-hit { stroke:transparent; stroke-width:7; vector-effect:non-scaling-stroke; pointer-events:stroke; cursor:grab; touch-action:none; }
+.card-line-hit:active { cursor:grabbing; }
+.card-line-handle-hit { fill:transparent; stroke:transparent; pointer-events:all; cursor:move; touch-action:none; }
+.card-line-handle { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:none; }
+.card-edge.locked .card-line-handle { fill:#52e0a3; filter:drop-shadow(0 0 3px #52e0a3); }
+.card-edge.selected .card-line-handle { stroke:#fff; stroke-width:.75; }
+.virtual-corner { pointer-events:none; }
+.virtual-corner circle { fill:#fff; stroke:#081a13; stroke-width:.35; vector-effect:non-scaling-stroke; }
+.virtual-corner line { stroke:#fff; stroke-width:.45; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 2px #000); }
+.card-line-status { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:0 0 10px; }
+.card-line-status span { padding:8px 9px; border:1px solid #725f38; border-radius:9px; color:#cfc6b5; background:#17130f; font-size:11px; font-weight:800; text-align:center; }
+.card-line-status span.locked { border-color:#328966; color:#52e0a3; background:#16312755; }
