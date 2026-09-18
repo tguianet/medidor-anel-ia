@@ -267,3 +267,10 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .card-corner-status { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:0 0 10px; }
 .card-corner-status span { padding:7px 9px; border:1px solid #725f38; border-radius:8px; color:#cfc6b5; font-size:11px; text-align:center; }
 .card-corner-status span.locked { border-color:#328966; color:#52e0a3; background:#16312755; }
+
+.card-perspective-overlay { transform-origin:center; will-change:transform; }
+.card-perspective-overlay .corner-hit { fill:transparent; stroke:transparent; pointer-events:all; cursor:grab; touch-action:none; }
+.card-perspective-overlay .corner-hit:active { cursor:grabbing; }
+.card-perspective-overlay .corner-dot { fill:#f2cf73; stroke:#171109; stroke-width:.45; vector-effect:non-scaling-stroke; pointer-events:none; }
+.card-perspective-overlay .corner-dot.locked { fill:#52e0a3; filter:drop-shadow(0 0 2px #52e0a3); }
+.card-perspective-overlay .corner-dot.selected { stroke:#fff; stroke-width:.8; filter:drop-shadow(0 0 4px #fff); }
