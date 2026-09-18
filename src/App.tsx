@@ -524,7 +524,7 @@ export default function App() {
     cardLineDragStartRef.current=null;
   };
 
-  const fingerBandEdgesPx = () => {
+  const fingerBandSamplesPx = () => {
     const stage = measureRef.current;
     const source = photoPixelsRef.current;
     if (!stage || !source || !leftLocked || !rightLocked) return null;
@@ -551,18 +551,26 @@ export default function App() {
       }
       return { x: bestX, score: bestScore };
     };
-    const widths: {left:number;right:number;y:number;width:number}[] = [];
-    for (const offset of [-18, -12, -6, 0, 6, 12, 18]) {
+
+    const samples: {left:number;right:number;y:number;width:number}[] = [];
+    // Em vez de confiar em uma única linha horizontal, mede uma faixa local.
+    // A mediana reduz o efeito de dobras, brilho e pequenas diferenças na
+    // altura onde o usuário posicionou a linha.
+    for (const offset of [-24, -18, -12, -6, 0, 6, 12, 18, 24]) {
       const y = Math.round(imageY + offset);
       if (y < 3 || y >= source.height - 3) continue;
       const leftEdge = findEdge(leftCenter, y);
       const rightEdge = findEdge(rightCenter, y);
       if (leftEdge.score < 10 || rightEdge.score < 10 || rightEdge.x <= leftEdge.x) continue;
-      widths.push({left:leftEdge.x,right:rightEdge.x,y,width:rightEdge.x-leftEdge.x});
+      samples.push({left:leftEdge.x,right:rightEdge.x,y,width:rightEdge.x-leftEdge.x});
     }
-    if (widths.length < 4) return null;
-    widths.sort((a,b)=>a.width-b.width);
-    return widths[Math.round((widths.length-1)*0.65)];
+    if (samples.length < 5) return null;
+
+    const orderedWidths = samples.map((sample)=>sample.width).sort((a,b)=>a-b);
+    const medianWidth = orderedWidths[Math.floor(orderedWidths.length/2)];
+    const tolerancePx = Math.max(3, medianWidth * 0.08);
+    const filtered = samples.filter((sample)=>Math.abs(sample.width-medianWidth)<=tolerancePx);
+    return filtered.length >= 3 ? filtered : samples;
   };
 
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
@@ -590,46 +598,63 @@ export default function App() {
     if(!source||!stage) return null;
 
     const rect=stage.getBoundingClientRect();
-    const edge=fingerBandEdgesPx();
+    const samples=fingerBandSamplesPx();
     const toImageX=(percent:number)=>((((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width);
     const imageY=(((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height;
-    const leftPx=edge?.left??toImageX(leftLine);
-    const rightPx=edge?.right??toImageX(rightLine);
-    const yPx=edge?.y??imageY;
-    const fingerWidthPx=Math.abs(rightPx-leftPx);
 
-    // Corrige a perspectiva usando os quatro cantos confirmados do cartão.
-    // Em vez de assumir a mesma escala horizontal em toda a foto, projetamos
-    // cada borda do dedo para o plano métrico do cartão (85,60 x 53,98 mm).
-    // Isso reduz a variação quando o cartão está levemente tombado na foto.
+    const fallbackSample = {
+      left: toImageX(leftLine),
+      right: toImageX(rightLine),
+      y: imageY,
+      width: Math.abs(toImageX(rightLine)-toImageX(leftLine)),
+    };
+    const measurementSamples = samples && samples.length ? samples : [fallbackSample];
+
+    const median = (values:number[]) => {
+      const ordered=[...values].filter(Number.isFinite).sort((a,b)=>a-b);
+      if(!ordered.length) return null;
+      const middle=Math.floor(ordered.length/2);
+      return ordered.length%2 ? ordered[middle] : (ordered[middle-1]+ordered[middle])/2;
+    };
+
+    // Corrige a perspectiva de CADA linha da faixa e depois usa a mediana
+    // das medidas. Assim uma única dobra, sombra ou altura ligeiramente
+    // diferente não empurra o resultado inteiro para cima/baixo.
     const quadPx = cardQuad.map((point)=>({
       x: point.x/100*source.width,
       y: point.y/100*source.height,
     })) as [Point,Point,Point,Point];
     try {
       const mapToCardMm = homographyFromQuad(quadPx);
-      const leftMm = mapToCardMm({x:leftPx,y:yPx});
-      const rightMm = mapToCardMm({x:rightPx,y:yPx});
-      const perspectiveWidthMm = distance(leftMm,rightMm);
-      if(Number.isFinite(perspectiveWidthMm) && perspectiveWidthMm>0 && perspectiveWidthMm<45){
-        return perspectiveWidthMm;
-      }
+      const widthsMm = measurementSamples
+        .map((sample)=>{
+          const leftMm=mapToCardMm({x:sample.left,y:sample.y});
+          const rightMm=mapToCardMm({x:sample.right,y:sample.y});
+          return distance(leftMm,rightMm);
+        })
+        .filter((value)=>Number.isFinite(value)&&value>0&&value<45);
+      const stableWidthMm=median(widthsMm);
+      if(stableWidthMm!==null) return stableWidthMm;
     } catch {
       // Cai no método defensivo abaixo.
     }
 
-    // Fallback defensivo: usa a largura projetada do cartão na mesma altura.
-    const cardReferencePx=cardWidthAtImageY(yPx,source.width,source.height);
-    if(cardReferencePx && cardReferencePx>0){
-      return fingerWidthPx/cardReferencePx*85.6;
-    }
+    // Fallback defensivo: calcula a razão cartão/dedo em várias alturas e
+    // também usa a mediana, em vez de uma única leitura.
+    const fallbackWidthsMm=measurementSamples.map((sample)=>{
+      const cardReferencePx=cardWidthAtImageY(sample.y,source.width,source.height);
+      if(!cardReferencePx||cardReferencePx<=0) return NaN;
+      return sample.width/cardReferencePx*85.6;
+    });
+    const stableFallbackMm=median(fallbackWidthsMm);
+    if(stableFallbackMm!==null) return stableFallbackMm;
 
     const cardBottomPx=Math.hypot(
       (cardQuad[2].x-cardQuad[3].x)/100*source.width,
       (cardQuad[2].y-cardQuad[3].y)/100*source.height,
     );
     if(cardBottomPx<=0) return null;
-    return fingerWidthPx/cardBottomPx*85.6;
+    return fallbackSample.width/cardBottomPx*85.6;
   },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardQuad,cardLines]);
 
   const confirmRestMeasurement = () => {
