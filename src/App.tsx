@@ -818,7 +818,9 @@ export default function App() {
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
-              <span>Largura marcada: {result.widthMm.toFixed(1)} mm</span>
+              <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
+              <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
+              <span>Correção aplicada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
               {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
