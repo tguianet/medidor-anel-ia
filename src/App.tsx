@@ -246,15 +246,15 @@ export default function App() {
   ) => {
     const source=photoPixelsRef.current;
     if(source){
-      const quadPx=quadPercent.map((p)=>({x:p.x/100*source.width,y:p.y/100*source.height})) as [Point,Point,Point,Point];
-      const map=homographyFromQuad(quadPx);
-      const centerY=((quadPercent[2].y+quadPercent[3].y)/2)/100*source.height;
-      const a=map({x:quadPercent[3].x/100*source.width,y:centerY});
-      const b=map({x:quadPercent[2].x/100*source.width,y:centerY});
-      const px=Math.abs(quadPercent[2].x-quadPercent[3].x)/100*source.width;
-      setPixelsPerMm(px/Math.max(distance(a,b),0.01));
+      // UI scale only. The actual MA calculation below uses the card itself as
+      // the metric reference and never the full photo/canvas width.
+      const bottomWidthPx=Math.hypot(
+        (quadPercent[2].x-quadPercent[3].x)/100*source.width,
+        (quadPercent[2].y-quadPercent[3].y)/100*source.height,
+      );
+      setPixelsPerMm(bottomWidthPx/85.6);
     } else {
-      setPixelsPerMm(((baseRight-baseLeft)/100*900)/85.6);
+      setPixelsPerMm(1);
     }
     setCalibrationConfidence((current)=>Math.max(current,confidence));
     setLeftLine(38);
@@ -559,11 +559,30 @@ export default function App() {
     return widths[Math.round((widths.length-1)*0.65)];
   };
 
+  const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
+    const toPx=(line:Line):Line=>({
+      a:{x:line.a.x/100*sourceWidth,y:line.a.y/100*sourceHeight},
+      b:{x:line.b.x/100*sourceWidth,y:line.b.y/100*sourceHeight},
+    });
+    const xAtY=(line:Line,y:number)=>{
+      const dy=line.b.y-line.a.y;
+      if(Math.abs(dy)<1e-6) return null;
+      const t=(y-line.a.y)/dy;
+      return line.a.x+(line.b.x-line.a.x)*t;
+    };
+    const leftX=xAtY(toPx(cardLines.left),imageY);
+    const rightX=xAtY(toPx(cardLines.right),imageY);
+    if(leftX===null||rightX===null||!Number.isFinite(leftX)||!Number.isFinite(rightX)) return null;
+    const width=Math.abs(rightX-leftX);
+    return width>1?width:null;
+  };
+
   const liveWidthMm = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
     const source=photoPixelsRef.current;
     const stage=measureRef.current;
     if(!source||!stage) return null;
+
     const rect=stage.getBoundingClientRect();
     const edge=fingerBandEdgesPx();
     const toImageX=(percent:number)=>((((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width);
@@ -571,14 +590,25 @@ export default function App() {
     const leftPx=edge?.left??toImageX(leftLine);
     const rightPx=edge?.right??toImageX(rightLine);
     const yPx=edge?.y??imageY;
-    try{
-      const quadPx=cardQuad.map((p)=>({x:p.x/100*source.width,y:p.y/100*source.height})) as [Point,Point,Point,Point];
-      const map=homographyFromQuad(quadPx);
-      return distance(map({x:leftPx,y:yPx}),map({x:rightPx,y:yPx}));
-    }catch{
-      return Math.abs(rightPx-leftPx)/pixelsPerMm;
+    const fingerWidthPx=Math.abs(rightPx-leftPx);
+
+    // MA is now normalized only by the card's projected width at the same
+    // image height. Moving the camera closer/farther changes both values by
+    // the same factor, so the ratio remains stable.
+    const cardReferencePx=cardWidthAtImageY(yPx,source.width,source.height);
+    if(cardReferencePx && cardReferencePx>0){
+      return fingerWidthPx/cardReferencePx*85.6;
     }
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardQuad]);
+
+    // Defensive fallback: use the confirmed bottom edge of the physical card,
+    // never the complete image width.
+    const cardBottomPx=Math.hypot(
+      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
+      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
+    );
+    if(cardBottomPx<=0) return null;
+    return fingerWidthPx/cardBottomPx*85.6;
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardQuad,cardLines]);
 
   const confirmRestMeasurement = () => {
     if (liveWidthMm === null) return;
