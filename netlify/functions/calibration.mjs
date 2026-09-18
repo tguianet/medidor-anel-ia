@@ -103,7 +103,8 @@ const makeGaugeCurve = (tests) => {
       samples: group.widths.length,
       averageWidthMm: Number(averageWidthMm.toFixed(2)),
       averagePrediction: Number(averagePrediction.toFixed(1)),
-      averageError: Number((group.ringSize - averagePrediction).toFixed(1)),\n      averageDiameterMm: group.diameters.length ? Number((group.diameters.reduce((sum, value) => sum + value, 0) / group.diameters.length).toFixed(2)) : null,
+      averageError: Number((group.ringSize - averagePrediction).toFixed(1)),
+      averageDiameterMm: group.diameters.length ? Number((group.diameters.reduce((sum, value) => sum + value, 0) / group.diameters.length).toFixed(2)) : null,
     };
   }).sort((a, b) => a.ringSize - b.ringSize);
 };
