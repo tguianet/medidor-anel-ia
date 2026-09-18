@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto, cardMatchesLiveGuide } from "./vision";
 import AdminCalibration from "./AdminCalibration";
 import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
-import { homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
+import { assessCardQuadGeometry, homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
 import type { CardEdge, DragTarget, FingerMeasureStep, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
@@ -228,13 +228,19 @@ export default function App() {
     try {
       const quad = cardQuadFromCurrentLines();
       homographyFromQuad(quad.px);
+      const geometry = assessCardQuadGeometry(quad.px);
+      if (!geometry.valid) {
+        camera.setError(geometry.reason || "A calibração do cartão ficou instável. Ajuste as quatro bordas e confirme novamente.");
+        return;
+      }
       setCardQuad(quad.percent);
       setPerspectiveReady(true);
+      setCalibrationConfidence(geometry.confidence);
       const bottomY=(quad.percent[2].y+quad.percent[3].y)/2;
       setCardLeft(quad.percent[3].x);
       setCardRight(quad.percent[2].x);
       setCardBottom(bottomY);
-      activateFingerMeasurement(quad.percent[3].x,quad.percent[2].x,bottomY,calibrationConfidence||92,quad.percent);
+      activateFingerMeasurement(quad.percent[3].x,quad.percent[2].x,bottomY,geometry.confidence,quad.percent);
     } catch {
       camera.setError("As linhas não formam um cartão válido. Ajuste cada borda e confirme novamente.");
     }
@@ -592,16 +598,32 @@ export default function App() {
     const yPx=edge?.y??imageY;
     const fingerWidthPx=Math.abs(rightPx-leftPx);
 
-    // MA is now normalized only by the card's projected width at the same
-    // image height. Moving the camera closer/farther changes both values by
-    // the same factor, so the ratio remains stable.
+    // Corrige a perspectiva usando os quatro cantos confirmados do cartão.
+    // Em vez de assumir a mesma escala horizontal em toda a foto, projetamos
+    // cada borda do dedo para o plano métrico do cartão (85,60 x 53,98 mm).
+    // Isso reduz a variação quando o cartão está levemente tombado na foto.
+    const quadPx = cardQuad.map((point)=>({
+      x: point.x/100*source.width,
+      y: point.y/100*source.height,
+    })) as [Point,Point,Point,Point];
+    try {
+      const mapToCardMm = homographyFromQuad(quadPx);
+      const leftMm = mapToCardMm({x:leftPx,y:yPx});
+      const rightMm = mapToCardMm({x:rightPx,y:yPx});
+      const perspectiveWidthMm = distance(leftMm,rightMm);
+      if(Number.isFinite(perspectiveWidthMm) && perspectiveWidthMm>0 && perspectiveWidthMm<45){
+        return perspectiveWidthMm;
+      }
+    } catch {
+      // Cai no método defensivo abaixo.
+    }
+
+    // Fallback defensivo: usa a largura projetada do cartão na mesma altura.
     const cardReferencePx=cardWidthAtImageY(yPx,source.width,source.height);
     if(cardReferencePx && cardReferencePx>0){
       return fingerWidthPx/cardReferencePx*85.6;
     }
 
-    // Defensive fallback: use the confirmed bottom edge of the physical card,
-    // never the complete image width.
     const cardBottomPx=Math.hypot(
       (cardQuad[2].x-cardQuad[3].x)/100*source.width,
       (cardQuad[2].y-cardQuad[3].y)/100*source.height,
@@ -783,7 +805,7 @@ export default function App() {
             <div className="card-base-status">
               <strong>Ajuste as 4 linhas nas bordas retas</strong>
               <span>Arraste a linha inteira para mover. Arraste as bolinhas das pontas para inclinar. Ao soltar, o ímã procura a borda.</span>
-              <small>Os cruzamentos das linhas definem os 4 cantos usados na correção de perspectiva.</small>
+              <small>Os 4 cantos corrigem a perspectiva. Se o cartão estiver inclinado demais, a medição é bloqueada para evitar variar o aro.</small>
             </div>
           )}
 
