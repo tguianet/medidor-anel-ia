@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { calibratePhoto, cardMatchesLiveGuide } from "./vision";
 import AdminCalibration from "./AdminCalibration";
 import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
+import { homographyFromQuad, distance, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
 import type { DragTarget, FingerMeasureStep, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
@@ -25,6 +26,8 @@ export default function App() {
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
+  const [cardCorners, setCardCorners] = useState<[Point, Point, Point, Point]>([{x:15,y:28},{x:85,y:28},{x:85,y:58},{x:15,y:58}]);
+  const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [cardLeftLocked, setCardLeftLocked] = useState(false);
   const [cardRightLocked, setCardRightLocked] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
@@ -169,10 +172,12 @@ export default function App() {
       setCardLeft(finalLeft);
       setCardRight(finalRight);
       setCardBottom(finalBottom);
+      const top = clamp(finalBottom - (finalRight - finalLeft) * (53.98 / 85.6) * 0.75, 4, finalBottom - 5);
+      setCardCorners([{x:finalLeft,y:top},{x:finalRight,y:top},{x:finalRight,y:finalBottom},{x:finalLeft,y:finalBottom}]);
+      setPerspectiveReady(false);
       setCardLeftLocked(true);
       setCardRightLocked(true);
-      activateFingerMeasurement(finalLeft, finalRight, finalBottom, calibration.confidence);
-      camera.setError("");
+      camera.setError("Confira as quatro bordas do cartão e toque em Confirmar perspectiva.");
     } catch {
       camera.setError("Não consegui travar a base automaticamente. Arraste as duas linhas para os cantos inferiores do cartão.");
     } finally {
@@ -180,9 +185,30 @@ export default function App() {
     }
   };
 
+  const confirmPerspective = () => {
+    try {
+      const source = photoPixelsRef.current;
+      if (!source) return;
+      const quad = cardCorners.map((p) => ({ x: p.x / 100 * source.width, y: p.y / 100 * source.height })) as [Point, Point, Point, Point];
+      const map = homographyFromQuad(quad);
+      const measured = distance(map(quad[0]), map(quad[1]));
+      if (Math.abs(measured - 85.6) > 0.15) throw new Error("perspectiva");
+      setPerspectiveReady(true);
+      activateFingerMeasurement(cardCorners[3].x, cardCorners[2].x, (cardCorners[2].y + cardCorners[3].y) / 2, calibrationConfidence || 92);
+    } catch { camera.setError("As quatro bordas não formam um cartão válido. Ajuste os cantos e tente novamente."); }
+  };
+
   const activateFingerMeasurement = (baseLeft: number, baseRight: number, baseBottom: number, confidence = 92) => {
-    const widthPx = (baseRight - baseLeft) / 100 * 900;
-    setPixelsPerMm(widthPx / 85.6);
+    const source = photoPixelsRef.current;
+    if (source) {
+      const quad = cardCorners.map((p) => ({ x: p.x / 100 * source.width, y: p.y / 100 * source.height })) as [Point, Point, Point, Point];
+      const map = homographyFromQuad(quad);
+      const centerY = ((cardCorners[2].y + cardCorners[3].y) / 2) / 100 * source.height;
+      const a = map({x: cardCorners[3].x / 100 * source.width, y:centerY});
+      const b = map({x: cardCorners[2].x / 100 * source.width, y:centerY});
+      const px = Math.abs(cardCorners[2].x-cardCorners[3].x)/100*source.width;
+      setPixelsPerMm(px / Math.max(distance(a,b), 0.01));
+    } else setPixelsPerMm(((baseRight - baseLeft) / 100 * 900) / 85.6);
     setCalibrationConfidence((current) => Math.max(current, confidence));
     setLeftLine(38);
     setRightLine(62);
@@ -231,6 +257,12 @@ export default function App() {
     const x = clamp(((clientX - rect.left) / rect.width) * 100, 2, 98);
     const y = clamp(((clientY - rect.top) / rect.height) * 100, 8, 92);
     const target = draggingRef.current;
+    if (typeof target === "string" && target.startsWith("card-corner-")) {
+      const index = Number(target.slice(-1));
+      setPerspectiveReady(false);
+      setCardCorners((current) => current.map((p,i) => i === index ? {x,y} : p) as [Point,Point,Point,Point]);
+      return;
+    }
     if (target === "showcase-ring") {
       const dx = ((clientX - dragStartRef.current.x) / rect.width) * 100;
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
@@ -578,6 +610,10 @@ export default function App() {
             {photo && <img className={phase === "finger" ? "zoomable-photo" : ""} style={phase === "finger" ? { transform: `translate(${panX}px, ${panY}px) scale(${zoom})` } : undefined} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && (
               <>
+                <svg className="card-perspective-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Quatro bordas do cartão">
+                  <polygon points={cardCorners.map(p => `${p.x},${p.y}`).join(" ")} />
+                  {cardCorners.map((p,i) => <circle key={i} cx={p.x} cy={p.y} r="1.6" onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = (`card-corner-${i}` as DragTarget); e.currentTarget.setPointerCapture(e.pointerId); }} />)}
+                </svg>
                 <button
                   className={`card-base-line${cardLeftLocked && cardRightLocked ? " locked" : ""}`}
                   style={{ left: `${cardLeft}%`, top: `${cardBottom}%`, width: `${cardRight - cardLeft}%` }}
@@ -623,6 +659,7 @@ export default function App() {
           </div>
 
           {analyzingCard && <p className="analysis-loading">Localizando a base e os cantos inferiores do cartão...</p>}
+          {phase === "card" && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar perspectiva do cartão</button>}
           {phase === "card" && !analyzingCard && (
             <div className={`card-base-status${cardLeftLocked && cardRightLocked ? " ready" : ""}`}>
               <strong>{cardLeftLocked && cardRightLocked ? "✓ Confira a base antes de continuar" : "Ajuste os dois cantos inferiores"}</strong>
