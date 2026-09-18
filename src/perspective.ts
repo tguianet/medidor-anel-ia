@@ -1,4 +1,5 @@
 export type Point = { x: number; y: number };
+export type Line = { a: Point; b: Point };
 
 const solve = (a: number[][], b: number[]) => {
   const n = b.length;
@@ -39,3 +40,24 @@ export const localMmPerPixel = (quad:[Point,Point,Point,Point], p:Point) => {
   const map=homographyFromQuad(quad);
   return distance(map(p),map({x:p.x+1,y:p.y}));
 };
+
+
+export const lineIntersection = (l1: Line, l2: Line): Point => {
+  const x1=l1.a.x, y1=l1.a.y, x2=l1.b.x, y2=l1.b.y;
+  const x3=l2.a.x, y3=l2.a.y, x4=l2.b.x, y4=l2.b.y;
+  const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4);
+  if (Math.abs(den)<1e-8) throw new Error("Linhas paralelas");
+  const p1=x1*y2-y1*x2;
+  const p2=x3*y4-y3*x4;
+  return {
+    x:(p1*(x3-x4)-(x1-x2)*p2)/den,
+    y:(p1*(y3-y4)-(y1-y2)*p2)/den,
+  };
+};
+
+export const quadFromLines = (lines: { top: Line; right: Line; bottom: Line; left: Line }): [Point,Point,Point,Point] => [
+  lineIntersection(lines.top, lines.left),
+  lineIntersection(lines.top, lines.right),
+  lineIntersection(lines.bottom, lines.right),
+  lineIntersection(lines.bottom, lines.left),
+];
