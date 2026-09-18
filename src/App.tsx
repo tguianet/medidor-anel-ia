@@ -825,7 +825,10 @@ export default function App() {
                   <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
                 </>
               ) : (
-                <span>Modo dedo: curva do anelímetro não aplicada</span>
+                <>
+                  <span>Modo dedo: curva do anelímetro não aplicada</span>
+                  {result.fingerFitOffset !== 0 && <span>Ajuste de dedo real: +{result.fingerFitOffset} aro</span>}
+                </>
               )}
               {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
