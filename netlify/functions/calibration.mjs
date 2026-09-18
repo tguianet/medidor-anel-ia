@@ -103,7 +103,7 @@ const makeGaugeCurve = (tests) => {
       samples: group.widths.length,
       averageWidthMm: Number(averageWidthMm.toFixed(2)),
       averagePrediction: Number(averagePrediction.toFixed(1)),
-      averageError: Number((group.ringSize - averagePrediction).toFixed(1)),
+      averageError: Number((group.ringSize - averagePrediction).toFixed(1)),\n      averageDiameterMm: group.diameters.length ? Number((group.diameters.reduce((sum, value) => sum + value, 0) / group.diameters.length).toFixed(2)) : null,
     };
   }).sort((a, b) => a.ringSize - b.ringSize);
 };
@@ -161,7 +161,7 @@ export default async (request, context) => {
         finger: String(body.finger || "não informado").slice(0, 30),
         hand: String(body.hand || "não informada").slice(0, 20),
         note: String(body.note || "").slice(0, 180),
-        measurementType: body.measurementType === "anelimetro" ? "anelimetro" : "finger",
+        measurementType,
       };
       await store.setJSON(`tests/${record.createdAt}-${record.id}`, record, { onlyIfNew: true });
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
