@@ -1,6 +1,6 @@
 export type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 export type MeasurePhase = "card" | "finger";
-export type DragTarget = "left" | "right" | "height" | "card-base-left" | "card-base-right" | "card-base-y" | "pan" | "showcase-ring" | "showcase-left" | "showcase-right" | null;
+export type DragTarget = "left" | "right" | "height" | "card-base-left" | "card-base-right" | "card-base-y" | "card-corner-0" | "card-corner-1" | "card-corner-2" | "card-corner-3" | "pan" | "showcase-ring" | "showcase-left" | "showcase-right" | null;
 export type RingMetal = "gold" | "silver" | "rose" | "black";
 export type RingStyle = "classic" | "textured" | "matte" | "grooved" | "stone" | "solitaire";
 export type MeasurementMode = "finger" | "anelimetro";
