@@ -49,6 +49,9 @@ export default function App() {
   const [rightFingerTilt, setRightFingerTilt] = useState(0);
   const [leftMagnetConfidence, setLeftMagnetConfidence] = useState(0);
   const [rightMagnetConfidence, setRightMagnetConfidence] = useState(0);
+  const [leftManualRefined, setLeftManualRefined] = useState(false);
+  const [rightManualRefined, setRightManualRefined] = useState(false);
+  const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const [cardReady, setCardReady] = useState(false);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
@@ -124,6 +127,8 @@ export default function App() {
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
     setRightMagnetConfidence(0);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
     setCardReady(false);
     setStage("camera");
     await camera.startCameraStream();
@@ -177,6 +182,8 @@ export default function App() {
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
     setRightMagnetConfidence(0);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
     camera.stopCamera();
     setStage("review");
     camera.setError("");
@@ -292,6 +299,8 @@ export default function App() {
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
     setRightMagnetConfidence(0);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
   };
 
   const captureHand = () => {
@@ -375,26 +384,36 @@ export default function App() {
       return;
     }
     if (target === "left") {
-      setLeftLocked(false);
-      setLeftMagnetConfidence(0);
-      setLeftFingerTilt(0);
+      if (fingerRefineDragRef.current !== "left") {
+        setLeftLocked(false);
+        setLeftMagnetConfidence(0);
+        setLeftFingerTilt(0);
+        setLeftManualRefined(false);
+      }
       setLeftLine(Math.min(x, rightLine - 3));
     }
     if (target === "right") {
-      setRightLocked(false);
-      setRightMagnetConfidence(0);
-      setRightFingerTilt(0);
+      if (fingerRefineDragRef.current !== "right") {
+        setRightLocked(false);
+        setRightMagnetConfidence(0);
+        setRightFingerTilt(0);
+        setRightManualRefined(false);
+      }
       setRightLine(Math.max(x, leftLine + 3));
     }
     if (target === "height") {
       setLeftLocked(false);
       setRightLocked(false);
+      setLeftManualRefined(false);
+      setRightManualRefined(false);
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
       setMeasureY(clamp(dragStartRef.current.right + dy, 18, 76));
     }
     if (target === "pan") {
       setLeftLocked(false);
       setRightLocked(false);
+      setLeftManualRefined(false);
+      setRightManualRefined(false);
       const maxX = (zoom - 1) * rect.width / 2;
       const maxY = (zoom - 1) * rect.height / 2;
       setPanX(clamp(dragStartRef.current.left + clientX - dragStartRef.current.x, -maxX, maxX));
@@ -404,6 +423,12 @@ export default function App() {
 
   const startDrag = (target: DragTarget, event: React.PointerEvent) => {
     event.stopPropagation();
+    // Depois que o ímã encontrou a borda, tocar/arrastar a mesma linha entra
+    // em refinamento manual. Ao soltar, não puxamos de volta para o ímã.
+    fingerRefineDragRef.current =
+      target === "left" && leftLocked ? "left" :
+      target === "right" && rightLocked ? "right" :
+      null;
     draggingRef.current = target;
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -447,6 +472,8 @@ export default function App() {
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
     setRightMagnetConfidence(0);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
     if (value === 1) { setPanX(0); setPanY(0); }
   };
 
@@ -535,11 +562,13 @@ export default function App() {
       setLeftLine(Math.min(snappedPercent,rightLine-3));
       setLeftFingerTilt(tiltDeg);
       setLeftMagnetConfidence(confidence);
+      setLeftManualRefined(false);
       setLeftLocked(true);
     }else{
       setRightLine(Math.max(snappedPercent,leftLine+3));
       setRightFingerTilt(tiltDeg);
       setRightMagnetConfidence(confidence);
+      setRightManualRefined(false);
       setRightLocked(true);
     }
   };
@@ -598,12 +627,28 @@ export default function App() {
 
   const finishDrag = (event:React.PointerEvent) => {
     const target=draggingRef.current;
-    if(target==="left"||target==="right") snapBoundary(target,event.clientX);
+    if(target==="left"||target==="right"){
+      const refining=fingerRefineDragRef.current===target;
+      if(refining){
+        // Mantém exatamente a posição escolhida pelo usuário. A inclinação
+        // detectada pelo ímã continua como referência visual.
+        if(target==="left"){
+          setLeftLocked(true);
+          setLeftManualRefined(true);
+        }else{
+          setRightLocked(true);
+          setRightManualRefined(true);
+        }
+      }else{
+        snapBoundary(target,event.clientX);
+      }
+    }
     if(typeof target==="string"&&target.startsWith("card-line-")){
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match) snapCardLine(match[1] as CardEdge);
     }
     draggingRef.current=null;
+    fingerRefineDragRef.current=null;
     cardLineDragStartRef.current=null;
   };
 
@@ -754,6 +799,8 @@ export default function App() {
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
     setRightMagnetConfidence(0);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
   };
 
   const confirmJointMeasurement = () => {
@@ -788,6 +835,8 @@ export default function App() {
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
     setRightMagnetConfidence(0);
+    setLeftManualRefined(false);
+    setRightManualRefined(false);
     camera.setError("");
     setHandPhoto("");
     void openCamera();
@@ -986,9 +1035,9 @@ export default function App() {
           {phase === "finger" && !tryOn && <div className="edge-status">
             <strong>{leftLocked && rightLocked ? "Bordas magnéticas ajustadas" : "Aproxime e solte cada linha na borda"}</strong>
             <span>
-              {leftLocked ? `✓ Esquerda magnética ${leftMagnetConfidence}%` : "○ Falta a esquerda"}
+              {leftLocked ? (leftManualRefined ? `✓ Esquerda refinada manualmente` : `✓ Esquerda magnética ${leftMagnetConfidence}%`) : "○ Falta a esquerda"}
               {" · "}
-              {rightLocked ? `✓ Direita magnética ${rightMagnetConfidence}%` : "○ Falta a direita"}
+              {rightLocked ? (rightManualRefined ? `✓ Direita refinada manualmente` : `✓ Direita magnética ${rightMagnetConfidence}%`) : "○ Falta a direita"}
             </span>
           </div>}
 
@@ -1013,7 +1062,7 @@ export default function App() {
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
-          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Use + para ampliar, arraste a foto para centralizar e depois encaixe as linhas nas bordas do dedo."}</p>
+          <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Aproxime e solte para usar o ímã. Depois que travar em verde, arraste novamente a linha para fazer o ajuste fino manual."}</p>
         </section>
       )}
 
