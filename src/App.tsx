@@ -772,19 +772,39 @@ export default function App() {
     const source = photoPixelsRef.current;
     if (!stage || !source || !leftLocked || !rightLocked) return null;
     const rect = stage.getBoundingClientRect();
+
     const toImageX = (percent: number) => (
       (((percent / 100 * rect.width) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width
     );
-    const imageY = (((measureY / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
+    const toImageY = (percent: number) => (
+      (((percent / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height
+    );
+    const imageY = toImageY(measureY);
+
+    const screenLineXAtImageY = (line:Line, yImage:number) => {
+      const aY = toImageY(line.a.y);
+      const bY = toImageY(line.b.y);
+      const aX = toImageX(line.a.x);
+      const bX = toImageX(line.b.x);
+      const dy = bY - aY;
+      if (Math.abs(dy) < 1e-6) return (aX + bX) / 2;
+      const t = (yImage - aY) / dy;
+      return aX + (bX - aX) * t;
+    };
+
     const leftCenter = toImageX(leftLine);
     const rightCenter = toImageX(rightLine);
     const leftSlope = Math.tan(leftFingerTilt * Math.PI / 180);
     const rightSlope = Math.tan(rightFingerTilt * Math.PI / 180);
     const searchRadius = Math.max(7, Math.round(18 / zoom));
+
     const grayscale = (x: number, y: number) => {
-      const offset = (y * source.width + x) * 4;
+      const ix = Math.max(0, Math.min(source.width - 1, Math.round(x)));
+      const iy = Math.max(0, Math.min(source.height - 1, Math.round(y)));
+      const offset = (iy * source.width + ix) * 4;
       return source.data[offset] * 0.299 + source.data[offset + 1] * 0.587 + source.data[offset + 2] * 0.114;
     };
+
     const findEdge = (center: number, y: number) => {
       let bestX = Math.round(center);
       let bestScore = -Infinity;
@@ -798,19 +818,37 @@ export default function App() {
     };
 
     const samples: {left:number;right:number;y:number;width:number}[] = [];
-    // Em vez de confiar em uma única linha horizontal, mede uma faixa local.
-    // A mediana reduz o efeito de dobras, brilho e pequenas diferenças na
-    // altura onde o usuário posicionou a linha.
+
     for (const offset of [-24, -18, -12, -6, 0, 6, 12, 18, 24]) {
       const y = Math.round(imageY + offset);
       if (y < 3 || y >= source.height - 3) continue;
-      const leftPredicted = leftCenter + leftSlope * (y - imageY);
-      const rightPredicted = rightCenter + rightSlope * (y - imageY);
-      const leftEdge = findEdge(leftPredicted, y);
-      const rightEdge = findEdge(rightPredicted, y);
+
+      const leftPredicted = leftManualRefined
+        ? screenLineXAtImageY(fingerLines.left, y)
+        : leftCenter + leftSlope * (y - imageY);
+
+      const rightPredicted = rightManualRefined
+        ? screenLineXAtImageY(fingerLines.right, y)
+        : rightCenter + rightSlope * (y - imageY);
+
+      const leftEdge = leftManualRefined
+        ? { x: leftPredicted, score: 999 }
+        : findEdge(leftPredicted, y);
+
+      const rightEdge = rightManualRefined
+        ? { x: rightPredicted, score: 999 }
+        : findEdge(rightPredicted, y);
+
       if (leftEdge.score < 10 || rightEdge.score < 10 || rightEdge.x <= leftEdge.x) continue;
-      samples.push({left:leftEdge.x,right:rightEdge.x,y,width:rightEdge.x-leftEdge.x});
+
+      samples.push({
+        left:leftEdge.x,
+        right:rightEdge.x,
+        y,
+        width:rightEdge.x-leftEdge.x,
+      });
     }
+
     if (samples.length < 5) return null;
 
     const orderedWidths = samples.map((sample)=>sample.width).sort((a,b)=>a-b);
@@ -902,7 +940,7 @@ export default function App() {
     );
     if(cardBottomPx<=0) return null;
     return fallbackSample.width/cardBottomPx*85.6;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,cardQuad,cardLines]);
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad,cardLines]);
 
   const confirmRestMeasurement = () => {
     if (liveWidthMm === null) return;
