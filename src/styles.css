@@ -456,3 +456,57 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   fill:#52e0a3;
   filter:drop-shadow(0 0 3px #52e0a3);
 }
+
+
+.camera-angle-guide {
+  position:absolute;
+  left:50%;
+  top:51%;
+  z-index:8;
+  display:grid;
+  grid-template-columns:42px auto 42px;
+  align-items:center;
+  gap:8px;
+  transform:translateX(-50%);
+  padding:8px 10px;
+  border:1px solid #8d7444;
+  border-radius:999px;
+  background:#0b0907c9;
+  color:#f3d58a;
+  pointer-events:none;
+}
+.camera-angle-guide strong {
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.035em;
+  white-space:nowrap;
+}
+.camera-angle-guide .angle-arrow {
+  display:grid;
+  place-items:center;
+  width:34px;
+  height:34px;
+  border:1px solid #8d7444;
+  border-radius:50%;
+  background:#2a2117;
+  color:#f3d58a;
+  font-size:24px;
+  font-weight:900;
+  line-height:1;
+  opacity:.32;
+}
+.camera-angle-guide.forward .angle-arrow.forward,
+.camera-angle-guide.backward .angle-arrow.backward {
+  opacity:1;
+  background:#f2cf73;
+  color:#171109;
+  box-shadow:0 0 10px #f2cf7388;
+}
+.camera-angle-guide.aligned {
+  border-color:#328966;
+  color:#52e0a3;
+  background:#0c1f18d9;
+}
+.camera-angle-guide.aligned .angle-arrow {
+  opacity:.2;
+}
