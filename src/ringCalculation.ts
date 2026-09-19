@@ -108,6 +108,8 @@ export type RingResult = {
   rawWidthMm: number;
   widthMm: number;
   measurementCorrectionMm: number;
+  calculatedDiameterMm: number;
+  diameterCorrectionMm: number;
   equivalentDiameterMm: number;
   ringSize: number;
   calculationMode: "formula";
@@ -115,19 +117,31 @@ export type RingResult = {
   fingerFitOffset: number;
 };
 
-type FingerFitCorrection = {
-  minWidthMm: number;
-  maxWidthMm: number;
-  predictedRing: number;
-  offset: number;
-};
+// Correção experimental exclusiva do modo dedo aplicada no DI contínuo,
+// antes de escolher o aro na tabela. Assim evitamos "pular aro" artificialmente.
+//
+// Pontos reais confirmados:
+// - MA 18,0 mm: precisava sair de aro 16 para 17 -> +0,23 mm no DI.
+// - MA 21,9–22,1 mm: aro 27 ficou usável, mas o ideal é 26 -> -0,17 mm no DI.
+// - MA 22,7 mm: aro 29 ficou perfeito -> correção volta a 0.
+export const fingerDiameterCorrectionMm = (rawWidthMm: number) => {
+  if (!Number.isFinite(rawWidthMm)) return 0;
 
-// Primeiro ponto empírico exclusivo de dedo real.
-// Teste confirmado: MA bruto 18,0 mm -> sistema aro 16 -> aro real 17.
-// Mantemos uma faixa estreita para não contaminar outras regiões da curva.
-export const FINGER_FIT_CORRECTIONS: FingerFitCorrection[] = [
-  { minWidthMm: 17.7, maxWidthMm: 18.3, predictedRing: 16, offset: 1 },
-];
+  if (rawWidthMm >= 17.7 && rawWidthMm <= 18.3) {
+    return 0.23;
+  }
+
+  if (rawWidthMm >= 21.8 && rawWidthMm <= 22.1) {
+    return -0.17;
+  }
+
+  if (rawWidthMm > 22.1 && rawWidthMm < 22.7) {
+    const t = (rawWidthMm - 22.1) / (22.7 - 22.1);
+    return -0.17 * (1 - t);
+  }
+
+  return 0;
+};
 
 const findRingBySize = (size: number) => (
   RING_DIAMETER_TABLE.find((ring) => ring.size === size)
@@ -142,9 +156,11 @@ export const computeRingResult = (
   // supercorrigiu os testes iniciais, então só é aplicada quando explicitamente
   // habilitada pelo modo anelímetro.
   const widthMm = applyBenchCalibration ? calibrateMeasuredWidthMm(rawWidthMm) : rawWidthMm;
-  const equivalentDiameterMm = estimateInnerDiameter(widthMm);
+  const baseDiameterMm = estimateInnerDiameter(widthMm);
+  const diameterCorrectionMm = applyBenchCalibration ? 0 : fingerDiameterCorrectionMm(rawWidthMm);
+  const calculatedDiameterMm = baseDiameterMm + diameterCorrectionMm;
   const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
-    Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
+    Math.abs(candidate.diameterMm - calculatedDiameterMm) < Math.abs(closest.diameterMm - calculatedDiameterMm) ? candidate : closest
   );
   const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
     widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
@@ -157,30 +173,20 @@ export const computeRingResult = (
   const matchingRule = rules.find((rule) => (
     rule.predictedRing === comfortRing.size && widthMm >= rule.minWidthMm && widthMm <= rule.maxWidthMm
   ));
-  const ruleAdjustedRing = matchingRule
+  const selectedRing = matchingRule
     ? findRingBySize(clamp(comfortRing.size + matchingRule.offset, 1, 40)) || comfortRing
     : comfortRing;
-
-  const fingerFitCorrection = !applyBenchCalibration && !matchingRule
-    ? FINGER_FIT_CORRECTIONS.find((correction) => (
-        widthMm >= correction.minWidthMm &&
-        widthMm <= correction.maxWidthMm &&
-        ruleAdjustedRing.size === correction.predictedRing
-      ))
-    : undefined;
-
-  const selectedRing = fingerFitCorrection
-    ? findRingBySize(clamp(ruleAdjustedRing.size + fingerFitCorrection.offset, 1, 40)) || ruleAdjustedRing
-    : ruleAdjustedRing;
 
   return {
     rawWidthMm,
     widthMm,
     measurementCorrectionMm: widthMm - rawWidthMm,
+    calculatedDiameterMm,
+    diameterCorrectionMm,
     equivalentDiameterMm: selectedRing.diameterMm,
     ringSize: selectedRing.size,
     calculationMode: "formula",
     appliedRuleOffset: matchingRule?.offset ?? null,
-    fingerFitOffset: fingerFitCorrection?.offset ?? 0,
+    fingerFitOffset: 0,
   };
 };
