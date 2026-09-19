@@ -60,19 +60,24 @@ describe("computeRingResult", () => {
     expect(adjusted.appliedRuleOffset).toBe(2);
   });
 
-  it("corrige apenas o modo dedo na faixa confirmada de 18,0 mm: aro 16 -> 17", () => {
+  it("aplica correção contínua de DI apenas no modo dedo para o ponto de 18,0 mm", () => {
     const finger = computeRingResult(18.0, [], false);
     const gauge = computeRingResult(18.0, [], true);
-    expect(finger.ringSize).toBe(17);
-    expect(finger.fingerFitOffset).toBe(1);
-    expect(gauge.fingerFitOffset).toBe(0);
+    expect(finger.diameterCorrectionMm).toBeCloseTo(0.23, 5);
+    expect(gauge.diameterCorrectionMm).toBe(0);
   });
 
-  it("não aplica a correção de dedo fora da faixa estreita", () => {
-    const below = computeRingResult(17.5, [], false);
-    const above = computeRingResult(18.5, [], false);
-    expect(below.fingerFitOffset).toBe(0);
-    expect(above.fingerFitOffset).toBe(0);
+  it("reduz o DI em 0,17 mm na faixa real de MA 21,8-22,1", () => {
+    const finger = computeRingResult(22.0, [], false);
+    expect(finger.diameterCorrectionMm).toBeCloseTo(-0.17, 5);
+  });
+
+  it("volta suavemente para zero até MA 22,7, preservando o aro 29 confirmado", () => {
+    const middle = computeRingResult(22.4, [], false);
+    const confirmed = computeRingResult(22.7, [], false);
+    expect(middle.diameterCorrectionMm).toBeLessThan(0);
+    expect(middle.diameterCorrectionMm).toBeGreaterThan(-0.17);
+    expect(confirmed.diameterCorrectionMm).toBe(0);
   });
 
   it("ignora regras de calibração fora da faixa de largura medida", () => {
