@@ -363,11 +363,13 @@ export default function App() {
     const stage=measureRef.current;
     if(!stage) return;
     const rect=stage.getBoundingClientRect();
-    const imageX=(((event.clientX-rect.left)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
-    const imageY=(((event.clientY-rect.top)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+    // O ajuste fino do dedo é desenhado no espaço visual da tela.
+    // Guardamos o ponto inicial nesse mesmo espaço para evitar salto e atraso.
+    const screenX=(event.clientX-rect.left)/rect.width*100;
+    const screenY=(event.clientY-rect.top)/rect.height*100;
     const line=fingerLines[side];
     draggingRef.current=(endpoint ? `finger-line-${side}-${endpoint}` : `finger-line-${side}`) as DragTarget;
-    fingerLineDragStartRef.current={pointer:{x:imageX,y:imageY},line:{a:{...line.a},b:{...line.b}}};
+    fingerLineDragStartRef.current={pointer:{x:screenX,y:screenY},line:{a:{...line.a},b:{...line.b}}};
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -438,10 +440,21 @@ export default function App() {
         const start=fingerLineDragStartRef.current;
         if(start){
           let next:Line;
+          const dx=rawX-start.pointer.x;
+          const dy=rawY-start.pointer.y;
           if(endpoint){
-            next={...start.line,[endpoint]:{x:clamp(imageX,2,98),y:clamp(imageY,4,96)}};
+            // Move pela diferença do gesto, não pela posição absoluta do dedo.
+            // Assim a bolinha não pula para onde o usuário encostou dentro da
+            // área de toque maior; ela continua exatamente de onde estava.
+            const startPoint=start.line[endpoint];
+            next={
+              ...start.line,
+              [endpoint]:{
+                x:clamp(startPoint.x+dx,2,98),
+                y:clamp(startPoint.y+dy,4,96),
+              },
+            };
           }else{
-            const dx=imageX-start.pointer.x, dy=imageY-start.pointer.y;
             next={
               a:{x:clamp(start.line.a.x+dx,2,98),y:clamp(start.line.a.y+dy,4,96)},
               b:{x:clamp(start.line.b.x+dx,2,98),y:clamp(start.line.b.y+dy,4,96)},
