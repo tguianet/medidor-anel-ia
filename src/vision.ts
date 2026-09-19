@@ -4,11 +4,21 @@ export type CardCalibration = {
   cardBox: { x: number; y: number; width: number; height: number };
 };
 
-// Checagem em tempo real (sobre o preview da câmera) para acender o guia
-// verde quando o cartão está alinhado. Independente do pipeline de
-// calibração usado após a captura da foto.
-export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
-  if (!video.videoWidth || !video.videoHeight) return false;
+// Checagem em tempo real (sobre o preview da câmera) para encaixar o cartão
+// e orientar o ângulo da câmera antes da foto.
+export type LiveCardAngleGuide = "forward" | "backward" | "aligned" | "unknown";
+
+export type LiveCardGuideAnalysis = {
+  frameAligned: boolean;
+  angle: LiveCardAngleGuide;
+  skew: number;
+  ready: boolean;
+};
+
+export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnalysis => {
+  const fallback: LiveCardGuideAnalysis = { frameAligned: false, angle: "unknown", skew: 0, ready: false };
+  if (!video.videoWidth || !video.videoHeight) return fallback;
+
   const canvas = document.createElement("canvas");
   canvas.width = 300;
   canvas.height = 400;
@@ -22,18 +32,24 @@ export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
     sh = video.videoWidth / targetRatio;
     sy = (video.videoHeight - sh) / 2;
   }
+
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return false;
+  if (!context) return fallback;
   context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+
   const grayAt = (x: number, y: number) => {
-    const offset = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+    const ix = Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
+    const iy = Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
+    const offset = (iy * canvas.width + ix) * 4;
     return pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114;
   };
+
   const left = canvas.width * 0.11;
   const right = canvas.width * 0.89;
   const top = canvas.height * 0.1;
   const bottom = top + (canvas.width * 0.78) / 1.586;
+
   const verticalScore = (x: number, insideDirection: number) => {
     let total = 0;
     let count = 0;
@@ -48,6 +64,7 @@ export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
     const coverage = continuous / Math.max(1, count);
     return average * (0.35 + coverage * 0.65);
   };
+
   const horizontalScore = (y: number, insideDirection: number) => {
     let total = 0;
     let count = 0;
@@ -62,11 +79,13 @@ export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
     const coverage = continuous / Math.max(1, count);
     return average * (0.35 + coverage * 0.65);
   };
+
   const bestNear = (position: number, score: (value: number) => number) => {
     let best = 0;
     for (let shift = -9; shift <= 9; shift += 3) best = Math.max(best, score(position + shift));
     return best;
   };
+
   const scores = [
     bestNear(left, (value) => verticalScore(value, 1)),
     bestNear(right, (value) => verticalScore(value, -1)),
@@ -74,8 +93,63 @@ export const cardMatchesLiveGuide = (video: HTMLVideoElement) => {
     bestNear(bottom, (value) => horizontalScore(value, -1)),
   ];
   const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  return scores.every((score) => score >= 14) && average >= 17;
+  const frameAligned = scores.every((score) => score >= 14) && average >= 17;
+
+  // Mede a largura aparente do cartão perto da borda superior e inferior.
+  // Se uma delas fica maior, a câmera não está paralela ao plano do cartão.
+  const edgeXAt = (expectedX: number, y: number) => {
+    let bestX = expectedX;
+    let best = -Infinity;
+    for (let x = expectedX - 22; x <= expectedX + 22; x += 1) {
+      let score = 0;
+      let samples = 0;
+      for (let yy = y - 7; yy <= y + 7; yy += 3) {
+        const contrast = Math.abs(grayAt(x - 3, yy) - grayAt(x + 3, yy));
+        score += contrast;
+        samples++;
+      }
+      score /= Math.max(1, samples);
+      score -= Math.abs(x - expectedX) * 0.28;
+      if (score > best) { best = score; bestX = x; }
+    }
+    return { x: bestX, score: best };
+  };
+
+  const topY = top + 22;
+  const bottomY = bottom - 22;
+  const lt = edgeXAt(left, topY);
+  const rt = edgeXAt(right, topY);
+  const lb = edgeXAt(left, bottomY);
+  const rb = edgeXAt(right, bottomY);
+
+  const edgeReliable = Math.min(lt.score, rt.score, lb.score, rb.score) >= 7;
+  let angle: LiveCardAngleGuide = "unknown";
+  let skew = 0;
+
+  if (edgeReliable) {
+    const topWidth = rt.x - lt.x;
+    const bottomWidth = rb.x - lb.x;
+    const averageWidth = (topWidth + bottomWidth) / 2;
+    if (averageWidth > 80) {
+      skew = (topWidth - bottomWidth) / averageWidth;
+
+      // 2,2% de diferença entre topo/base já é visível na calibração final.
+      // Topo mais largo = câmera apontada demais para a parte de cima:
+      // orientar o usuário a inclinar o aparelho para trás. E vice-versa.
+      if (Math.abs(skew) <= 0.022) angle = "aligned";
+      else angle = skew > 0 ? "backward" : "forward";
+    }
+  }
+
+  return {
+    frameAligned,
+    angle,
+    skew,
+    ready: frameAligned && angle === "aligned",
+  };
 };
+
+export const cardMatchesLiveGuide = (video: HTMLVideoElement) => analyzeLiveCardGuide(video).ready;
 
 export type Box = { minX: number; minY: number; maxX: number; maxY: number; count: number };
 
