@@ -827,11 +827,16 @@ export default function App() {
               ) : (
                 <>
                   <span>Modo dedo: curva do anelímetro não aplicada</span>
-                  {result.fingerFitOffset !== 0 && <span>Ajuste de dedo real: +{result.fingerFitOffset} aro</span>}
+                  {result.diameterCorrectionMm !== 0 && (
+                    <span>
+                      Ajuste fino no diâmetro: {result.diameterCorrectionMm >= 0 ? "+" : ""}{result.diameterCorrectionMm.toFixed(2)} mm
+                    </span>
+                  )}
                 </>
               )}
               {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
-              <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
+              <span>Diâmetro calculado: {result.calculatedDiameterMm.toFixed(2)} mm</span>
+              <span>Diâmetro do aro indicado: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
