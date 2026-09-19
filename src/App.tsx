@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { calibratePhoto, cardMatchesLiveGuide } from "./vision";
+import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
 import AdminCalibration from "./AdminCalibration";
 import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
 import { assessCardQuadGeometry, homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
@@ -61,6 +61,7 @@ export default function App() {
     right: { a:{x:38,y:34}, b:{x:38,y:66} },
   });
   const [cardReady, setCardReady] = useState(false);
+  const [cameraAngleGuide, setCameraAngleGuide] = useState<"forward" | "backward" | "aligned" | "unknown">("unknown");
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
@@ -108,14 +109,18 @@ export default function App() {
   useEffect(() => {
     if (stage !== "camera" || camera.cameraOpening) {
       setCardReady(false);
+      setCameraAngleGuide("unknown");
       return;
     }
     let running = false;
     const checkAlignment = () => {
       if (running || !camera.videoRef.current) return;
       running = true;
-      try { setCardReady(cardMatchesLiveGuide(camera.videoRef.current)); }
-      finally { running = false; }
+      try {
+        const liveGuide = analyzeLiveCardGuide(camera.videoRef.current);
+        setCardReady(liveGuide.ready);
+        setCameraAngleGuide(liveGuide.angle);
+      } finally { running = false; }
     };
     checkAlignment();
     const interval = window.setInterval(checkAlignment, 450);
@@ -138,6 +143,7 @@ export default function App() {
     setLeftManualRefined(false);
     setRightManualRefined(false);
     setCardReady(false);
+    setCameraAngleGuide("unknown");
     setStage("camera");
     await camera.startCameraStream();
   };
@@ -990,6 +996,7 @@ export default function App() {
           torchSupported={camera.torchSupported}
           onToggleTorch={() => void camera.toggleTorch()}
           cardReady={cardReady}
+          cameraAngleGuide={cameraAngleGuide}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
