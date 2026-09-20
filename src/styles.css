@@ -405,17 +405,6 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   filter:drop-shadow(0 0 5px #52e0a3);
 }
 
-/* Área de teste: cartão em pé ao lado do dedo. O guia padrão continua igual. */
-.side-card-capture-guide { position:absolute; inset:0; z-index:6; pointer-events:none; }
-.side-card-frame { position:absolute; left:9%; top:16%; width:28%; height:58%; border:3px solid #f2cf73; border-radius:12px; box-shadow:0 0 0 1px #171109aa,0 0 12px #f2cf7366; }
-.side-card-frame span, .side-finger-axis span { position:absolute; left:50%; padding:5px 8px; transform:translateX(-50%); border:1px solid #171109; border-radius:999px; color:#171109; background:#f2cf73; font-size:9px; font-weight:900; white-space:nowrap; }
-.side-card-frame span { bottom:-33px; }
-.side-finger-axis { position:absolute; left:69%; top:9%; bottom:9%; width:0; border-left:3px solid #52e0a3; filter:drop-shadow(0 0 5px #52e0a3); }
-.side-finger-axis::before, .side-finger-axis::after { content:""; position:absolute; left:50%; width:20px; height:3px; transform:translateX(-50%); border-radius:3px; background:#52e0a3; }
-.side-finger-axis::before { top:0; }
-.side-finger-axis::after { bottom:0; }
-.side-finger-axis span { top:50%; transform:translate(-50%,-50%) rotate(-90deg); color:#071b14; background:#52e0a3; }
-
 
 /* Linhas do dedo: mesmo conceito de ajuste fino do cartão.
    A linha inteira pode ser arrastada e cada extremidade tem sua própria alça. */
