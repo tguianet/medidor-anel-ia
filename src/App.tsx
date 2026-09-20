@@ -4,7 +4,7 @@ import AdminCalibration from "./AdminCalibration";
 import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
 import { assessCardQuadGeometry, homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
-import type { CardEdge, DragTarget, FingerMeasureStep, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
+import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
 import IntroScreen from "./components/IntroScreen";
 import CameraScreen from "./components/CameraScreen";
@@ -73,9 +73,6 @@ export default function App() {
   const [showcaseWidth, setShowcaseWidth] = useState(24);
   const [showcaseAngle, setShowcaseAngle] = useState(0);
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
-  const [fingerMeasureStep, setFingerMeasureStep] = useState<FingerMeasureStep>("rest");
-  const [restWidthMm, setRestWidthMm] = useState<number | null>(null);
-  const [jointWidthMm, setJointWidthMm] = useState<number | null>(null);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
 
   useEffect(() => {
@@ -314,9 +311,6 @@ export default function App() {
     setPanY(0);
     camera.setError("");
     setPhase("finger");
-    setFingerMeasureStep("rest");
-    setRestWidthMm(null);
-    setJointWidthMm(null);
     setLeftLocked(false);
     setRightLocked(false);
     setLeftFingerTilt(0);
@@ -942,26 +936,6 @@ export default function App() {
     return fallbackSample.width/cardBottomPx*85.6;
   },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad,cardLines]);
 
-  const confirmRestMeasurement = () => {
-    if (liveWidthMm === null) return;
-    setRestWidthMm(liveWidthMm);
-    setFingerMeasureStep("joint");
-    setLeftLocked(false);
-    setRightLocked(false);
-    setLeftFingerTilt(0);
-    setRightFingerTilt(0);
-    setLeftMagnetConfidence(0);
-    setRightMagnetConfidence(0);
-    setLeftManualRefined(false);
-    setRightManualRefined(false);
-  };
-
-  const confirmJointMeasurement = () => {
-    if (liveWidthMm === null) return;
-    setJointWidthMm(liveWidthMm);
-    setFingerMeasureStep("complete");
-  };
-
   const finalMeasurementConfidence = useMemo(() => {
     const edgeConfidence = leftLocked && rightLocked
       ? Math.round((leftMagnetConfidence + rightMagnetConfidence) / 2)
@@ -981,9 +955,6 @@ export default function App() {
   const recalibrateCard = () => {
     setPhase("card");
     setPerspectiveReady(false);
-    setFingerMeasureStep("rest");
-    setRestWidthMm(null);
-    setJointWidthMm(null);
     setLeftLocked(false);
     setRightLocked(false);
     setLeftManualRefined(false);
@@ -993,12 +964,9 @@ export default function App() {
   };
 
   const result = useMemo(() => {
-    const widthMm = measurementMode === "finger"
-      ? restWidthMm !== null && jointWidthMm !== null ? Math.max(restWidthMm, jointWidthMm) : null
-      : liveWidthMm;
-    if (widthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
-    return computeRingResult(widthMm, calibrationRules, measurementMode === "anelimetro");
-  }, [liveWidthMm, measurementMode, restWidthMm, jointWidthMm, calibrationRules, calibrationConfidence]);
+    if (liveWidthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
+    return computeRingResult(liveWidthMm, calibrationRules, measurementMode === "anelimetro");
+  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence]);
 
   const resetPhoto = () => {
     setPhoto("");
@@ -1006,9 +974,6 @@ export default function App() {
     setAnalyzingCard(false);
     setPixelsPerMm(null);
     setPhase("card");
-    setFingerMeasureStep("rest");
-    setRestWidthMm(null);
-    setJointWidthMm(null);
     setZoom(1);
     setPanX(0);
     setPanY(0);
@@ -1072,8 +1037,8 @@ export default function App() {
 
       {stage === "review" && (
         <section className="panel review">
-          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : fingerMeasureStep === "rest" ? "2. MEÇA ONDE O ANEL FICA" : fingerMeasureStep === "joint" ? "3. MEÇA A JUNTA" : "MEDIÇÃO CONCLUÍDA"}</span>
-          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : fingerMeasureStep === "rest" ? "Meça onde o anel vai ficar" : fingerMeasureStep === "joint" ? "Agora meça a junta mais grossa" : "Usamos a maior medida do dedo"}</h1>
+          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : "2. MEÇA O DEDO"}</span>
+          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Meça onde o anel vai ficar"}</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -1216,24 +1181,6 @@ export default function App() {
             </div>
           )}
 
-          {phase === "finger" && measurementMode === "finger" && liveWidthMm !== null && leftLocked && rightLocked && !result && (
-            <section className="measurement-step">
-              {fingerMeasureStep === "rest" ? (
-                <>
-                  <strong>Medida onde o anel vai ficar: {liveWidthMm.toFixed(1)} mm</strong>
-                  <span>Confirme e depois arraste a faixa até a junta mais grossa do mesmo dedo.</span>
-                  <button className="primary" type="button" onClick={confirmRestMeasurement}>Confirmar esta medida</button>
-                </>
-              ) : (
-                <>
-                  <strong>Medida da junta: {liveWidthMm.toFixed(1)} mm</strong>
-                  <span>O sistema escolherá a maior medida para o anel passar sem apertar.</span>
-                  <button className="primary" type="button" onClick={confirmJointMeasurement}>Calcular usando a maior medida</button>
-                </>
-              )}
-            </section>
-          )}
-
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
@@ -1247,7 +1194,6 @@ export default function App() {
               ) : (
                 <span>Modo dedo: curva do anelímetro não aplicada</span>
               )}
-              {measurementMode === "finger" && restWidthMm !== null && jointWidthMm !== null && <span>Encaixe: {restWidthMm.toFixed(1)} mm · Junta: {jointWidthMm.toFixed(1)} mm</span>}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>
