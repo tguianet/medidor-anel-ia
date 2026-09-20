@@ -12,10 +12,11 @@ type Props = {
   onClose: () => void;
   onCapture: () => void;
   onRetry: () => void;
+  captureLayout?: "sobre-dedo" | "cartao-lateral";
 };
 
 export default function CameraScreen({
-  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, cameraAngleGuide, cameraOpening, error, onClose, onCapture, onRetry,
+  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, cameraAngleGuide, cameraOpening, error, onClose, onCapture, onRetry, captureLayout = "sobre-dedo",
 }: Props) {
   return (
     <section className="camera-screen">
@@ -26,7 +27,7 @@ export default function CameraScreen({
       <div className="viewport">
         <video ref={videoRef} playsInline muted autoPlay />
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
-        <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
+        {captureLayout === "sobre-dedo" ? <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
           <div className="live-card-frame">
             <span>{cardReady ? "✓ CARTÃO E ÂNGULO OK" : "ENCAIXE O CARTÃO"}</span>
             <i className="card-guide-corner tl" />
@@ -49,10 +50,12 @@ export default function CameraScreen({
           <div className="live-finger-axis">
             <span>ALINHE O DEDO</span>
           </div>
-        </div>
+        </div> : <div className="side-card-capture-guide" aria-hidden="true"><div className="side-card-frame"><span>CARTÃO EM PÉ</span></div><div className="side-finger-axis"><span>DEDO ESCOLHIDO</span></div></div>}
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{cardReady
+      <p>{captureLayout === "cartao-lateral"
+        ? "Teste: apoie o cartão em pé ao lado do dedo. Deixe os dois no mesmo plano e sem encostar."
+        : cardReady
         ? "Cartão e ângulo corretos. Mantenha o dedo sobre a linha central e tire a foto."
         : cameraAngleGuide === "forward"
           ? "Incline levemente a câmera para frente até o indicador ficar verde."
