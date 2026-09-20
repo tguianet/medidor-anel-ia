@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 15016)
-Total output lines: 1324
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
 import AdminCalibration from "./AdminCalibration";
@@ -838,3 +835,4 @@ export default function App() {
     </main>
   );
 }
+
