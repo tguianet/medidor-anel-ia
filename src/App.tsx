@@ -12,6 +12,8 @@ import HandCameraScreen from "./components/HandCameraScreen";
 import HandReviewScreen from "./components/HandReviewScreen";
 import TryOnPanel from "./components/TryOnPanel";
 
+type CaptureLayout = "sobre-dedo" | "cartao-lateral";
+
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 
@@ -73,6 +75,7 @@ export default function App() {
   const [showcaseWidth, setShowcaseWidth] = useState(24);
   const [showcaseAngle, setShowcaseAngle] = useState(0);
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
+  const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("sobre-dedo");
   const [fingerMeasureStep, setFingerMeasureStep] = useState<FingerMeasureStep>("rest");
   const [restWidthMm, setRestWidthMm] = useState<number | null>(null);
   const [jointWidthMm, setJointWidthMm] = useState<number | null>(null);
@@ -112,6 +115,11 @@ export default function App() {
       setCameraAngleGuide("unknown");
       return;
     }
+    if (captureLayout === "cartao-lateral") {
+      setCardReady(true);
+      setCameraAngleGuide("aligned");
+      return;
+    }
     let running = false;
     const checkAlignment = () => {
       if (running || !camera.videoRef.current) return;
@@ -125,9 +133,10 @@ export default function App() {
     checkAlignment();
     const interval = window.setInterval(checkAlignment, 450);
     return () => window.clearInterval(interval);
-  }, [stage, camera.cameraOpening]);
+  }, [stage, camera.cameraOpening, captureLayout]);
 
-  const openCamera = async () => {
+  const openCamera = async (layout: CaptureLayout = "sobre-dedo") => {
+    setCaptureLayout(layout);
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
     setPhase("card");
@@ -178,7 +187,10 @@ export default function App() {
     setCardLeft(11);
     setCardRight(89);
     setCardBottom(47);
-    setCardLines({
+    setCardLines(captureLayout === "cartao-lateral" ? {
+      top:{a:{x:10,y:16},b:{x:36,y:16}}, right:{a:{x:36,y:16},b:{x:36,y:72}},
+      bottom:{a:{x:10,y:72},b:{x:36,y:72}}, left:{a:{x:10,y:16},b:{x:10,y:72}},
+    } : {
       top:{a:{x:7,y:22},b:{x:93,y:22}}, right:{a:{x:89,y:16},b:{x:89,y:58}},
       bottom:{a:{x:7,y:47},b:{x:93,y:47}}, left:{a:{x:11,y:16},b:{x:11,y:58}},
     });
@@ -202,6 +214,13 @@ export default function App() {
     setStage("review");
     camera.setError("");
     setAnalyzingCard(true);
+    if (captureLayout === "cartao-lateral") {
+      setPerspectiveReady(false);
+      setCalibrationConfidence(0);
+      setAnalyzingCard(false);
+      camera.setError("Modo teste: ajuste as quatro linhas no cartão em pé e confirme. A tela normal não foi alterada.");
+      return;
+    }
     try {
       const calibration = await calibratePhoto(capturedPhoto);
       const detectedLeft = clamp(calibration.cardBox.x * 100, 2, 94);
@@ -225,7 +244,7 @@ export default function App() {
       setSelectedCardLine(null);
       setPerspectiveReady(false);
       setCalibrationConfidence(calibration.confidence);
-      camera.setError("Ajuste as quatro linhas nas bordas retas do cartão. Elas podem inclinar independentemente.");
+      camera.setError(captureLayout === "cartao-lateral" ? "Modo teste: ajuste as quatro linhas no cartão em pé e confirme. A tela normal não foi alterada." : "Ajuste as quatro linhas nas bordas retas do cartão. Elas podem inclinar independentemente.");
     } catch {
       camera.setError("Não consegui localizar o cartão automaticamente. Ajuste manualmente as 4 linhas nas bordas retas.");
     } finally {
@@ -260,8 +279,10 @@ export default function App() {
   const confirmPerspective = () => {
     try {
       const quad = cardQuadFromCurrentLines();
-      homographyFromQuad(quad.px);
-      const geometry = assessCardQuadGeometry(quad.px);
+      const cardWidth = captureLayout === "cartao-lateral" ? 53.98 : 85.6;
+      const cardHeight = captureLayout === "cartao-lateral" ? 85.6 : 53.98;
+      homographyFromQuad(quad.px, cardWidth, cardHeight);
+      const geometry = assessCardQuadGeometry(quad.px, cardWidth, cardHeight);
       if (!geometry.valid) {
         camera.setError(geometry.reason || "A calibração do cartão ficou instável. Ajuste as quatro bordas e confirme novamente.");
         return;
@@ -296,7 +317,7 @@ export default function App() {
         (quadPercent[2].x-quadPercent[3].x)/100*source.width,
         (quadPercent[2].y-quadPercent[3].y)/100*source.height,
       );
-      setPixelsPerMm(bottomWidthPx/85.6);
+      setPixelsPerMm(bottomWidthPx/(captureLayout === "cartao-lateral" ? 53.98 : 85.6));
     } else {
       setPixelsPerMm(1);
     }
@@ -910,7 +931,7 @@ export default function App() {
       y: point.y/100*source.height,
     })) as [Point,Point,Point,Point];
     try {
-      const mapToCardMm = homographyFromQuad(quadPx);
+      const mapToCardMm = homographyFromQuad(quadPx, captureLayout === "cartao-lateral" ? 53.98 : 85.6, captureLayout === "cartao-lateral" ? 85.6 : 53.98);
       const widthsMm = measurementSamples
         .map((sample)=>{
           const leftMm=mapToCardMm({x:sample.left,y:sample.y});
@@ -929,7 +950,7 @@ export default function App() {
     const fallbackWidthsMm=measurementSamples.map((sample)=>{
       const cardReferencePx=cardWidthAtImageY(sample.y,source.width,source.height);
       if(!cardReferencePx||cardReferencePx<=0) return NaN;
-      return sample.width/cardReferencePx*85.6;
+      return sample.width/cardReferencePx*(captureLayout === "cartao-lateral" ? 53.98 : 85.6);
     });
     const stableFallbackMm=median(fallbackWidthsMm);
     if(stableFallbackMm!==null) return stableFallbackMm;
@@ -939,7 +960,7 @@ export default function App() {
       (cardQuad[2].y-cardQuad[3].y)/100*source.height,
     );
     if(cardBottomPx<=0) return null;
-    return fallbackSample.width/cardBottomPx*85.6;
+    return fallbackSample.width/cardBottomPx*(captureLayout === "cartao-lateral" ? 53.98 : 85.6);
   },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad,cardLines]);
 
   const confirmRestMeasurement = () => {
@@ -1022,7 +1043,7 @@ export default function App() {
     setRightManualRefined(false);
     camera.setError("");
     setHandPhoto("");
-    void openCamera();
+    void openCamera(captureLayout);
   };
 
   return (
@@ -1036,6 +1057,7 @@ export default function App() {
         <IntroScreen
           error={camera.error}
           onMeasureFinger={() => { setMeasurementMode("finger"); void openCamera(); }}
+          onTestSideCard={() => { setMeasurementMode("finger"); void openCamera("cartao-lateral"); }}
           onTestGauge={() => { setMeasurementMode("anelimetro"); void openCamera(); }}
         />
       )}
@@ -1052,7 +1074,8 @@ export default function App() {
           error={camera.error}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
-          onRetry={() => void openCamera()}
+          onRetry={() => void openCamera(captureLayout)}
+          captureLayout={captureLayout}
         />
       )}
 
