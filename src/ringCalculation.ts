@@ -124,6 +124,7 @@ export type RingResult = {
   widthMm: number;
   measurementCorrectionMm: number;
   equivalentDiameterMm: number;
+  fingerEquivalentMabMm: number | null;
   ringSize: number;
   calculationMode: "formula";
   appliedRuleOffset: number | null;
@@ -186,14 +187,31 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
   return match?.ringSize ?? 35;
 };
 
+// Correlação dedo -> anelímetro obtida a partir dos quatro testes reais
+// confirmados nesta calibração:
+// 19,19 -> aro 17 (~16,90 no anelímetro)
+// 21,01 -> aro 25 (~19,50 no anelímetro)
+// 23,06 -> aro 30 (~20,90 no anelímetro)
+// 26,24 -> aro 33 (~21,70 no anelímetro)
+// A saída desta curva entra na MESMA tabela de faixas do anelímetro.
+export const fingerMabToGaugeEquivalent = (normalizedFingerMabMm: number) => (
+  -0.120496 * normalizedFingerMabMm * normalizedFingerMabMm
+  + 6.141391 * normalizedFingerMabMm
+  - 56.512581
+);
+
 export const computeRingResult = (
   rawWidthMm: number,
   _rules: CalibrationRule[] = [],
-  _applyBenchCalibration = true,
+  applyBenchCalibration = true,
   calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
   const widthMm = normalizeMabTo94(rawWidthMm, calibrationConfidence);
-  const ringSize = ringSizeFromNormalizedMab(widthMm);
+  const fingerEquivalentMabMm = applyBenchCalibration
+    ? null
+    : fingerMabToGaugeEquivalent(widthMm);
+  const mabForRingLookup = fingerEquivalentMabMm ?? widthMm;
+  const ringSize = ringSizeFromNormalizedMab(mabForRingLookup);
   const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
 
   return {
@@ -201,6 +219,7 @@ export const computeRingResult = (
     widthMm,
     measurementCorrectionMm: widthMm - rawWidthMm,
     equivalentDiameterMm: selectedRing.diameterMm,
+    fingerEquivalentMabMm,
     ringSize: selectedRing.size,
     calculationMode: "formula",
     appliedRuleOffset: null,
