@@ -273,9 +273,9 @@ export const fingerMabToGaugeEquivalent = (x: number) => {
 
 export const computeDiameterOnlyTestResult = (
   rawDiameterMm: number,
-  calibrationConfidence = MAB_REFERENCE_CALIBRATION,
+  _calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
-  const diameterMm = normalizeMeasurementTo100(rawDiameterMm, calibrationConfidence);
+  const diameterMm = rawDiameterMm;
 
   const { selectedRing, nearBoundary, boundaryDistanceMm } =
     ringFromInnerDiameter(diameterMm);
@@ -301,12 +301,12 @@ export const computeRingResult = (
   applyBenchCalibration = true,
   calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
-  // No modo dedo, 100% é a referência ideal do cartão. Quando a
-  // calibração fica abaixo de 100%, a medida é corrigida proporcionalmente.
+  // No modo dedo, o percentual de calibração é apenas um indicador de confiança.
+  // A escala física já vem do cartão/homografia e não deve alterar a medida em mm.
   // O modo anelímetro mantém a normalização histórica para não alterar a bancada.
   const widthMm = applyBenchCalibration
     ? normalizeMabTo94(rawWidthMm, calibrationConfidence)
-    : normalizeMeasurementTo100(rawWidthMm, calibrationConfidence);
+    : rawWidthMm;
 
   // Modo anelímetro continua usando a curva MAB medida em bancada.
   if (applyBenchCalibration) {
