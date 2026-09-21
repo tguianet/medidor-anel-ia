@@ -1269,28 +1269,20 @@ export default function App() {
               {diameterPhotoTestMode && <span>Diâmetro ajustado para 94%: {result.widthMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>{result.nearBoundary ? "Zona morta ativa" : "Fora da zona morta"}{result.boundaryDistanceMm !== null ? " · " + result.boundaryDistanceMm.toFixed(2) + " mm da divisão" : ""}</span>}
-              {!diameterPhotoTestMode && (
+              {!diameterPhotoTestMode && measurementMode === "finger" && (
                 <>
-                  <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
-                  <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
-                  {measurementMode === "anelimetro" ? (
-                    <>
-                      <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
-                      <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>MAB normalizado para 94%: {result.widthMm.toFixed(2)} mm</span>
-                      {result.fingerEquivalentMabMm !== null && (
-                        <span>MAB equivalente no anelímetro: {result.fingerEquivalentMabMm.toFixed(2)} mm</span>
-                      )}
-                    </>
-                  )}
+                  <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
+                  <span>{result.nearBoundary ? "Zona morta ativa" : "Fora da zona morta"}{result.boundaryDistanceMm !== null ? " · " + result.boundaryDistanceMm.toFixed(2) + " mm da divisão" : ""}</span>
+                </>
+              )}
+              {!diameterPhotoTestMode && measurementMode === "anelimetro" && (
+                <>
+                  <span>Medida normalizada: {result.widthMm.toFixed(2)} mm</span>
                   <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
                 </>
               )}
               <span>Calibração do cartão: {calibrationConfidence}%</span>
-              <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>
+              {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
             </div>
           )}
           {phase === "finger" && result && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
