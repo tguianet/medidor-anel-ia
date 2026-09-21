@@ -200,9 +200,9 @@ export const adjustFingerMeasurementByCalibration = (
   if (!Number.isFinite(calibrationConfidence)) return rawMm;
 
   // Correção global única para qualquer aro: 94% é o ponto neutro.
-  // A partir dos testes reais, cada ponto percentual equivale a 0,0675 mm.
+  // A partir dos testes reais mais recentes, cada ponto percentual equivale a 0,18 mm.
   // Mantemos um limite de segurança para evitar correções extremas.
-  const correctionMm = clamp((94 - calibrationConfidence) * 0.0675, -0.30, 0.30);
+  const correctionMm = clamp((94 - calibrationConfidence) * 0.18, -0.90, 0.90);
   return rawMm + correctionMm;
 };
 
