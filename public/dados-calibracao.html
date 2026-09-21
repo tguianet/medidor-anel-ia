@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dados de calibração</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#071018;color:#eef4f8;margin:0;padding:24px}
+    main{max-width:1100px;margin:0 auto}
+    h1{margin:0 0 8px}
+    p{color:#a9bac7}
+    .card{background:#0d1822;border:1px solid #263746;border-radius:14px;padding:16px;margin:16px 0}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:10px;border-bottom:1px solid #263746;text-align:left}
+    th{color:#a9bac7}
+    code{white-space:pre-wrap;word-break:break-word}
+    .err{color:#ff9b9b}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Dados de calibração</h1>
+  <p>Resumo direto dos testes armazenados no banco.</p>
+  <div id="status" class="card">Carregando...</div>
+  <div id="content"></div>
+</main>
+<script>
+(async()=>{
+  const status=document.getElementById('status');
+  const content=document.getElementById('content');
+  try{
+    const res=await fetch('/.netlify/functions/calibration?summary=1',{cache:'no-store'});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||'Falha ao carregar dados');
+    const tests=Array.isArray(data.tests)?data.tests:[];
+    status.textContent=data.count+' teste(s) novo(s) encontrado(s).';
+    const rows=tests.map((t,i)=>`
+      <tr>
+        <td>${i+1}</td><td>${t.measurementType||''}</td><td>${t.widthMm??''}</td>
+        <td>${t.predictedRing??''}</td><td>${t.actualRing??''}</td><td>${t.error??''}</td>
+        <td>${t.calibrationConfidence??''}</td><td>${t.zoom??''}</td>
+      </tr>`).join('');
+    content.innerHTML=`
+      <section class="card">
+        <h2>Testes novos</h2>
+        <table>
+          <thead><tr><th>#</th><th>Tipo</th><th>Largura mm</th><th>Aro previsto</th><th>Aro real</th><th>Erro</th><th>Confiança</th><th>Zoom</th></tr></thead>
+          <tbody>${rows||'<tr><td colspan="8">Nenhum teste novo.</td></tr>'}</tbody>
+        </table>
+      </section>
+      <section class="card"><h2>Curva do anelímetro</h2><code>${JSON.stringify(data.gaugeCurve||[],null,2)}</code></section>
+      <section class="card"><h2>Sugestões</h2><code>${JSON.stringify(data.suggestions||[],null,2)}</code></section>
+    `;
+  }catch(err){
+    status.className='card err';
+    status.textContent='Erro ao carregar: '+(err&&err.message?err.message:String(err));
+  }
+})();
+</script>
+</body>
+</html>
