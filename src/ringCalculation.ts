@@ -191,6 +191,21 @@ export const normalizeMeasurementTo100 = (rawMm: number, calibrationConfidence: 
   return rawMm * (100 / calibrationConfidence);
 };
 
+
+export const adjustFingerMeasurementByCalibration = (
+  rawMm: number,
+  calibrationConfidence: number,
+) => {
+  if (!Number.isFinite(rawMm)) return rawMm;
+  if (!Number.isFinite(calibrationConfidence)) return rawMm;
+
+  // Correção empírica inicial: 94% é o ponto neutro.
+  // Cada ponto percentual de diferença aplica 0,10 mm, limitado para
+  // evitar correções agressivas enquanto coletamos mais dados.
+  const correctionMm = clamp((94 - calibrationConfidence) * 0.10, -0.30, 0.30);
+  return rawMm + correctionMm;
+};
+
 export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
   const match = MAB_RING_THRESHOLDS.find((threshold) => normalizedMabMm < threshold.maxMm);
   return match?.ringSize ?? 35;
@@ -275,7 +290,7 @@ export const computeDiameterOnlyTestResult = (
   rawDiameterMm: number,
   _calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
-  const diameterMm = rawDiameterMm;
+  const diameterMm = adjustFingerMeasurementByCalibration(rawDiameterMm, _calibrationConfidence);
 
   const { selectedRing, nearBoundary, boundaryDistanceMm } =
     ringFromInnerDiameter(diameterMm);
@@ -306,7 +321,7 @@ export const computeRingResult = (
   // O modo anelímetro mantém a normalização histórica para não alterar a bancada.
   const widthMm = applyBenchCalibration
     ? normalizeMabTo94(rawWidthMm, calibrationConfidence)
-    : rawWidthMm;
+    : adjustFingerMeasurementByCalibration(rawWidthMm, calibrationConfidence);
 
   // Modo anelímetro continua usando a curva MAB medida em bancada.
   if (applyBenchCalibration) {
