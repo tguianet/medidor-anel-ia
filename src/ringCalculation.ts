@@ -187,6 +187,44 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
   return match?.ringSize ?? 35;
 };
 
+export const ringFromInnerDiameter = (diameterMm: number, deadZoneMm = 0.05) => {
+  let selectedIndex = RING_DIAMETER_TABLE.length - 1;
+
+  for (let i = 0; i < RING_DIAMETER_TABLE.length; i++) {
+    const current = RING_DIAMETER_TABLE[i];
+    const next = RING_DIAMETER_TABLE[i + 1];
+    const upperBoundary = next
+      ? (current.diameterMm + next.diameterMm) / 2
+      : Number.POSITIVE_INFINITY;
+
+    if (diameterMm < upperBoundary) {
+      selectedIndex = i;
+      break;
+    }
+  }
+
+  const selectedRing = RING_DIAMETER_TABLE[selectedIndex];
+  const previous = RING_DIAMETER_TABLE[selectedIndex - 1];
+  const next = RING_DIAMETER_TABLE[selectedIndex + 1];
+  const lowerBoundary = previous
+    ? (previous.diameterMm + selectedRing.diameterMm) / 2
+    : Number.NEGATIVE_INFINITY;
+  const upperBoundary = next
+    ? (selectedRing.diameterMm + next.diameterMm) / 2
+    : Number.POSITIVE_INFINITY;
+
+  const boundaryDistanceMm = Math.min(
+    Math.abs(diameterMm - lowerBoundary),
+    Math.abs(upperBoundary - diameterMm),
+  );
+
+  return {
+    selectedRing,
+    nearBoundary: Number.isFinite(boundaryDistanceMm) && boundaryDistanceMm <= deadZoneMm,
+    boundaryDistanceMm: Number.isFinite(boundaryDistanceMm) ? boundaryDistanceMm : null,
+  };
+};
+
 // Correlação dedo -> anelímetro baseada nos testes reais confirmados.
 // Em vez de uma curva rígida única, usamos uma transformação por trechos.
 // Isso permite uma "faixa estável" para o mesmo aro quando o dedo varia
@@ -246,33 +284,8 @@ export const computeDiameterOnlyTestResult = (
 ): RingResult => {
   const diameterMm = normalizeMabTo94(rawDiameterMm, calibrationConfidence);
 
-  let selectedIndex = RING_DIAMETER_TABLE.length - 1;
-  for (let i = 0; i < RING_DIAMETER_TABLE.length; i++) {
-    const current = RING_DIAMETER_TABLE[i];
-    const next = RING_DIAMETER_TABLE[i + 1];
-    const upperBoundary = next
-      ? (current.diameterMm + next.diameterMm) / 2
-      : Number.POSITIVE_INFINITY;
-    if (diameterMm < upperBoundary) {
-      selectedIndex = i;
-      break;
-    }
-  }
-
-  const selectedRing = RING_DIAMETER_TABLE[selectedIndex];
-  const previous = RING_DIAMETER_TABLE[selectedIndex - 1];
-  const next = RING_DIAMETER_TABLE[selectedIndex + 1];
-  const lowerBoundary = previous
-    ? (previous.diameterMm + selectedRing.diameterMm) / 2
-    : Number.NEGATIVE_INFINITY;
-  const upperBoundary = next
-    ? (selectedRing.diameterMm + next.diameterMm) / 2
-    : Number.POSITIVE_INFINITY;
-  const boundaryDistanceMm = Math.min(
-    Math.abs(diameterMm - lowerBoundary),
-    Math.abs(upperBoundary - diameterMm),
-  );
-  const nearBoundary = Number.isFinite(boundaryDistanceMm) && boundaryDistanceMm <= deadZoneMm;
+  const { selectedRing, nearBoundary, boundaryDistanceMm } =
+    ringFromInnerDiameter(diameterMm, deadZoneMm);
 
   return {
     rawWidthMm: rawDiameterMm,
@@ -296,24 +309,45 @@ export const computeRingResult = (
   calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
   const widthMm = normalizeMabTo94(rawWidthMm, calibrationConfidence);
-  const fingerEquivalentMabMm = applyBenchCalibration
-    ? null
-    : fingerMabToGaugeEquivalent(widthMm);
-  const mabForRingLookup = fingerEquivalentMabMm ?? widthMm;
-  const ringSize = ringSizeFromNormalizedMab(mabForRingLookup);
-  const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
+
+  // Modo anelímetro continua usando a curva MAB medida em bancada.
+  if (applyBenchCalibration) {
+    const ringSize = ringSizeFromNormalizedMab(widthMm);
+    const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
+
+    return {
+      rawWidthMm,
+      widthMm,
+      measurementCorrectionMm: widthMm - rawWidthMm,
+      equivalentDiameterMm: selectedRing.diameterMm,
+      fingerEquivalentMabMm: null,
+      ringSize: selectedRing.size,
+      calculationMode: "formula",
+      appliedRuleOffset: null,
+      continuousRing: null,
+      nearBoundary: false,
+      boundaryDistanceMm: null,
+    };
+  }
+
+  // Novo modo principal do dedo:
+  // largura calibrada -> diâmetro interno equivalente -> tabela de aros.
+  // Não passa mais pela correlação dedo -> MAB do anelímetro.
+  const equivalentDiameterMm = estimateInnerDiameter(widthMm);
+  const { selectedRing, nearBoundary, boundaryDistanceMm } =
+    ringFromInnerDiameter(equivalentDiameterMm, 0.05);
 
   return {
     rawWidthMm,
     widthMm,
     measurementCorrectionMm: widthMm - rawWidthMm,
-    equivalentDiameterMm: selectedRing.diameterMm,
-    fingerEquivalentMabMm,
+    equivalentDiameterMm,
+    fingerEquivalentMabMm: null,
     ringSize: selectedRing.size,
     calculationMode: "formula",
     appliedRuleOffset: null,
     continuousRing: null,
-    nearBoundary: false,
-    boundaryDistanceMm: null,
+    nearBoundary,
+    boundaryDistanceMm,
   };
 };
