@@ -34,10 +34,11 @@ type CalibrationTest = {
   note: string;
   measurementType: "finger" | "anelimetro";
   actualDiameterMm: number | null;
+  magnetWidthsMm?: number[];
 };
 
 type Props = {
-  measurement: { widthMm: number; ringSize: number };
+  measurement: { widthMm: number; ringSize: number; magnetWidthsMm?: number[] };
   calibrationConfidence: number;
   zoom: number;
   defaultMeasurementType: "finger" | "anelimetro";
@@ -103,6 +104,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
         hand,
         note,
         measurementType,
+        magnetWidthsMm: measurement.magnetWidthsMm || [],
       });
       setSuggestions(data.suggestions || []);
       setGaugeCurve(data.gaugeCurve || []);
@@ -133,6 +135,10 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
       "dedo",
       "mao",
       "observacao",
+      "ima_1_mm",
+      "ima_2_mm",
+      "ima_3_mm",
+      "ima_4_mm",
     ];
 
     const csvEscape = (value: unknown) => {
@@ -153,6 +159,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
       test.finger,
       test.hand,
       test.note,
+      ...(test.magnetWidthsMm || ["", "", "", ""]).slice(0, 4),
     ]);
 
     const csv = [headers, ...rows]
