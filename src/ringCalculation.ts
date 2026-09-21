@@ -182,6 +182,15 @@ export const normalizeMabTo94 = (rawWidthMm: number, calibrationConfidence: numb
   return rawWidthMm * (MAB_REFERENCE_CALIBRATION / calibrationConfidence);
 };
 
+// Novo ajuste experimental do modo dedo: considera 100% como a geometria
+// ideal do cartão e aumenta proporcionalmente a medida quando a calibração
+// observada fica abaixo de 100%.
+export const normalizeMeasurementTo100 = (rawMm: number, calibrationConfidence: number) => {
+  if (!Number.isFinite(rawMm)) return rawMm;
+  if (!Number.isFinite(calibrationConfidence) || calibrationConfidence <= 0) return rawMm;
+  return rawMm * (100 / calibrationConfidence);
+};
+
 export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
   const match = MAB_RING_THRESHOLDS.find((threshold) => normalizedMabMm < threshold.maxMm);
   return match?.ringSize ?? 35;
@@ -264,11 +273,9 @@ export const fingerMabToGaugeEquivalent = (x: number) => {
 
 export const computeDiameterOnlyTestResult = (
   rawDiameterMm: number,
-  _calibrationConfidence = MAB_REFERENCE_CALIBRATION,
+  calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
-  // A calibração (%) é apenas confiança geométrica. A escala física em mm
-  // já vem do cartão/homografia, portanto não altera a medida.
-  const diameterMm = rawDiameterMm;
+  const diameterMm = normalizeMeasurementTo100(rawDiameterMm, calibrationConfidence);
 
   const { selectedRing, nearBoundary, boundaryDistanceMm } =
     ringFromInnerDiameter(diameterMm);
@@ -294,12 +301,12 @@ export const computeRingResult = (
   applyBenchCalibration = true,
   calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
-  // No modo dedo, o percentual de calibração não corrige a escala.
-  // Ele serve somente como indicador de confiança/qualidade da homografia.
-  // O modo anelímetro mantém a normalização histórica para não alterar essa bancada.
+  // No modo dedo, 100% é a referência ideal do cartão. Quando a
+  // calibração fica abaixo de 100%, a medida é corrigida proporcionalmente.
+  // O modo anelímetro mantém a normalização histórica para não alterar a bancada.
   const widthMm = applyBenchCalibration
     ? normalizeMabTo94(rawWidthMm, calibrationConfidence)
-    : rawWidthMm;
+    : normalizeMeasurementTo100(rawWidthMm, calibrationConfidence);
 
   // Modo anelímetro continua usando a curva MAB medida em bancada.
   if (applyBenchCalibration) {
