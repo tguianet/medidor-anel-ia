@@ -990,6 +990,28 @@ export default function App() {
     void openCamera();
   };
 
+  const lineXAtMeasureY = (line: Line, fallbackX: number) => {
+    const dy = line.b.y - line.a.y;
+    if (Math.abs(dy) < 1e-6) return fallbackX;
+    const t = clamp((measureY - line.a.y) / dy, 0, 1);
+    return line.a.x + (line.b.x - line.a.x) * t;
+  };
+
+  const visualLeftX =
+    phase === "finger" && leftLocked && rightLocked
+      ? lineXAtMeasureY(fingerLines.left, leftLine)
+      : leftLine;
+
+  const visualRightX =
+    phase === "finger" && leftLocked && rightLocked
+      ? lineXAtMeasureY(fingerLines.right, rightLine)
+      : rightLine;
+
+  const visualBandLeft = Math.min(visualLeftX, visualRightX);
+  const visualBandRight = Math.max(visualLeftX, visualRightX);
+  const visualBandWidth = Math.max(0, visualBandRight - visualBandLeft);
+  const visualBandCenter = visualBandLeft + visualBandWidth / 2;
+
   return (
     <main className="app">
       <header className="brand">
@@ -1121,13 +1143,13 @@ export default function App() {
                     </g>)}
                   </svg>;
                 })}
-                <div className="measurement-band" style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} aria-hidden="true" />
-                <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${leftLine}%`, top: `${measureY}%`, width: `${rightLine - leftLine}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
-                <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${(leftLine + rightLine) / 2}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
+                <div className="measurement-band" style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} aria-hidden="true" />
+                <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
+                <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandCenter}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
               </>
             )}
             {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
-              <div className="ring-size-badge" style={{ left: `${(leftLine + rightLine) / 2}%` }} aria-live="polite">
+              <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
                 <span>ARO PROVÁVEL:</span>
                 <strong>{result.ringSize}</strong>
               </div>
@@ -1136,9 +1158,9 @@ export default function App() {
               <div
                 className={`virtual-ring metal-${ringMetal} style-${ringStyle}`}
                 style={{
-                  left: `${(leftLine + rightLine) / 2}%`,
+                  left: `${visualBandCenter}%`,
                   top: `${measureY}%`,
-                  width: `${Math.min(100, rightLine - leftLine)}%`,
+                  width: `${Math.min(100, visualBandWidth)}%`,
                   height: `${clamp(ringBandWidth * pixelsPerMm * zoom / 12, 0.8, 7)}%`,
                 }}
                 aria-label="Aliança virtual aplicada ao dedo"
