@@ -136,64 +136,65 @@ const findRingBySize = (size: number) => (
   RING_DIAMETER_TABLE.find((ring) => ring.size === size)
 );
 
+export const MAB_REFERENCE_CALIBRATION = 94;
+
+// Limites obtidos pelos pontos médios das medições reais do anelímetro.
+// Primeiro normalizamos o MA/MAB para 94% de calibração do cartão e só
+// depois classificamos o aro. Isso compensa automaticamente capturas em
+// 93%, 95%, 96% etc. sem somar/subtrair aros manualmente.
+export const MAB_RING_THRESHOLDS = [
+  { maxMm: 12.96, ringSize: 5 },
+  { maxMm: 13.35, ringSize: 6 },
+  { maxMm: 13.85, ringSize: 7 },
+  { maxMm: 14.25, ringSize: 8 },
+  { maxMm: 14.71, ringSize: 9 },
+  { maxMm: 15.11, ringSize: 10 },
+  { maxMm: 15.46, ringSize: 11 },
+  { maxMm: 15.87, ringSize: 12 },
+  { maxMm: 16.22, ringSize: 13 },
+  { maxMm: 16.45, ringSize: 14 },
+  { maxMm: 16.67, ringSize: 15 },
+  { maxMm: 16.86, ringSize: 16 },
+  { maxMm: 17.00, ringSize: 17 },
+  { maxMm: 17.25, ringSize: 18 },
+  { maxMm: 17.55, ringSize: 19 },
+  { maxMm: 17.85, ringSize: 20 },
+  { maxMm: 18.15, ringSize: 21 },
+  { maxMm: 18.50, ringSize: 22 },
+  { maxMm: 18.95, ringSize: 23 },
+  { maxMm: 19.35, ringSize: 24 },
+  { maxMm: 19.60, ringSize: 25 },
+  { maxMm: 19.90, ringSize: 26 },
+  { maxMm: 20.20, ringSize: 27 },
+  { maxMm: 20.45, ringSize: 28 },
+  { maxMm: 20.75, ringSize: 29 },
+  { maxMm: 21.05, ringSize: 30 },
+  { maxMm: 21.30, ringSize: 31 },
+  { maxMm: 21.55, ringSize: 32 },
+  { maxMm: 21.85, ringSize: 33 },
+  { maxMm: 22.05, ringSize: 34 },
+] as const;
+
+export const normalizeMabTo94 = (rawWidthMm: number, calibrationConfidence: number) => {
+  if (!Number.isFinite(rawWidthMm)) return rawWidthMm;
+  if (!Number.isFinite(calibrationConfidence) || calibrationConfidence <= 0) return rawWidthMm;
+  return rawWidthMm * (MAB_REFERENCE_CALIBRATION / calibrationConfidence);
+};
+
+export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
+  const match = MAB_RING_THRESHOLDS.find((threshold) => normalizedMabMm < threshold.maxMm);
+  return match?.ringSize ?? 35;
+};
+
 export const computeRingResult = (
   rawWidthMm: number,
-  rules: CalibrationRule[] = [],
-  applyBenchCalibration = true,
+  _rules: CalibrationRule[] = [],
+  _applyBenchCalibration = true,
+  calibrationConfidence = MAB_REFERENCE_CALIBRATION,
 ): RingResult => {
-  // MODO DEDO — teste matemático da curva provisória.
-  // Não usa REAL_FIT_REFERENCES nem regras aprendidas: queremos observar
-  // exatamente o comportamento da fórmula nos próximos testes reais.
-  if (!applyBenchCalibration) {
-    const continuousRing = FINGER_RING_SLOPE * rawWidthMm + FINGER_RING_INTERCEPT;
-    const lowerRing = Math.floor(continuousRing);
-    const boundaryRingValue = lowerRing + 0.5;
-    const boundaryDistanceMm = Math.abs(continuousRing - boundaryRingValue) / FINGER_RING_SLOPE;
-    const nearBoundary = boundaryDistanceMm <= FINGER_RING_DEAD_ZONE_MM;
-
-    // Fora da zona morta: arredondamento matemático normal.
-    // Dentro da zona: mantém o aro superior para evitar ficar alternando
-    // entre dois números por pequenas variações da leitura.
-    const provisionalSize = nearBoundary
-      ? lowerRing + 1
-      : Math.round(continuousRing);
-    const ringSize = clamp(provisionalSize, 1, 40);
-    const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
-
-    return {
-      rawWidthMm,
-      widthMm: rawWidthMm,
-      measurementCorrectionMm: 0,
-      equivalentDiameterMm: selectedRing.diameterMm,
-      ringSize: selectedRing.size,
-      calculationMode: "formula",
-      appliedRuleOffset: null,
-      continuousRing,
-      nearBoundary,
-      boundaryDistanceMm: nearBoundary ? boundaryDistanceMm : null,
-    };
-  }
-
-  // MODO ANELÍMETRO — mantém a matemática existente nesta fase de teste.
-  const widthMm = calibrateMeasuredWidthMm(rawWidthMm);
-  const equivalentDiameterMm = estimateInnerDiameter(widthMm);
-
-  const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
-    Math.abs(candidate.diameterMm - equivalentDiameterMm) < Math.abs(closest.diameterMm - equivalentDiameterMm) ? candidate : closest
-  );
-  const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
-    widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
-  ));
-  const baseRing = confirmedFit
-    ? findRingBySize(confirmedFit.ringSize) || closestRing
-    : findRingBySize(clamp(closestRing.size + COMFORT_RING_OFFSET, 1, 40)) || closestRing;
-
-  const matchingRule = rules.find((rule) => (
-    rule.predictedRing === baseRing.size && widthMm >= rule.minWidthMm && widthMm <= rule.maxWidthMm
-  ));
-  const selectedRing = matchingRule
-    ? findRingBySize(clamp(baseRing.size + matchingRule.offset, 1, 40)) || baseRing
-    : baseRing;
+  const widthMm = normalizeMabTo94(rawWidthMm, calibrationConfidence);
+  const ringSize = ringSizeFromNormalizedMab(widthMm);
+  const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
 
   return {
     rawWidthMm,
@@ -202,7 +203,7 @@ export const computeRingResult = (
     equivalentDiameterMm: selectedRing.diameterMm,
     ringSize: selectedRing.size,
     calculationMode: "formula",
-    appliedRuleOffset: matchingRule?.offset ?? null,
+    appliedRuleOffset: null,
     continuousRing: null,
     nearBoundary: false,
     boundaryDistanceMm: null,
