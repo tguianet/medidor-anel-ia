@@ -7,61 +7,9 @@ const STORE_NAME = "ring-calibration-learning";
 // aprendizagem automática. Os registros recuperados ficam no banco para
 // consulta, mas só entram nas curvas quando analysisEligible !== false.
 const RECOVERED_DATA_VERSION = "2026-09-21-full-restore-v1";
+const FINGER_DATA_RESET_VERSION = "2026-09-21-finger-reset-v1";
 
 const RECOVERED_TESTS = [
-  // Referências reais de dedo já confirmadas em fases anteriores.
-  {
-    id: "recovered-finger-17",
-    createdAt: "2026-09-20T21:45:42.000Z",
-    widthMm: 17.70,
-    predictedRing: 15,
-    actualRing: 17,
-    error: 2,
-    calibrationConfidence: 92,
-    zoom: 1,
-    finger: "não informado",
-    hand: "não informada",
-    note: "Referência histórica real: largura ~17,7 mm, aro real 17. Algoritmo anterior indicou 15.",
-    measurementType: "finger",
-    actualDiameterMm: null,
-    source: "historical-recovered",
-    analysisEligible: false,
-  },
-  {
-    id: "recovered-finger-24",
-    createdAt: "2026-09-20T21:46:00.000Z",
-    widthMm: 21.60,
-    predictedRing: 24,
-    actualRing: 24,
-    error: 0,
-    calibrationConfidence: 0,
-    zoom: 1,
-    finger: "não informado",
-    hand: "não informada",
-    note: "Referência histórica de correlação: largura do dedo 21,60 mm, aro real 24. Predição original não preservada.",
-    measurementType: "finger",
-    actualDiameterMm: null,
-    source: "historical-recovered",
-    analysisEligible: false,
-  },
-  {
-    id: "recovered-finger-32",
-    createdAt: "2026-09-20T21:46:01.000Z",
-    widthMm: 26.00,
-    predictedRing: 32,
-    actualRing: 32,
-    error: 0,
-    calibrationConfidence: 0,
-    zoom: 1,
-    finger: "não informado",
-    hand: "não informada",
-    note: "Referência histórica de correlação: largura do dedo 26,00 mm, aro real 32. Predição original não preservada.",
-    measurementType: "finger",
-    actualDiameterMm: null,
-    source: "historical-recovered",
-    analysisEligible: false,
-  },
-
   // Medições físicas do anelímetro recuperadas da documentação.
   { id: "recovered-gauge-14", createdAt: "2026-09-20T21:47:14.000Z", widthMm: 18.20, predictedRing: 14, actualRing: 14, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 18,20 / DI 17,09. Ponto fora da série; repetir antes de usar na curva.", measurementType: "anelimetro", actualDiameterMm: 17.09, source: "historical-recovered", analysisEligible: false },
   { id: "recovered-gauge-16", createdAt: "2026-09-20T21:47:16.000Z", widthMm: 18.40, predictedRing: 16, actualRing: 16, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 18,40 / DI 17,83.", measurementType: "anelimetro", actualDiameterMm: 17.83, source: "historical-recovered", analysisEligible: true },
@@ -120,6 +68,25 @@ const ensureRecoveredCalibrationData = async (store) => {
   }
   await store.setJSON("references/recovered-calibration", RECOVERED_REFERENCES);
   await store.set("meta/recovered-data-version", RECOVERED_DATA_VERSION);
+};
+
+// Limpeza única solicitada para recomeçar a calibração de dedo sem misturar
+// testes antigos. Mantém intactos todos os registros do anelímetro e não
+// altera a fórmula de correlação implementada em src/ringCalculation.ts.
+// Também limpa regras antigas aprendidas a partir dos testes de dedo.
+const ensureFreshFingerDataset = async (store) => {
+  const resetVersion = await store.get("meta/finger-data-reset-version", { type: "text", consistency: "strong" });
+  if (resetVersion === FINGER_DATA_RESET_VERSION) return;
+
+  const { blobs } = await store.list({ prefix: "tests/" });
+  for (const { key } of blobs) {
+    const record = await store.get(key, { type: "json", consistency: "strong" });
+    if (!record || record.measurementType === "anelimetro") continue;
+    await store.delete(key);
+  }
+
+  await store.delete("rules/current");
+  await store.set("meta/finger-data-reset-version", FINGER_DATA_RESET_VERSION);
 };
 
 const json = (data, status = 200, extraHeaders = {}) => new Response(JSON.stringify(data), {
@@ -203,6 +170,7 @@ const responseData = (tests, rules) => ({
 export default async (request, context) => {
   const store = getStore(STORE_NAME);
   await ensureRecoveredCalibrationData(store);
+  await ensureFreshFingerDataset(store);
   if (request.method === "GET") {
     const url = new URL(request.url);
     const rules = await readRules(store);
