@@ -239,6 +239,56 @@ export const fingerMabToGaugeEquivalent = (x: number) => {
   return lerp(23.06, 20.90, 26.24, 21.70, x);
 };
 
+export const computeDiameterOnlyTestResult = (
+  rawDiameterMm: number,
+  calibrationConfidence = MAB_REFERENCE_CALIBRATION,
+  deadZoneMm = 0.05,
+): RingResult => {
+  const diameterMm = normalizeMabTo94(rawDiameterMm, calibrationConfidence);
+
+  let selectedIndex = RING_DIAMETER_TABLE.length - 1;
+  for (let i = 0; i < RING_DIAMETER_TABLE.length; i++) {
+    const current = RING_DIAMETER_TABLE[i];
+    const next = RING_DIAMETER_TABLE[i + 1];
+    const upperBoundary = next
+      ? (current.diameterMm + next.diameterMm) / 2
+      : Number.POSITIVE_INFINITY;
+    if (diameterMm < upperBoundary) {
+      selectedIndex = i;
+      break;
+    }
+  }
+
+  const selectedRing = RING_DIAMETER_TABLE[selectedIndex];
+  const previous = RING_DIAMETER_TABLE[selectedIndex - 1];
+  const next = RING_DIAMETER_TABLE[selectedIndex + 1];
+  const lowerBoundary = previous
+    ? (previous.diameterMm + selectedRing.diameterMm) / 2
+    : Number.NEGATIVE_INFINITY;
+  const upperBoundary = next
+    ? (selectedRing.diameterMm + next.diameterMm) / 2
+    : Number.POSITIVE_INFINITY;
+  const boundaryDistanceMm = Math.min(
+    Math.abs(diameterMm - lowerBoundary),
+    Math.abs(upperBoundary - diameterMm),
+  );
+  const nearBoundary = Number.isFinite(boundaryDistanceMm) && boundaryDistanceMm <= deadZoneMm;
+
+  return {
+    rawWidthMm: rawDiameterMm,
+    widthMm: diameterMm,
+    measurementCorrectionMm: diameterMm - rawDiameterMm,
+    equivalentDiameterMm: selectedRing.diameterMm,
+    fingerEquivalentMabMm: null,
+    ringSize: selectedRing.size,
+    calculationMode: "formula",
+    appliedRuleOffset: null,
+    continuousRing: null,
+    nearBoundary,
+    boundaryDistanceMm: Number.isFinite(boundaryDistanceMm) ? boundaryDistanceMm : null,
+  };
+};
+
 export const computeRingResult = (
   rawWidthMm: number,
   _rules: CalibrationRule[] = [],
