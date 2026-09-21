@@ -1,48 +1,11 @@
 import { getStore } from "@netlify/blobs";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 const STORE_NAME = "ring-calibration-learning";
-// Limita tentativas de PIN por IP para dificultar força bruta. O contador
-// vive no mesmo Blobs store (funções são stateless entre chamadas) e é
-// resetado a cada login bem-sucedido ou quando a janela de tempo expira.
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-const RATE_LIMIT_MAX_ATTEMPTS = 10;
 const json = (data, status = 200, extraHeaders = {}) => new Response(JSON.stringify(data), {
   status,
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extraHeaders },
 });
-
-const authorized = (request) => {
-  const expected = process.env.CALIBRATION_ADMIN_PIN || "";
-  const received = request.headers.get("x-admin-pin") || "";
-  if (!expected || expected.length !== received.length) return false;
-  return timingSafeEqual(Buffer.from(expected), Buffer.from(received));
-};
-
-const getClientIp = (request, context) => (
-  context?.ip
-  || request.headers.get("x-nf-client-connection-ip")
-  || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-  || "unknown"
-);
-
-const rateLimitKey = (ip) => `ratelimit/${ip}`;
-
-const readRateLimit = async (store, ip) => {
-  const record = await store.get(rateLimitKey(ip), { type: "json", consistency: "strong" });
-  if (!record || Date.now() - record.windowStart > RATE_LIMIT_WINDOW_MS) {
-    return { windowStart: Date.now(), attempts: 0 };
-  }
-  return record;
-};
-
-const registerFailedAttempt = async (store, ip, record) => {
-  await store.setJSON(rateLimitKey(ip), { windowStart: record.windowStart, attempts: record.attempts + 1 });
-};
-
-const clearRateLimit = async (store, ip) => {
-  await store.delete(rateLimitKey(ip));
-};
 
 const readTests = async (store) => {
   const { blobs } = await store.list({ prefix: "tests/" });
@@ -90,9 +53,10 @@ const makeGaugeCurve = (tests) => {
   const groups = new Map();
   for (const test of tests.filter((item) => item.measurementType === "anelimetro")) {
     const key = String(test.actualRing);
-    const group = groups.get(key) || { ringSize: test.actualRing, widths: [], predictions: [] };
+    const group = groups.get(key) || { ringSize: test.actualRing, widths: [], predictions: [], diameters: [] };
     group.widths.push(test.widthMm);
     group.predictions.push(test.predictedRing);
+    if (Number.isFinite(Number(test.actualDiameterMm))) group.diameters.push(Number(test.actualDiameterMm));
     groups.set(key, group);
   }
   return [...groups.values()].map((group) => {
@@ -123,20 +87,6 @@ export default async (request, context) => {
     return json({ rules });
   }
   if (request.method !== "POST") return json({ error: "Método não permitido." }, 405);
-  if (!process.env.CALIBRATION_ADMIN_PIN) return json({ error: "Defina CALIBRATION_ADMIN_PIN no Netlify antes de usar o modo administrador." }, 503);
-
-  const clientIp = getClientIp(request, context);
-  const rateLimit = await readRateLimit(store, clientIp);
-  if (rateLimit.attempts >= RATE_LIMIT_MAX_ATTEMPTS) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((rateLimit.windowStart + RATE_LIMIT_WINDOW_MS - Date.now()) / 1000));
-    return json({ error: "Muitas tentativas de PIN incorreto. Tente novamente mais tarde." }, 429, { "retry-after": String(retryAfterSeconds) });
-  }
-  if (!authorized(request)) {
-    await registerFailedAttempt(store, clientIp, rateLimit);
-    return json({ error: "PIN administrativo incorreto." }, 401);
-  }
-  await clearRateLimit(store, clientIp);
-
   try {
     const body = await request.json();
     if (body.action === "list") {
@@ -147,6 +97,8 @@ export default async (request, context) => {
       const widthMm = Number(body.widthMm);
       const predictedRing = Number(body.predictedRing);
       const actualRing = Number(body.actualRing);
+      const measurementType = body.measurementType === "anelimetro" ? "anelimetro" : "finger";
+      const actualDiameterMm = body.actualDiameterMm == null || body.actualDiameterMm === "" ? null : Number(body.actualDiameterMm);
       if (!(widthMm >= 10 && widthMm <= 40) || !(predictedRing >= 1 && predictedRing <= 40) || !(actualRing >= 1 && actualRing <= 40)) {
         return json({ error: "Dados da medição inválidos." }, 400);
       }
@@ -163,6 +115,7 @@ export default async (request, context) => {
         hand: String(body.hand || "não informada").slice(0, 20),
         note: String(body.note || "").slice(0, 180),
         measurementType,
+        actualDiameterMm: Number.isFinite(actualDiameterMm) ? Number(actualDiameterMm.toFixed(2)) : null,
       };
       await store.setJSON(`tests/${record.createdAt}-${record.id}`, record, { onlyIfNew: true });
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
