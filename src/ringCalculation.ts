@@ -90,6 +90,10 @@ export const estimateInnerDiameter = (measuredWidthMm: number) => (
 // conforto: a aliança precisa ficar firme, sem risco de cair. Não usamos dados
 // do anelímetro aqui — ele continua apenas como instrumento de validação.
 export const REAL_FIT_REFERENCES = [
+  // Dedo real confirmado: duas medições consecutivas em ~17,7 mm deram aro 15
+  // pela fórmula, mas o aro correto é 17. Mantemos a correção localizada para
+  // não deslocar toda a curva global.
+  { minWidthMm: 17.50, maxWidthMm: 17.90, ringSize: 17 },
   { minWidthMm: 21.45, maxWidthMm: 21.75, ringSize: 24 },
   { minWidthMm: 25.80, maxWidthMm: 26.20, ringSize: 32 },
 ];
@@ -136,17 +140,19 @@ export const computeRingResult = (
   const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
     widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
   ));
-  const technicalRing = confirmedFit
+  // Referências reais já representam o aro FINAL confirmado no dedo.
+  // Não aplicamos novamente a margem de conforto sobre elas, senão somamos
+  // um aro extra em dados que já foram validados na prática.
+  const baseRing = confirmedFit
     ? findRingBySize(confirmedFit.ringSize) || closestRing
-    : closestRing;
-  const comfortRing = findRingBySize(clamp(technicalRing.size + COMFORT_RING_OFFSET, 1, 40)) || technicalRing;
+    : findRingBySize(clamp(closestRing.size + COMFORT_RING_OFFSET, 1, 40)) || closestRing;
 
   const matchingRule = rules.find((rule) => (
-    rule.predictedRing === comfortRing.size && widthMm >= rule.minWidthMm && widthMm <= rule.maxWidthMm
+    rule.predictedRing === baseRing.size && widthMm >= rule.minWidthMm && widthMm <= rule.maxWidthMm
   ));
   const selectedRing = matchingRule
-    ? findRingBySize(clamp(comfortRing.size + matchingRule.offset, 1, 40)) || comfortRing
-    : comfortRing;
+    ? findRingBySize(clamp(baseRing.size + matchingRule.offset, 1, 40)) || baseRing
+    : baseRing;
 
   return {
     rawWidthMm,
