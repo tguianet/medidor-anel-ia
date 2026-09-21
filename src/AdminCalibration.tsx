@@ -31,8 +31,6 @@ const endpoint = "/.netlify/functions/calibration";
 
 export default function AdminCalibration({ measurement, calibrationConfidence, zoom, defaultMeasurementType }: Props) {
   const [open, setOpen] = useState(false);
-  const [pin, setPin] = useState("");
-  const [authenticated, setAuthenticated] = useState(false);
   const [actualRing, setActualRing] = useState(measurement.ringSize);
   const [actualDiameterMm, setActualDiameterMm] = useState("");
   const [finger, setFinger] = useState("anelar");
@@ -48,7 +46,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
   const request = async (body: Record<string, unknown>) => {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-admin-pin": pin },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     const data = await response.json();
@@ -56,17 +54,20 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
     return data;
   };
 
-  const login = async () => {
-    setBusy(true); setMessage("");
+  const openCalibration = async () => {
+    setOpen(true);
+    setBusy(true);
+    setMessage("");
     try {
       const data = await request({ action: "list" });
-      setAuthenticated(true);
       setSuggestions(data.suggestions || []);
       setGaugeCurve(data.gaugeCurve || []);
       setTestsCount(data.tests?.length || 0);
-      setMessage("Modo administrador liberado.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha no acesso."); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Falha ao carregar calibração.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveTest = async () => {
@@ -77,6 +78,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
         widthMm: measurement.widthMm,
         predictedRing: measurement.ringSize,
         actualRing,
+        actualDiameterMm: measurementType === "anelimetro" && actualDiameterMm ? Number(actualDiameterMm) : null,
         calibrationConfidence,
         zoom,
         finger,
@@ -93,17 +95,13 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
     finally { setBusy(false); }
   };
 
-  if (!open) return <button className="admin-entry" type="button" onClick={() => setOpen(true)}>Área de calibração</button>;
+  if (!open) return <button className="admin-entry" type="button" onClick={() => void openCalibration()}>Área de calibração</button>;
 
   return (
     <section className="admin-calibration">
-      <div className="admin-title"><div><span>ACESSO RESTRITO</span><strong>Calibração inteligente</strong></div><button type="button" onClick={() => setOpen(false)}>×</button></div>
-      {!authenticated ? (
-        <div className="admin-login">
-          <label>PIN do administrador</label>
-          <input value={pin} onChange={(event) => setPin(event.target.value)} type="password" inputMode="numeric" placeholder="Digite seu PIN" />
-          <button className="primary" type="button" disabled={busy || !pin} onClick={() => void login()}>{busy ? "Entrando..." : "Entrar"}</button>
-        </div>
+      <div className="admin-title"><div><span>MODO DE TESTE</span><strong>Calibração inteligente</strong></div><button type="button" onClick={() => setOpen(false)}>×</button></div>
+      {busy && testsCount === 0 && suggestions.length === 0 && gaugeCurve.length === 0 ? (
+        <p className="admin-message">Carregando calibração...</p>
       ) : (
         <>
           <div className="admin-current"><span>Leitura atual</span><strong>{measurement.widthMm.toFixed(1)} mm · aro {measurement.ringSize}</strong></div>
