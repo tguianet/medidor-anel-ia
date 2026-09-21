@@ -18,6 +18,22 @@ type GaugeCurvePoint = {
   averageWidthMm: number;
   averagePrediction: number;
   averageError: number;
+  averageDiameterMm: number | null;
+};
+
+type CalibrationTest = {
+  createdAt: string;
+  widthMm: number;
+  predictedRing: number;
+  actualRing: number;
+  error: number;
+  calibrationConfidence: number;
+  zoom: number;
+  finger: string;
+  hand: string;
+  note: string;
+  measurementType: "finger" | "anelimetro";
+  actualDiameterMm: number | null;
 };
 
 type Props = {
@@ -39,6 +55,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
   const [measurementType, setMeasurementType] = useState(defaultMeasurementType);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [gaugeCurve, setGaugeCurve] = useState<GaugeCurvePoint[]>([]);
+  const [tests, setTests] = useState<CalibrationTest[]>([]);
   const [testsCount, setTestsCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -62,6 +79,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
       const data = await request({ action: "list" });
       setSuggestions(data.suggestions || []);
       setGaugeCurve(data.gaugeCurve || []);
+      setTests(data.tests || []);
       setTestsCount(data.tests?.length || 0);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar calibração.");
@@ -88,11 +106,69 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
       });
       setSuggestions(data.suggestions || []);
       setGaugeCurve(data.gaugeCurve || []);
+      setTests(data.tests || []);
       setTestsCount(data.tests?.length || 0);
       setNote("");
       setMessage(`Teste armazenado: previsto ${measurement.ringSize}, confirmado ${actualRing}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao armazenar."); }
     finally { setBusy(false); }
+  };
+
+  const exportTests = () => {
+    if (!tests.length) {
+      setMessage("Ainda não há testes para exportar.");
+      return;
+    }
+
+    const headers = [
+      "data",
+      "tipo",
+      "largura_mm",
+      "aro_previsto",
+      "aro_real",
+      "erro_aro",
+      "diametro_real_mm",
+      "confianca_calibracao",
+      "zoom",
+      "dedo",
+      "mao",
+      "observacao",
+    ];
+
+    const csvEscape = (value: unknown) => {
+      const text = value == null ? "" : String(value);
+      return `"${text.replaceAll('"', '""')}"`;
+    };
+
+    const rows = tests.map((test) => [
+      test.createdAt,
+      test.measurementType,
+      test.widthMm,
+      test.predictedRing,
+      test.actualRing,
+      test.error,
+      test.actualDiameterMm ?? "",
+      test.calibrationConfidence,
+      test.zoom,
+      test.finger,
+      test.hand,
+      test.note,
+    ]);
+
+    const csv = [headers, ...rows]
+      .map((row) => row.map(csvEscape).join(";"))
+      .join("\n");
+
+    const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `testes-calibracao-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setMessage("Arquivo de testes exportado. Envie o CSV no ChatGPT para análise.");
   };
 
   if (!open) return <button className="admin-entry" type="button" onClick={() => void openCalibration()}>Área de calibração</button>;
@@ -115,6 +191,7 @@ export default function AdminCalibration({ measurement, calibrationConfidence, z
           </div>
           <button className="primary" type="button" disabled={busy || actualRing < 1 || actualRing > 40 || (measurementType === "anelimetro" && (!actualDiameterMm || Number(actualDiameterMm) < 10))} onClick={() => void saveTest()}>{busy ? "Armazenando..." : "Armazenar teste"}</button>
           <div className="learning-summary"><strong>{testsCount} testes armazenados</strong><span>Testes de anelímetro validam a leitura. Só testes de dedo entram nas sugestões de correção.</span></div>
+          <button className="secondary" type="button" disabled={!tests.length} onClick={exportTests}>Exportar testes para análise (CSV)</button>
           {gaugeCurve.length > 0 && <section className="gauge-curve">
             <div><strong>Curva do anelímetro</strong><span>Dados guardados para calibrar depois. Esta curva não altera a medida do dedo.</span></div>
             <div className="gauge-curve-grid" role="table" aria-label="Curva de calibração do anelímetro">
