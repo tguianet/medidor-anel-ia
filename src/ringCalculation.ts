@@ -196,11 +196,13 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
 // 19,19 -> aro 17 (~16,90 no anelímetro)
 // 21,01 -> aro 25 (~19,50 no anelímetro)
 // 21,67 -> aro 25 (~19,50 no anelímetro)
+// 22,31 -> aro 30 (~20,90 no anelímetro)
 // 23,06 -> aro 30 (~20,90 no anelímetro)
 // 26,24 -> aro 33 (~21,70 no anelímetro)
 //
 // A faixa 21,01–21,67 fica estabilizada no equivalente do aro 25.
-// Fora dela, interpolamos suavemente entre os pontos confirmados.
+// A faixa 22,31–23,06 fica estabilizada no equivalente do aro 30.
+// Entre as zonas estáveis, interpolamos suavemente.
 export const fingerMabToGaugeEquivalent = (x: number) => {
   const lerp = (x0: number, y0: number, x1: number, y1: number, value: number) => (
     y0 + ((value - x0) / (x1 - x0)) * (y1 - y0)
@@ -220,8 +222,13 @@ export const fingerMabToGaugeEquivalent = (x: number) => {
     return 19.50;
   }
 
-  if (x < 23.06) {
-    return lerp(21.67, 19.50, 23.06, 20.90, x);
+  if (x < 22.31) {
+    return lerp(21.67, 19.50, 22.31, 20.90, x);
+  }
+
+  if (x <= 23.06) {
+    // Zona estável confirmada para aro 30.
+    return 20.90;
   }
 
   if (x < 26.24) {
