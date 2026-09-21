@@ -199,10 +199,10 @@ export const adjustFingerMeasurementByCalibration = (
   if (!Number.isFinite(rawMm)) return rawMm;
   if (!Number.isFinite(calibrationConfidence)) return rawMm;
 
-  // Correção empírica inicial: 94% é o ponto neutro.
-  // Cada ponto percentual de diferença aplica 0,10 mm, limitado para
-  // evitar correções agressivas enquanto coletamos mais dados.
-  const correctionMm = clamp((94 - calibrationConfidence) * 0.10, -0.30, 0.30);
+  // Correção global única para qualquer aro: 94% é o ponto neutro.
+  // A partir dos testes reais, cada ponto percentual equivale a 0,0675 mm.
+  // Mantemos um limite de segurança para evitar correções extremas.
+  const correctionMm = clamp((94 - calibrationConfidence) * 0.0675, -0.30, 0.30);
   return rawMm + correctionMm;
 };
 
