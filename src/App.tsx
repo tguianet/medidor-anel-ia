@@ -773,25 +773,18 @@ export default function App() {
     const toImageY = (percent: number) => (
       (((percent / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height
     );
-    const imageY = toImageY(measureY);
+    const toScreenXPercent = (imageX: number) => (
+      (rect.width / 2 + (imageX / source.width * rect.width - rect.width / 2) * zoom + panX) / rect.width * 100
+    );
 
-    const screenLineXAtImageY = (line:Line, yImage:number) => {
-      const aY = toImageY(line.a.y);
-      const bY = toImageY(line.b.y);
-      const aX = toImageX(line.a.x);
-      const bX = toImageX(line.b.x);
-      const dy = bY - aY;
-      if (Math.abs(dy) < 1e-6) return (aX + bX) / 2;
-      const t = (yImage - aY) / dy;
-      return aX + (bX - aX) * t;
+    const lineXAtScreenY = (line:Line, yPercent:number) => {
+      const dy=line.b.y-line.a.y;
+      if(Math.abs(dy)<1e-6) return (line.a.x+line.b.x)/2;
+      const t=clamp((yPercent-line.a.y)/dy,0,1);
+      return line.a.x+(line.b.x-line.a.x)*t;
     };
 
-    const leftCenter = toImageX(leftLine);
-    const rightCenter = toImageX(rightLine);
-    const leftSlope = Math.tan(leftFingerTilt * Math.PI / 180);
-    const rightSlope = Math.tan(rightFingerTilt * Math.PI / 180);
-    const searchRadius = Math.max(7, Math.round(18 / zoom));
-
+    const searchRadius = Math.max(6, Math.round(14 / zoom));
     const grayscale = (x: number, y: number) => {
       const ix = Math.max(0, Math.min(source.width - 1, Math.round(x)));
       const iy = Math.max(0, Math.min(source.height - 1, Math.round(y)));
@@ -805,49 +798,52 @@ export default function App() {
       for (let x = Math.round(center) - searchRadius; x <= Math.round(center) + searchRadius; x++) {
         if (x < 3 || x >= source.width - 3) continue;
         const contrast = Math.abs(grayscale(x - 2, y) - grayscale(x + 2, y));
-        const score = contrast - Math.abs(x - center) * 0.7;
+        const score = contrast - Math.abs(x - center) * 0.55;
         if (score > bestScore) { bestScore = score; bestX = x; }
       }
       return { x: bestX, score: bestScore };
     };
 
-    const samples: {left:number;right:number;y:number;width:number}[] = [];
+    // Quatro pares magnéticos independentes, sempre horizontais.
+    // As linhas laterais servem só como guia; cada par procura a borda local real.
+    const yPercents = [-15, -5, 5, 15].map((offset)=>clamp(measureY + offset, 6, 94));
+    const samples: {left:number;right:number;y:number;width:number;yPercent:number;leftPercent:number;rightPercent:number;confidence:number}[] = [];
 
-    for (const offset of [-24, -18, -12, -6, 0, 6, 12, 18, 24]) {
-      const y = Math.round(imageY + offset);
+    for (const yPercent of yPercents) {
+      const y = toImageY(yPercent);
       if (y < 3 || y >= source.height - 3) continue;
 
-      const leftPredicted = leftManualRefined
-        ? screenLineXAtImageY(fingerLines.left, y)
-        : leftCenter + leftSlope * (y - imageY);
+      const leftGuidePercent = lineXAtScreenY(fingerLines.left, yPercent);
+      const rightGuidePercent = lineXAtScreenY(fingerLines.right, yPercent);
+      const leftGuide = toImageX(leftGuidePercent);
+      const rightGuide = toImageX(rightGuidePercent);
 
-      const rightPredicted = rightManualRefined
-        ? screenLineXAtImageY(fingerLines.right, y)
-        : rightCenter + rightSlope * (y - imageY);
+      const leftEdge = findEdge(leftGuide, y);
+      const rightEdge = findEdge(rightGuide, y);
+      if (leftEdge.score < 8 || rightEdge.score < 8 || rightEdge.x <= leftEdge.x) continue;
 
-      const leftEdge = leftManualRefined
-        ? { x: leftPredicted, score: 999 }
-        : findEdge(leftPredicted, y);
-
-      const rightEdge = rightManualRefined
-        ? { x: rightPredicted, score: 999 }
-        : findEdge(rightPredicted, y);
-
-      if (leftEdge.score < 10 || rightEdge.score < 10 || rightEdge.x <= leftEdge.x) continue;
+      const confidence = Math.round(clamp(
+        45 + Math.min(28, leftEdge.score * 0.55) + Math.min(28, rightEdge.score * 0.55),
+        0, 99,
+      ));
 
       samples.push({
         left:leftEdge.x,
         right:rightEdge.x,
         y,
         width:rightEdge.x-leftEdge.x,
+        yPercent,
+        leftPercent:toScreenXPercent(leftEdge.x),
+        rightPercent:toScreenXPercent(rightEdge.x),
+        confidence,
       });
     }
 
-    if (samples.length < 5) return null;
+    if (samples.length < 3) return null;
 
     const orderedWidths = samples.map((sample)=>sample.width).sort((a,b)=>a-b);
     const medianWidth = orderedWidths[Math.floor(orderedWidths.length/2)];
-    const tolerancePx = Math.max(3, medianWidth * 0.08);
+    const tolerancePx = Math.max(3, medianWidth * 0.10);
     const filtered = samples.filter((sample)=>Math.abs(sample.width-medianWidth)<=tolerancePx);
     return filtered.length >= 3 ? filtered : samples;
   };
@@ -911,7 +907,15 @@ export default function App() {
           const rightMm=mapToCardMm({x:sample.right,y:sample.y});
           return distance(leftMm,rightMm);
         })
-        .filter((value)=>Number.isFinite(value)&&value>0&&value<45);
+        .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
+        .sort((a,b)=>a-b);
+
+      // Com 4 leituras, usa a média central (descarta os extremos).
+      // Se houver só 3 leituras válidas, usa a mediana.
+      if(widthsMm.length>=4){
+        const middle=widthsMm.slice(1,-1);
+        return middle.reduce((sum,value)=>sum+value,0)/middle.length;
+      }
       const stableWidthMm=median(widthsMm);
       if(stableWidthMm!==null) return stableWidthMm;
     } catch {
@@ -1011,6 +1015,10 @@ export default function App() {
   const visualBandRight = Math.max(visualLeftX, visualRightX);
   const visualBandWidth = Math.max(0, visualBandRight - visualBandLeft);
   const visualBandCenter = visualBandLeft + visualBandWidth / 2;
+
+  const fourMagnetSamples = phase === "finger" && leftLocked && rightLocked
+    ? fingerBandSamplesPx()
+    : null;
 
   return (
     <main className="app">
@@ -1143,6 +1151,19 @@ export default function App() {
                     </g>)}
                   </svg>;
                 })}
+                {fourMagnetSamples?.map((sample,index)=>(
+                  <div
+                    key={`magnet-pair-${index}`}
+                    className="measurement-band"
+                    style={{
+                      left: `${sample.leftPercent}%`,
+                      top: `${sample.yPercent}%`,
+                      width: `${Math.max(0, sample.rightPercent-sample.leftPercent)}%`,
+                      opacity: index===1 || index===2 ? 0.72 : 0.48,
+                    }}
+                    aria-hidden="true"
+                  />
+                ))}
                 <div className="measurement-band" style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} aria-hidden="true" />
                 <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
                 <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandCenter}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
@@ -1229,6 +1250,12 @@ export default function App() {
               zoom={zoom}
               defaultMeasurementType={measurementMode}
             />
+          )}
+          {phase === "finger" && leftLocked && rightLocked && fourMagnetSamples && !tryOn && (
+            <div className="edge-status">
+              <strong>4 ímãs horizontais ativos</strong>
+              <span>{fourMagnetSamples.length}/4 leituras válidas · cálculo pela média central das medidas</span>
+            </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
             <strong>{leftLocked && rightLocked ? "2. Ímã concluído — agora ajuste pelas bolinhas" : "1. Alinhe as duas linhas até ficarem verdes"}</strong>
