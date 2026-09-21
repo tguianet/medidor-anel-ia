@@ -1269,22 +1269,26 @@ export default function App() {
               {diameterPhotoTestMode && <span>Diâmetro ajustado para 94%: {result.widthMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>{result.nearBoundary ? "Zona morta ativa" : "Fora da zona morta"}{result.boundaryDistanceMm !== null ? " · " + result.boundaryDistanceMm.toFixed(2) + " mm da divisão" : ""}</span>}
-              <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
-              <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
-              {measurementMode === "anelimetro" ? (
+              {!diameterPhotoTestMode && (
                 <>
-                  <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
-                  <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
-                </>
-              ) : (
-                <>
-                  <span>MAB normalizado para 94%: {result.widthMm.toFixed(2)} mm</span>
-                  {result.fingerEquivalentMabMm !== null && (
-                    <span>MAB equivalente no anelímetro: {result.fingerEquivalentMabMm.toFixed(2)} mm</span>
+                  <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
+                  <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
+                  {measurementMode === "anelimetro" ? (
+                    <>
+                      <span>Medida corrigida: {result.widthMm.toFixed(1)} mm</span>
+                      <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>MAB normalizado para 94%: {result.widthMm.toFixed(2)} mm</span>
+                      {result.fingerEquivalentMabMm !== null && (
+                        <span>MAB equivalente no anelímetro: {result.fingerEquivalentMabMm.toFixed(2)} mm</span>
+                      )}
+                    </>
                   )}
+                  <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
                 </>
               )}
-              <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>
             </div>
@@ -1297,7 +1301,7 @@ export default function App() {
               defaultMeasurementType={measurementMode}
             />
           )}
-          {phase === "finger" && leftLocked && rightLocked && fourMagnetSamples && !tryOn && (
+          {phase === "finger" && leftLocked && rightLocked && fourMagnetSamples && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>4 ímãs horizontais ativos</strong>
               <span>{fourMagnetSamples.length}/4 leituras válidas · cálculo pela média central das medidas</span>
