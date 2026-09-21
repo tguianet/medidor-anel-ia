@@ -2,9 +2,10 @@ type Props = {
   error: string;
   onMeasureFinger: () => void;
   onTestGauge: () => void;
+  onTestDiameterPhoto: () => void;
 };
 
-export default function IntroScreen({ error, onMeasureFinger, onTestGauge }: Props) {
+export default function IntroScreen({ error, onMeasureFinger, onTestGauge, onTestDiameterPhoto }: Props) {
   return (
     <section className="panel intro">
       <span className="step">MEDIÇÃO MANUAL ASSISTIDA</span>
@@ -19,6 +20,7 @@ export default function IntroScreen({ error, onMeasureFinger, onTestGauge }: Pro
       </ul>
       <button className="primary" onClick={onMeasureFinger}>Medir meu dedo</button>
       <button className="secondary" onClick={onTestGauge}>Testar no anelímetro</button>
+      <button className="secondary" onClick={onTestDiameterPhoto}>Teste diâmetro interno por foto</button>
       {error && <p className="error">{error}</p>}
     </section>
   );
