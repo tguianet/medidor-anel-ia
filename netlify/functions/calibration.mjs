@@ -204,7 +204,32 @@ export default async (request, context) => {
   const store = getStore(STORE_NAME);
   await ensureRecoveredCalibrationData(store);
   if (request.method === "GET") {
+    const url = new URL(request.url);
     const rules = await readRules(store);
+
+    if (url.searchParams.get("summary") === "1") {
+      const tests = await readTests(store);
+      const liveTests = tests
+        .filter((test) => test.source === "live-test")
+        .map((test) => ({
+          widthMm: test.widthMm,
+          predictedRing: test.predictedRing,
+          actualRing: test.actualRing,
+          error: test.error,
+          measurementType: test.measurementType,
+          actualDiameterMm: test.actualDiameterMm ?? null,
+          calibrationConfidence: test.calibrationConfidence,
+          zoom: test.zoom,
+        }));
+
+      return json({
+        count: liveTests.length,
+        tests: liveTests,
+        gaugeCurve: makeGaugeCurve(tests),
+        suggestions: makeSuggestions(tests, rules),
+      });
+    }
+
     return json({ rules });
   }
   if (request.method !== "POST") return json({ error: "Método não permitido." }, 405);
