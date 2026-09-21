@@ -1020,6 +1020,41 @@ export default function App() {
     ? fingerBandSamplesPx()
     : null;
 
+  // Guarda as quatro larguras horizontais em milímetros individualmente.
+  // Essas medidas formam o perfil do dedo e serão usadas para descobrir a
+  // correlação entre formato do dedo e equivalente do anelímetro.
+  const fourMagnetWidthsMm = (() => {
+    if (!fourMagnetSamples?.length) return [] as number[];
+    const source = photoPixelsRef.current;
+    if (!source) return [] as number[];
+
+    const quadPx = cardQuad.map((point)=>({
+      x: point.x / 100 * source.width,
+      y: point.y / 100 * source.height,
+    })) as [Point,Point,Point,Point];
+
+    try {
+      const mapToCardMm = homographyFromQuad(quadPx);
+      return fourMagnetSamples
+        .map((sample)=>{
+          const leftMm = mapToCardMm({x:sample.left,y:sample.y});
+          const rightMm = mapToCardMm({x:sample.right,y:sample.y});
+          return distance(leftMm,rightMm);
+        })
+        .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
+        .map((value)=>Number(value.toFixed(2)));
+    } catch {
+      return fourMagnetSamples
+        .map((sample)=>{
+          const cardReferencePx = cardWidthAtImageY(sample.y,source.width,source.height);
+          if(!cardReferencePx||cardReferencePx<=0) return NaN;
+          return sample.width / cardReferencePx * 85.6;
+        })
+        .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
+        .map((value)=>Number(value.toFixed(2)));
+    }
+  })();
+
   return (
     <main className="app">
       <header className="brand">
@@ -1249,7 +1284,7 @@ export default function App() {
           )}
           {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
             <AdminCalibration
-              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize }}
+              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: fourMagnetWidthsMm }}
               calibrationConfidence={calibrationConfidence}
               zoom={zoom}
               defaultMeasurementType={measurementMode}
