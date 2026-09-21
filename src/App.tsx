@@ -1209,8 +1209,9 @@ export default function App() {
             )}
             {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
-                <span>ARO PROVÁVEL:</span>
+                <span>ARO AJUSTADO:</span>
                 <strong>{result.ringSize}</strong>
+                <small>Conforto: {clamp(result.ringSize + 1, 1, 40)}</small>
               </div>
             )}
             {phase === "finger" && pixelsPerMm && tryOn && (
@@ -1264,15 +1265,14 @@ export default function App() {
 
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
-              <strong>Aro provável: {result.ringSize}</strong>
+              <strong>Aro ajustado: {result.ringSize}</strong>
+              {measurementMode === "finger" && <span>Aro de conforto: {clamp(result.ringSize + 1, 1, 40)}</span>}
               {diameterPhotoTestMode && <span>Diâmetro interno medido: {result.rawWidthMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>Diâmetro ajustado para 94%: {result.widthMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
-              {diameterPhotoTestMode && <span>{result.nearBoundary ? "Zona morta ativa" : "Fora da zona morta"}{result.boundaryDistanceMm !== null ? " · " + result.boundaryDistanceMm.toFixed(2) + " mm da divisão" : ""}</span>}
               {!diameterPhotoTestMode && measurementMode === "finger" && (
                 <>
                   <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
-                  <span>{result.nearBoundary ? "Zona morta ativa" : "Fora da zona morta"}{result.boundaryDistanceMm !== null ? " · " + result.boundaryDistanceMm.toFixed(2) + " mm da divisão" : ""}</span>
                 </>
               )}
               {!diameterPhotoTestMode && measurementMode === "anelimetro" && (
