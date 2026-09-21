@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Teste isolado - Diâmetro interno</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#161616;background:#f3f4f6}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px}
+    .wrap{max-width:760px;margin:0 auto}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:20px;padding:24px;box-shadow:0 12px 35px rgba(0,0,0,.07)}
+    h1{font-size:24px;margin:0 0 8px}
+    .muted{color:#6b7280;margin:0 0 22px;line-height:1.45}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    label{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:700;color:#374151}
+    input{width:100%;border:1px solid #d1d5db;border-radius:12px;padding:13px 14px;font-size:17px;background:#fff}
+    .result{margin-top:22px;border-radius:16px;padding:20px;background:#111827;color:#fff}
+    .ring{font-size:42px;font-weight:800;line-height:1}
+    .rows{display:grid;gap:8px;margin-top:15px;font-size:14px}
+    .row{display:flex;justify-content:space-between;gap:16px}
+    .warning{margin-top:14px;border-radius:12px;padding:12px 14px;background:#fef3c7;color:#92400e;font-weight:700}
+    .ok{margin-top:14px;border-radius:12px;padding:12px 14px;background:#dcfce7;color:#166534;font-weight:700}
+    .table{margin-top:22px;overflow:auto;border:1px solid #e5e7eb;border-radius:14px}
+    table{width:100%;border-collapse:collapse;font-size:13px;background:#fff}
+    th,td{padding:10px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap}
+    th:first-child,td:first-child{text-align:left}
+    tr.active{background:#eef2ff;font-weight:800}
+    .note{font-size:12px;color:#6b7280;margin-top:16px;line-height:1.45}
+    @media(max-width:620px){body{padding:12px}.card{padding:18px}.grid{grid-template-columns:1fr}.ring{font-size:36px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <h1>Teste isolado — diâmetro interno</h1>
+      <p class="muted">Este teste não usa MAB do dedo, curva dedo→anelímetro nem as regras atuais. Ele trabalha somente com diâmetro interno medido, calibração e zona morta.</p>
+
+      <div class="grid">
+        <label>
+          Diâmetro interno medido (mm)
+          <input id="diameter" type="number" inputmode="decimal" step="0.01" min="10" max="35" value="20.68" />
+        </label>
+        <label>
+          Calibração do cartão (%)
+          <input id="calibration" type="number" inputmode="decimal" step="1" min="1" max="100" value="94" />
+        </label>
+        <label>
+          Referência de calibração (%)
+          <input id="reference" type="number" inputmode="decimal" step="1" min="1" max="100" value="94" />
+        </label>
+        <label>
+          Zona morta perto da divisão (mm)
+          <input id="deadZone" type="number" inputmode="decimal" step="0.01" min="0" max="0.30" value="0.05" />
+        </label>
+      </div>
+
+      <div class="result">
+        <div>Aro calculado</div>
+        <div class="ring" id="ring">25</div>
+        <div class="rows">
+          <div class="row"><span>Diâmetro medido</span><strong id="raw">20,68 mm</strong></div>
+          <div class="row"><span>Diâmetro ajustado</span><strong id="adjusted">20,68 mm</strong></div>
+          <div class="row"><span>Diâmetro de referência do aro</span><strong id="referenceDiameter">20,68 mm</strong></div>
+          <div class="row"><span>Diferença para a referência</span><strong id="difference">0,00 mm</strong></div>
+        </div>
+        <div id="status" class="ok">Fora da zona morta.</div>
+      </div>
+
+      <div class="table">
+        <table>
+          <thead><tr><th>Aro</th><th>Diâmetro interno</th><th>Limite inferior</th><th>Limite superior</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <p class="note">Ajuste experimental: diâmetro ajustado = diâmetro medido × (referência de calibração / calibração atual). A página é isolada para podermos validar essa hipótese sem alterar o cálculo principal do sistema.</p>
+    </section>
+  </main>
+
+  <script>
+    const rings = [
+      [1,13.05],[2,13.37],[3,13.68],[4,14.01],[5,14.32],[6,14.64],[7,14.95],[8,15.28],[9,15.60],[10,15.92],
+      [11,16.24],[12,16.55],[13,16.87],[14,17.19],[15,17.50],[16,17.83],[17,18.14],[18,18.46],[19,18.76],[20,19.10],
+      [21,19.42],[22,19.77],[23,20.05],[24,20.37],[25,20.68],[26,21.04],[27,21.37],[28,21.68],[29,21.96],[30,22.28],
+      [31,22.60],[32,22.92],[33,23.24],[34,23.55],[35,23.87],[36,24.19],[37,24.51],[38,24.83],[39,25.15],[40,25.46]
+    ];
+
+    const el = id => document.getElementById(id);
+    const fmt = n => Number(n).toFixed(2).replace(".", ",");
+
+    function bounds(i){
+      const current = rings[i][1];
+      const lower = i === 0 ? -Infinity : (rings[i-1][1] + current) / 2;
+      const upper = i === rings.length - 1 ? Infinity : (current + rings[i+1][1]) / 2;
+      return { lower, upper };
+    }
+
+    function calculate(){
+      const raw = Number(el("diameter").value);
+      const calibration = Number(el("calibration").value);
+      const reference = Number(el("reference").value);
+      const deadZone = Math.max(0, Number(el("deadZone").value) || 0);
+      if(!Number.isFinite(raw) || !Number.isFinite(calibration) || calibration <= 0 || !Number.isFinite(reference) || reference <= 0) return;
+
+      const adjusted = raw * (reference / calibration);
+
+      let selectedIndex = rings.length - 1;
+      for(let i=0;i<rings.length;i++){
+        const {upper} = bounds(i);
+        if(adjusted < upper){ selectedIndex = i; break; }
+      }
+
+      const [ring, diameter] = rings[selectedIndex];
+      const {lower, upper} = bounds(selectedIndex);
+      const lowerDistance = Number.isFinite(lower) ? Math.abs(adjusted - lower) : Infinity;
+      const upperDistance = Number.isFinite(upper) ? Math.abs(upper - adjusted) : Infinity;
+      const boundaryDistance = Math.min(lowerDistance, upperDistance);
+      const nearBoundary = boundaryDistance <= deadZone;
+
+      el("ring").textContent = String(ring);
+      el("raw").textContent = fmt(raw) + " mm";
+      el("adjusted").textContent = fmt(adjusted) + " mm";
+      el("referenceDiameter").textContent = fmt(diameter) + " mm";
+      const diff = adjusted - diameter;
+      el("difference").textContent = (diff >= 0 ? "+" : "") + fmt(diff) + " mm";
+
+      const status = el("status");
+      status.className = nearBoundary ? "warning" : "ok";
+      status.textContent = nearBoundary
+        ? "Zona morta: leitura a " + fmt(boundaryDistance) + " mm da divisão entre dois aros."
+        : "Fora da zona morta. Distância da divisão mais próxima: " + fmt(boundaryDistance) + " mm.";
+
+      const tbody = el("tbody");
+      tbody.innerHTML = rings.map((item,i)=>{
+        const b = bounds(i);
+        return '<tr class="' + (i===selectedIndex?'active':'') + '"><td>' + item[0] + '</td><td>' + fmt(item[1]) + ' mm</td><td>' +
+          (Number.isFinite(b.lower)?fmt(b.lower)+' mm':'—') + '</td><td>' +
+          (Number.isFinite(b.upper)?fmt(b.upper)+' mm':'—') + '</td></tr>';
+      }).join("");
+    }
+
+    ["diameter","calibration","reference","deadZone"].forEach(id => el(id).addEventListener("input", calculate));
+    calculate();
+  </script>
+</body>
+</html>
