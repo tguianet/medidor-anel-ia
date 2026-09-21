@@ -187,18 +187,50 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
   return match?.ringSize ?? 35;
 };
 
-// Correlação dedo -> anelímetro obtida a partir dos quatro testes reais
-// confirmados nesta calibração:
+// Correlação dedo -> anelímetro baseada nos testes reais confirmados.
+// Em vez de uma curva rígida única, usamos uma transformação por trechos.
+// Isso permite uma "faixa estável" para o mesmo aro quando o dedo varia
+// alguns décimos entre capturas por posição, pressão e formato.
+//
+// Pontos confirmados:
 // 19,19 -> aro 17 (~16,90 no anelímetro)
 // 21,01 -> aro 25 (~19,50 no anelímetro)
+// 21,67 -> aro 25 (~19,50 no anelímetro)
 // 23,06 -> aro 30 (~20,90 no anelímetro)
 // 26,24 -> aro 33 (~21,70 no anelímetro)
-// A saída desta curva entra na MESMA tabela de faixas do anelímetro.
-export const fingerMabToGaugeEquivalent = (normalizedFingerMabMm: number) => (
-  -0.120496 * normalizedFingerMabMm * normalizedFingerMabMm
-  + 6.141391 * normalizedFingerMabMm
-  - 56.512581
-);
+//
+// A faixa 21,01–21,67 fica estabilizada no equivalente do aro 25.
+// Fora dela, interpolamos suavemente entre os pontos confirmados.
+export const fingerMabToGaugeEquivalent = (x: number) => {
+  const lerp = (x0: number, y0: number, x1: number, y1: number, value: number) => (
+    y0 + ((value - x0) / (x1 - x0)) * (y1 - y0)
+  );
+
+  if (x <= 19.19) {
+    // Extrapola usando a inclinação do primeiro trecho conhecido.
+    return lerp(19.19, 16.90, 21.01, 19.50, x);
+  }
+
+  if (x < 21.01) {
+    return lerp(19.19, 16.90, 21.01, 19.50, x);
+  }
+
+  if (x <= 21.67) {
+    // Zona estável confirmada para aro 25.
+    return 19.50;
+  }
+
+  if (x < 23.06) {
+    return lerp(21.67, 19.50, 23.06, 20.90, x);
+  }
+
+  if (x < 26.24) {
+    return lerp(23.06, 20.90, 26.24, 21.70, x);
+  }
+
+  // Extrapola usando a inclinação do último trecho conhecido.
+  return lerp(23.06, 20.90, 26.24, 21.70, x);
+};
 
 export const computeRingResult = (
   rawWidthMm: number,
