@@ -82,6 +82,16 @@ export const INNER_DIAMETER_OFFSET_MM = 1.73;
 // indicação final não fique apertada no dedo.
 export const COMFORT_RING_OFFSET = 1;
 
+// Curva provisória do modo dedo, obtida pela correlação dos pontos reais
+// aro 17, 24 e 32. O objetivo desta fase é testar a matemática sem aplicar
+// correções manuais por faixa nem regras aprendidas sobre o resultado do dedo.
+export const FINGER_RING_SLOPE = 1.807461821;
+export const FINGER_RING_INTERCEPT = -15.009085637;
+
+// Zona morta em milímetros da largura do dedo. Próximo da fronteira entre
+// dois aros, preferimos o aro maior para evitar oscilação por décimos de mm.
+export const FINGER_RING_DEAD_ZONE_MM = 0.15;
+
 export const estimateInnerDiameter = (measuredWidthMm: number) => (
   measuredWidthMm * INNER_DIAMETER_SLOPE + INNER_DIAMETER_OFFSET_MM
 );
@@ -117,6 +127,9 @@ export type RingResult = {
   ringSize: number;
   calculationMode: "formula";
   appliedRuleOffset: number | null;
+  continuousRing: number | null;
+  nearBoundary: boolean;
+  boundaryDistanceMm: number | null;
 };
 
 const findRingBySize = (size: number) => (
@@ -128,10 +141,41 @@ export const computeRingResult = (
   rules: CalibrationRule[] = [],
   applyBenchCalibration = true,
 ): RingResult => {
-  // A curva MA -> PQ foi obtida com anelímetro rígido. Em dedo real ela
-  // supercorrigiu os testes iniciais, então só é aplicada quando explicitamente
-  // habilitada pelo modo anelímetro.
-  const widthMm = applyBenchCalibration ? calibrateMeasuredWidthMm(rawWidthMm) : rawWidthMm;
+  // MODO DEDO — teste matemático da curva provisória.
+  // Não usa REAL_FIT_REFERENCES nem regras aprendidas: queremos observar
+  // exatamente o comportamento da fórmula nos próximos testes reais.
+  if (!applyBenchCalibration) {
+    const continuousRing = FINGER_RING_SLOPE * rawWidthMm + FINGER_RING_INTERCEPT;
+    const lowerRing = Math.floor(continuousRing);
+    const boundaryRingValue = lowerRing + 0.5;
+    const boundaryDistanceMm = Math.abs(continuousRing - boundaryRingValue) / FINGER_RING_SLOPE;
+    const nearBoundary = boundaryDistanceMm <= FINGER_RING_DEAD_ZONE_MM;
+
+    // Fora da zona morta: arredondamento matemático normal.
+    // Dentro da zona: mantém o aro superior para evitar ficar alternando
+    // entre dois números por pequenas variações da leitura.
+    const provisionalSize = nearBoundary
+      ? lowerRing + 1
+      : Math.round(continuousRing);
+    const ringSize = clamp(provisionalSize, 1, 40);
+    const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
+
+    return {
+      rawWidthMm,
+      widthMm: rawWidthMm,
+      measurementCorrectionMm: 0,
+      equivalentDiameterMm: selectedRing.diameterMm,
+      ringSize: selectedRing.size,
+      calculationMode: "formula",
+      appliedRuleOffset: null,
+      continuousRing,
+      nearBoundary,
+      boundaryDistanceMm: nearBoundary ? boundaryDistanceMm : null,
+    };
+  }
+
+  // MODO ANELÍMETRO — mantém a matemática existente nesta fase de teste.
+  const widthMm = calibrateMeasuredWidthMm(rawWidthMm);
   const equivalentDiameterMm = estimateInnerDiameter(widthMm);
 
   const closestRing = RING_DIAMETER_TABLE.reduce((closest, candidate) =>
@@ -140,9 +184,6 @@ export const computeRingResult = (
   const confirmedFit = REAL_FIT_REFERENCES.find((reference) => (
     widthMm >= reference.minWidthMm && widthMm <= reference.maxWidthMm
   ));
-  // Referências reais já representam o aro FINAL confirmado no dedo.
-  // Não aplicamos novamente a margem de conforto sobre elas, senão somamos
-  // um aro extra em dados que já foram validados na prática.
   const baseRing = confirmedFit
     ? findRingBySize(confirmedFit.ringSize) || closestRing
     : findRingBySize(clamp(closestRing.size + COMFORT_RING_OFFSET, 1, 40)) || closestRing;
@@ -162,5 +203,8 @@ export const computeRingResult = (
     ringSize: selectedRing.size,
     calculationMode: "formula",
     appliedRuleOffset: matchingRule?.offset ?? null,
+    continuousRing: null,
+    nearBoundary: false,
+    boundaryDistanceMm: null,
   };
 };
