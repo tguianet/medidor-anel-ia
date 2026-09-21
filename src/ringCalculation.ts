@@ -187,7 +187,7 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
   return match?.ringSize ?? 35;
 };
 
-export const ringFromInnerDiameter = (diameterMm: number, deadZoneMm = 0.05) => {
+export const ringFromInnerDiameter = (diameterMm: number, deadZoneMm = 0.10) => {
   let selectedIndex = RING_DIAMETER_TABLE.length - 1;
 
   for (let i = 0; i < RING_DIAMETER_TABLE.length; i++) {
@@ -203,24 +203,31 @@ export const ringFromInnerDiameter = (diameterMm: number, deadZoneMm = 0.05) => 
     }
   }
 
-  const selectedRing = RING_DIAMETER_TABLE[selectedIndex];
+  const baseRing = RING_DIAMETER_TABLE[selectedIndex];
   const previous = RING_DIAMETER_TABLE[selectedIndex - 1];
   const next = RING_DIAMETER_TABLE[selectedIndex + 1];
   const lowerBoundary = previous
-    ? (previous.diameterMm + selectedRing.diameterMm) / 2
+    ? (previous.diameterMm + baseRing.diameterMm) / 2
     : Number.NEGATIVE_INFINITY;
   const upperBoundary = next
-    ? (selectedRing.diameterMm + next.diameterMm) / 2
+    ? (baseRing.diameterMm + next.diameterMm) / 2
     : Number.POSITIVE_INFINITY;
 
-  const boundaryDistanceMm = Math.min(
-    Math.abs(diameterMm - lowerBoundary),
-    Math.abs(upperBoundary - diameterMm),
-  );
+  const lowerDistance = Math.abs(diameterMm - lowerBoundary);
+  const upperDistance = Math.abs(upperBoundary - diameterMm);
+  const boundaryDistanceMm = Math.min(lowerDistance, upperDistance);
+  const nearBoundary = Number.isFinite(boundaryDistanceMm) && boundaryDistanceMm <= deadZoneMm;
+
+  // Zona morta de conforto: quando a leitura ainda caiu no aro menor,
+  // mas está a até 0,10 mm da divisão superior, indicamos o próximo aro.
+  // Ex.: 22,05 mm fica 0,07 mm abaixo da divisão 29/30 (~22,12 mm) -> aro 30.
+  if (next && diameterMm < upperBoundary && upperDistance <= deadZoneMm) {
+    selectedIndex += 1;
+  }
 
   return {
-    selectedRing,
-    nearBoundary: Number.isFinite(boundaryDistanceMm) && boundaryDistanceMm <= deadZoneMm,
+    selectedRing: RING_DIAMETER_TABLE[selectedIndex],
+    nearBoundary,
     boundaryDistanceMm: Number.isFinite(boundaryDistanceMm) ? boundaryDistanceMm : null,
   };
 };
@@ -280,7 +287,7 @@ export const fingerMabToGaugeEquivalent = (x: number) => {
 export const computeDiameterOnlyTestResult = (
   rawDiameterMm: number,
   calibrationConfidence = MAB_REFERENCE_CALIBRATION,
-  deadZoneMm = 0.05,
+  deadZoneMm = 0.10,
 ): RingResult => {
   const diameterMm = normalizeMabTo94(rawDiameterMm, calibrationConfidence);
 
@@ -335,7 +342,7 @@ export const computeRingResult = (
   // Não passa mais pela correlação dedo -> MAB do anelímetro.
   const equivalentDiameterMm = estimateInnerDiameter(widthMm);
   const { selectedRing, nearBoundary, boundaryDistanceMm } =
-    ringFromInnerDiameter(equivalentDiameterMm, 0.05);
+    ringFromInnerDiameter(equivalentDiameterMm, 0.10);
 
   return {
     rawWidthMm,
