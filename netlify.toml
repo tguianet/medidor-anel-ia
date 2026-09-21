@@ -7,3 +7,9 @@
 
 [functions]
   directory = "netlify/functions"
+
+[[redirects]]
+  from = "/dados-calibracao"
+  to = "/.netlify/functions/calibration?summary=1"
+  status = 200
+  force = true
