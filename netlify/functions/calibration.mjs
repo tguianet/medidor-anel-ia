@@ -188,6 +188,7 @@ export default async (request, context) => {
           actualDiameterMm: test.actualDiameterMm ?? null,
           calibrationConfidence: test.calibrationConfidence,
           zoom: test.zoom,
+          magnetWidthsMm: Array.isArray(test.magnetWidthsMm) ? test.magnetWidthsMm : [],
         }));
 
       return json({
@@ -213,6 +214,13 @@ export default async (request, context) => {
       const actualRing = Number(body.actualRing);
       const measurementType = body.measurementType === "anelimetro" ? "anelimetro" : "finger";
       const actualDiameterMm = body.actualDiameterMm == null || body.actualDiameterMm === "" ? null : Number(body.actualDiameterMm);
+      const magnetWidthsMm = Array.isArray(body.magnetWidthsMm)
+        ? body.magnetWidthsMm
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value) && value > 0 && value < 45)
+            .slice(0, 4)
+            .map((value) => Number(value.toFixed(2)))
+        : [];
       if (!(widthMm >= 10 && widthMm <= 40) || !(predictedRing >= 1 && predictedRing <= 40) || !(actualRing >= 1 && actualRing <= 40)) {
         return json({ error: "Dados da medição inválidos." }, 400);
       }
@@ -230,6 +238,7 @@ export default async (request, context) => {
         note: String(body.note || "").slice(0, 180),
         measurementType,
         actualDiameterMm: Number.isFinite(actualDiameterMm) ? Number(actualDiameterMm.toFixed(2)) : null,
+        magnetWidthsMm,
         source: "live-test",
         analysisEligible: true,
       };
