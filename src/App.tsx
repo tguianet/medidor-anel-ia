@@ -969,7 +969,7 @@ export default function App() {
 
   const result = useMemo(() => {
     if (liveWidthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
-    return computeRingResult(liveWidthMm, calibrationRules, measurementMode === "anelimetro");
+    return computeRingResult(liveWidthMm, calibrationRules, measurementMode === "anelimetro", calibrationConfidence);
   }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence]);
 
   const resetPhoto = () => {
@@ -1235,7 +1235,7 @@ export default function App() {
                   <span>Correção de bancada: {result.measurementCorrectionMm >= 0 ? "+" : ""}{result.measurementCorrectionMm.toFixed(2)} mm</span>
                 </>
               ) : (
-                <span>Modo dedo: curva do anelímetro não aplicada</span>
+                <span>MAB normalizado para 94%: {result.widthMm.toFixed(2)} mm</span>
               )}
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
