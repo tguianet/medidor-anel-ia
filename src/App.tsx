@@ -1240,7 +1240,6 @@ export default function App() {
               <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
               <span>Calibração do cartão: {calibrationConfidence}%</span>
               <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>
-              {!tryOn && <button className="try-on-button" type="button" onClick={() => setTryOn(true)}>Experimentar no meu dedo</button>}
             </div>
           )}
           {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
