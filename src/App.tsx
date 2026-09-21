@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
 import AdminCalibration from "./AdminCalibration";
-import { clamp, computeRingResult, type CalibrationRule } from "./ringCalculation";
+import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "./ringCalculation";
 import { assessCardQuadGeometry, homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
@@ -73,6 +73,7 @@ export default function App() {
   const [showcaseWidth, setShowcaseWidth] = useState(24);
   const [showcaseAngle, setShowcaseAngle] = useState(0);
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
+  const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
 
   useEffect(() => {
@@ -969,8 +970,9 @@ export default function App() {
 
   const result = useMemo(() => {
     if (liveWidthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
+    if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence, 0.05);
     return computeRingResult(liveWidthMm, calibrationRules, measurementMode === "anelimetro", calibrationConfidence);
-  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence]);
+  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
 
   const resetPhoto = () => {
     setPhoto("");
@@ -1065,8 +1067,9 @@ export default function App() {
       {stage === "intro" && (
         <IntroScreen
           error={camera.error}
-          onMeasureFinger={() => { setMeasurementMode("finger"); void openCamera(); }}
-          onTestGauge={() => { setMeasurementMode("anelimetro"); void openCamera(); }}
+          onMeasureFinger={() => { setDiameterPhotoTestMode(false); setMeasurementMode("finger"); void openCamera(); }}
+          onTestGauge={() => { setDiameterPhotoTestMode(false); setMeasurementMode("anelimetro"); void openCamera(); }}
+          onTestDiameterPhoto={() => { setDiameterPhotoTestMode(true); setMeasurementMode("finger"); void openCamera(); }}
         />
       )}
 
@@ -1102,8 +1105,8 @@ export default function App() {
 
       {stage === "review" && (
         <section className="panel review">
-          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : "2. MEÇA O DEDO"}</span>
-          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Meça onde o anel vai ficar"}</h1>
+          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : diameterPhotoTestMode ? "2. MEÇA O DIÂMETRO INTERNO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : "2. MEÇA O DEDO"}</span>
+          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Meça onde o anel vai ficar"}</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -1262,6 +1265,10 @@ export default function App() {
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>Aro provável: {result.ringSize}</strong>
+              {diameterPhotoTestMode && <span>Diâmetro interno medido: {result.rawWidthMm.toFixed(2)} mm</span>}
+              {diameterPhotoTestMode && <span>Diâmetro ajustado para 94%: {result.widthMm.toFixed(2)} mm</span>}
+              {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
+              {diameterPhotoTestMode && <span>{result.nearBoundary ? "Zona morta ativa" : "Fora da zona morta"}{result.boundaryDistanceMm !== null ? " · " + result.boundaryDistanceMm.toFixed(2) + " mm da divisão" : ""}</span>}
               <span>Faixa recomendada: aro {clamp(result.ringSize - 1, 1, 40)} a {clamp(result.ringSize + 1, 1, 40)}</span>
               <span>MA bruto: {result.rawWidthMm.toFixed(1)} mm</span>
               {measurementMode === "anelimetro" ? (
@@ -1282,7 +1289,7 @@ export default function App() {
               <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>
             </div>
           )}
-          {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
+          {phase === "finger" && result && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
             <AdminCalibration
               measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: fourMagnetWidthsMm }}
               calibrationConfidence={calibrationConfidence}
