@@ -2,18 +2,124 @@ import { getStore } from "@netlify/blobs";
 import { randomUUID } from "node:crypto";
 
 const STORE_NAME = "ring-calibration-learning";
-// Nova fase de testes: qualquer dado anterior a este epoch pertence a versões
-// diferentes da matemática e não pode entrar na análise atual.
-const CALIBRATION_DATA_EPOCH = "2026-09-21T01:15:00.000Z";
 
-const ensureCalibrationEpoch = async (store) => {
-  const currentEpoch = await store.get("meta/data-epoch", { type: "text", consistency: "strong" });
-  if (currentEpoch === CALIBRATION_DATA_EPOCH) return;
+// Restaura a base histórica conhecida sem misturar versões diferentes na
+// aprendizagem automática. Os registros recuperados ficam no banco para
+// consulta, mas só entram nas curvas quando analysisEligible !== false.
+const RECOVERED_DATA_VERSION = "2026-09-21-full-restore-v1";
 
-  const { blobs } = await store.list({ prefix: "tests/" });
-  await Promise.all(blobs.map(({ key }) => store.delete(key)));
-  await store.delete("rules/current");
-  await store.set("meta/data-epoch", CALIBRATION_DATA_EPOCH);
+const RECOVERED_TESTS = [
+  // Referências reais de dedo já confirmadas em fases anteriores.
+  {
+    id: "recovered-finger-17",
+    createdAt: "2026-09-20T21:45:42.000Z",
+    widthMm: 17.70,
+    predictedRing: 15,
+    actualRing: 17,
+    error: 2,
+    calibrationConfidence: 92,
+    zoom: 1,
+    finger: "não informado",
+    hand: "não informada",
+    note: "Referência histórica real: largura ~17,7 mm, aro real 17. Algoritmo anterior indicou 15.",
+    measurementType: "finger",
+    actualDiameterMm: null,
+    source: "historical-recovered",
+    analysisEligible: false,
+  },
+  {
+    id: "recovered-finger-24",
+    createdAt: "2026-09-20T21:46:00.000Z",
+    widthMm: 21.60,
+    predictedRing: 24,
+    actualRing: 24,
+    error: 0,
+    calibrationConfidence: 0,
+    zoom: 1,
+    finger: "não informado",
+    hand: "não informada",
+    note: "Referência histórica de correlação: largura do dedo 21,60 mm, aro real 24. Predição original não preservada.",
+    measurementType: "finger",
+    actualDiameterMm: null,
+    source: "historical-recovered",
+    analysisEligible: false,
+  },
+  {
+    id: "recovered-finger-32",
+    createdAt: "2026-09-20T21:46:01.000Z",
+    widthMm: 26.00,
+    predictedRing: 32,
+    actualRing: 32,
+    error: 0,
+    calibrationConfidence: 0,
+    zoom: 1,
+    finger: "não informado",
+    hand: "não informada",
+    note: "Referência histórica de correlação: largura do dedo 26,00 mm, aro real 32. Predição original não preservada.",
+    measurementType: "finger",
+    actualDiameterMm: null,
+    source: "historical-recovered",
+    analysisEligible: false,
+  },
+
+  // Medições físicas do anelímetro recuperadas da documentação.
+  { id: "recovered-gauge-14", createdAt: "2026-09-20T21:47:14.000Z", widthMm: 18.20, predictedRing: 14, actualRing: 14, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 18,20 / DI 17,09. Ponto fora da série; repetir antes de usar na curva.", measurementType: "anelimetro", actualDiameterMm: 17.09, source: "historical-recovered", analysisEligible: false },
+  { id: "recovered-gauge-16", createdAt: "2026-09-20T21:47:16.000Z", widthMm: 18.40, predictedRing: 16, actualRing: 16, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 18,40 / DI 17,83.", measurementType: "anelimetro", actualDiameterMm: 17.83, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-20", createdAt: "2026-09-20T21:47:20.000Z", widthMm: 19.80, predictedRing: 20, actualRing: 20, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 19,80 / DI 19,10. Valor corrigido na documentação.", measurementType: "anelimetro", actualDiameterMm: 19.10, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-21a", createdAt: "2026-09-20T21:47:21.000Z", widthMm: 19.90, predictedRing: 21, actualRing: 21, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "Referência conflitante do aro 21: LM 19,90 / DI 19,42.", measurementType: "anelimetro", actualDiameterMm: 19.42, source: "historical-recovered", analysisEligible: false },
+  { id: "recovered-gauge-21b", createdAt: "2026-09-20T21:47:22.000Z", widthMm: 20.50, predictedRing: 21, actualRing: 21, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "Referência conflitante do aro 21: LM 20,50 / DI 19,29.", measurementType: "anelimetro", actualDiameterMm: 19.29, source: "historical-recovered", analysisEligible: false },
+  { id: "recovered-gauge-23", createdAt: "2026-09-20T21:47:23.000Z", widthMm: 21.00, predictedRing: 23, actualRing: 23, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 21,00 / DI 20,05.", measurementType: "anelimetro", actualDiameterMm: 20.05, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-25", createdAt: "2026-09-20T21:47:25.000Z", widthMm: 21.80, predictedRing: 25, actualRing: 25, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 21,80 / DI 20,68.", measurementType: "anelimetro", actualDiameterMm: 20.68, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-26", createdAt: "2026-09-20T21:47:26.000Z", widthMm: 22.00, predictedRing: 26, actualRing: 26, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 22,00 / DI 21,04.", measurementType: "anelimetro", actualDiameterMm: 21.04, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-27", createdAt: "2026-09-20T21:47:27.000Z", widthMm: 22.50, predictedRing: 27, actualRing: 27, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 22,50 / DI 21,37.", measurementType: "anelimetro", actualDiameterMm: 21.37, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-28", createdAt: "2026-09-20T21:47:28.000Z", widthMm: 22.90, predictedRing: 28, actualRing: 28, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 22,90 / DI 21,68. Faixa de DI também registrada como 21,68–21,96.", measurementType: "anelimetro", actualDiameterMm: 21.68, source: "historical-recovered", analysisEligible: true },
+  { id: "recovered-gauge-31", createdAt: "2026-09-20T21:47:31.000Z", widthMm: 24.00, predictedRing: 31, actualRing: 31, error: 0, calibrationConfidence: 0, zoom: 1, finger: "anelímetro", hand: "n/a", note: "LM 24,00 / DI 22,60. Mantido como referência especial até nova confirmação.", measurementType: "anelimetro", actualDiameterMm: 22.60, source: "historical-recovered", analysisEligible: false },
+];
+
+const RECOVERED_REFERENCES = {
+  version: RECOVERED_DATA_VERSION,
+  anelimetroCurve: {
+    slope: 0.853012552,
+    intercept: 2.157198047,
+    formula: "DI = 0.853012552 * LM + 2.157198047",
+    note: "Curva provisória própria do modo anelímetro; converter DI diretamente pela tabela oficial sem +1 de conforto.",
+  },
+  fingerCurve: {
+    slope: 1.807461821,
+    intercept: -15.009085637,
+    formula: "aro = 1.807461821 * largura_do_dedo_mm - 15.009085637",
+    deadZoneMm: 0.15,
+    note: "Curva provisória do modo dedo; manter separada do anelímetro.",
+  },
+  ring32: {
+    ringSize: 32,
+    internalDiameterMm: 22.92,
+    lmMm: null,
+    note: "DI conhecido; LM não confirmado.",
+  },
+  legacyBenchMaPq: [
+    { ringSize: 14, maMm: 15.5, pqMm: 15.4 },
+    { ringSize: 16, maMm: 16.2, pqMm: 16.5 },
+    { ringSize: 18, maMm: 16.9, pqMm: 17.4 },
+    { ringSize: 20, maMm: 17.7, pqMm: 18.2 },
+    { ringSize: 22, maMm: 18.4, pqMm: 19.0 },
+    { ringSize: 24, maMm: 19.1, pqMm: 19.8 },
+    { ringSize: 26, maMm: 19.6, pqMm: 20.6 },
+    { ringSize: 28, maMm: 20.1, pqMm: 21.4 },
+    { ringSize: 30, maMm: 20.8, pqMm: 22.0 },
+    { ringSize: 32, maMm: 21.7, pqMm: 22.7 },
+  ],
+};
+
+const ensureRecoveredCalibrationData = async (store) => {
+  const restoredVersion = await store.get("meta/recovered-data-version", { type: "text", consistency: "strong" });
+  if (restoredVersion === RECOVERED_DATA_VERSION) return;
+
+  for (const record of RECOVERED_TESTS) {
+    await store.setJSON(`tests/recovered/${record.id}`, record, { onlyIfNew: true });
+  }
+  await store.setJSON("references/recovered-calibration", RECOVERED_REFERENCES);
+  await store.set("meta/recovered-data-version", RECOVERED_DATA_VERSION);
 };
 
 const json = (data, status = 200, extraHeaders = {}) => new Response(JSON.stringify(data), {
@@ -31,7 +137,7 @@ const readRules = async (store) => (await store.get("rules/current", { type: "js
 
 const makeSuggestions = (tests, rules) => {
   const groups = new Map();
-  for (const test of tests.filter((item) => item.measurementType !== "anelimetro")) {
+  for (const test of tests.filter((item) => item.measurementType !== "anelimetro" && item.analysisEligible !== false)) {
     const bucket = Math.round(test.widthMm * 2) / 2;
     const key = `${test.predictedRing}:${bucket.toFixed(1)}`;
     const group = groups.get(key) || { key, bucket, predictedRing: test.predictedRing, values: [] };
@@ -65,7 +171,7 @@ const makeSuggestions = (tests, rules) => {
 // cliente. Cada ponto reúne as leituras feitas na mesma marca do anelímetro.
 const makeGaugeCurve = (tests) => {
   const groups = new Map();
-  for (const test of tests.filter((item) => item.measurementType === "anelimetro")) {
+  for (const test of tests.filter((item) => item.measurementType === "anelimetro" && item.analysisEligible !== false)) {
     const key = String(test.actualRing);
     const group = groups.get(key) || { ringSize: test.actualRing, widths: [], predictions: [], diameters: [] };
     group.widths.push(test.widthMm);
@@ -96,7 +202,7 @@ const responseData = (tests, rules) => ({
 
 export default async (request, context) => {
   const store = getStore(STORE_NAME);
-  await ensureCalibrationEpoch(store);
+  await ensureRecoveredCalibrationData(store);
   if (request.method === "GET") {
     const rules = await readRules(store);
     return json({ rules });
@@ -131,6 +237,8 @@ export default async (request, context) => {
         note: String(body.note || "").slice(0, 180),
         measurementType,
         actualDiameterMm: Number.isFinite(actualDiameterMm) ? Number(actualDiameterMm.toFixed(2)) : null,
+        source: "live-test",
+        analysisEligible: true,
       };
       await store.setJSON(`tests/${record.createdAt}-${record.id}`, record, { onlyIfNew: true });
       const [tests, rules] = await Promise.all([readTests(store), readRules(store)]);
