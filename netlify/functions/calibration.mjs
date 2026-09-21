@@ -2,6 +2,20 @@ import { getStore } from "@netlify/blobs";
 import { randomUUID } from "node:crypto";
 
 const STORE_NAME = "ring-calibration-learning";
+// Nova fase de testes: qualquer dado anterior a este epoch pertence a versões
+// diferentes da matemática e não pode entrar na análise atual.
+const CALIBRATION_DATA_EPOCH = "2026-09-21T01:15:00.000Z";
+
+const ensureCalibrationEpoch = async (store) => {
+  const currentEpoch = await store.get("meta/data-epoch", { type: "text", consistency: "strong" });
+  if (currentEpoch === CALIBRATION_DATA_EPOCH) return;
+
+  const { blobs } = await store.list({ prefix: "tests/" });
+  await Promise.all(blobs.map(({ key }) => store.delete(key)));
+  await store.delete("rules/current");
+  await store.set("meta/data-epoch", CALIBRATION_DATA_EPOCH);
+};
+
 const json = (data, status = 200, extraHeaders = {}) => new Response(JSON.stringify(data), {
   status,
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extraHeaders },
@@ -82,6 +96,7 @@ const responseData = (tests, rules) => ({
 
 export default async (request, context) => {
   const store = getStore(STORE_NAME);
+  await ensureCalibrationEpoch(store);
   if (request.method === "GET") {
     const rules = await readRules(store);
     return json({ rules });
