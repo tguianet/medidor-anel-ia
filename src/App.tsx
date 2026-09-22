@@ -1174,6 +1174,69 @@ export default function App() {
   })();
 
   const fourMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
+
+  const measurementAudit = (() => {
+    if(!fourMagnetSamples?.length) return null;
+
+    const rawWidthsPx=fourMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite).sort((a,b)=>a-b);
+    if(!rawWidthsPx.length) return null;
+
+    const centralWidthsPx =
+      rawWidthsPx.length>=4
+        ? rawWidthsPx.slice(1,-1)
+        : rawWidthsPx;
+
+    const usedWidthPx =
+      centralWidthsPx.reduce((sum,value)=>sum+value,0)/centralWidthsPx.length;
+
+    const cardScaleMmPerPx =
+      pixelsPerMm && pixelsPerMm>0
+        ? 1/pixelsPerMm
+        : null;
+
+    const fixedScaleMmPerPx =
+      measurementMode==="finger" && !diameterPhotoTestMode
+        ? TEST_FIXED_FINGER_SCALE_MM_PER_PX
+        : cardScaleMmPerPx;
+
+    const mmUsingFixedScale =
+      fixedScaleMmPerPx!==null
+        ? usedWidthPx*fixedScaleMmPerPx
+        : null;
+
+    const mmUsingCardScale =
+      cardScaleMmPerPx!==null
+        ? usedWidthPx*cardScaleMmPerPx
+        : null;
+
+    const scaleDifferencePercent =
+      cardScaleMmPerPx!==null
+        ? ((cardScaleMmPerPx-TEST_FIXED_FINGER_SCALE_MM_PER_PX)/TEST_FIXED_FINGER_SCALE_MM_PER_PX)*100
+        : null;
+
+    const spreadPx =
+      rawWidthsPx.length
+        ? rawWidthsPx[rawWidthsPx.length-1]-rawWidthsPx[0]
+        : 0;
+
+    const spreadPercent =
+      usedWidthPx>0
+        ? spreadPx/usedWidthPx*100
+        : 0;
+
+    return {
+      rawWidthsPx,
+      usedWidthPx,
+      cardScaleMmPerPx,
+      fixedScaleMmPerPx,
+      mmUsingFixedScale,
+      mmUsingCardScale,
+      scaleDifferencePercent,
+      spreadPx,
+      spreadPercent,
+    };
+  })();
+
   const fourMagnetWidthsMm = (() => {
     if(!fourMagnetSamples?.length||!pixelsPerMm) return [] as number[];
     const mmPerPx =
@@ -1514,6 +1577,29 @@ export default function App() {
               {measurementMode === "finger" && !diameterPhotoTestMode && (
                 <>
                   <span>Escala fixa de teste aplicada: {TEST_FIXED_FINGER_SCALE_MM_PER_PX.toFixed(4)} mm/px</span>
+                  {measurementAudit && (
+                    <>
+                      <strong>DIAGNÓSTICO DA MEDIÇÃO</strong>
+                      <span>Larguras detectadas: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                      <span>Largura em px usada no cálculo: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
+                      <span>Variação dos 4 pontos: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
+                      {measurementAudit.cardScaleMmPerPx !== null && (
+                        <span>Escala do cartão: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>
+                      )}
+                      {measurementAudit.scaleDifferencePercent !== null && (
+                        <span>Diferença cartão × escala fixa: {measurementAudit.scaleDifferencePercent >= 0 ? "+" : ""}{measurementAudit.scaleDifferencePercent.toFixed(2)}%</span>
+                      )}
+                      {measurementAudit.mmUsingCardScale !== null && (
+                        <span>Se usasse a escala do cartão: {measurementAudit.mmUsingCardScale.toFixed(2)} mm</span>
+                      )}
+                      {measurementAudit.mmUsingFixedScale !== null && (
+                        <span>Com escala fixa: {measurementAudit.mmUsingFixedScale.toFixed(2)} mm</span>
+                      )}
+                      {referenceCardLengthPx !== null && (
+                        <span>Foto 1 do cartão: 85,60 mm = {referenceCardLengthPx.toFixed(1)} px</span>
+                      )}
+                    </>
+                  )}
                 </>
               )}
               {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
