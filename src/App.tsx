@@ -896,7 +896,14 @@ export default function App() {
       if(match){
         const edge=match[1] as CardEdge;
         if(measurementMode==="finger" && !diameterPhotoTestMode && fingerCardCalibrationStep!=="done"){
-          setCardLineLocked((current)=>({...current,[edge]:true}));
+          if(edge==="left" || edge==="right"){
+            // Laterais magnéticas: ao soltar, encaixam na borda real do cartão.
+            snapCardLine(edge);
+          }else if(edge==="bottom"){
+            // Linha central continua manual. As bolinhas são apenas handles;
+            // a medida válida é SEMPRE o trecho entre as duas interseções.
+            setCardLineLocked((current)=>({...current,bottom:true}));
+          }
         }else{
           snapCardLine(edge);
         }
@@ -1300,13 +1307,13 @@ export default function App() {
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
-                {fingerCardCalibrationStep === "reference" ? "Salvar reta de 85,60 mm e tirar 2ª foto" : "Usar esta reta e medir o dedo"}
+                {fingerCardCalibrationStep === "reference" ? "Salvar interseções de 85,60 mm e tirar 2ª foto" : "Usar interseções e medir o dedo"}
               </button>
               <div className="card-base-status">
                 <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — cartão em superfície reta" : "Foto 2 — cartão sobre o dedo"}</strong>
-                <span>Primeiro ajuste as duas linhas laterais exatamente nas bordas do cartão. Depois ajuste a linha central atravessando o cartão.</span>
-                <small>As interseções da linha central com as duas laterais definem automaticamente o segmento que vale 85,60 mm.</small>
-                <small>Faça o mesmo na segunda foto; a nova distância entre as interseções gera a escala px/mm usada no dedo.</small>
+                <span>Primeiro aproxime as duas linhas laterais das bordas do cartão e solte: elas encaixam magneticamente. Depois ajuste a linha central atravessando o cartão.</span>
+                <small>As bolinhas e as pontas podem ficar para fora. O único segmento que vale 85,60 mm é a distância entre as duas interseções da linha central com as laterais.</small>
+                <small>Na segunda foto repita o mesmo ajuste; a distância entre essas duas interseções gera a escala px/mm usada no dedo.</small>
               </div>
             </>
           )}
