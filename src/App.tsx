@@ -42,7 +42,7 @@ export default function App() {
   const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
   const [rightLine, setRightLine] = useState(38);
-  const [measureY, setMeasureY] = useState(50);
+  const [measureY, setMeasureY] = useState(60);
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -504,7 +504,7 @@ export default function App() {
       setLeftManualRefined(false);
       setRightManualRefined(false);
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
-      setMeasureY(clamp(dragStartRef.current.right + dy, 18, 76));
+      setMeasureY(clamp(dragStartRef.current.right + dy, 35, 82));
     }
     if (target === "pan") {
       setLeftLocked(false);
@@ -1209,7 +1209,7 @@ export default function App() {
           {phase === "finger" && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Linha única de medição ativa</strong>
-              <span>{singleFingerSample ? "Leitura válida no ponto central do dedo" : "Ajuste a linha horizontal sobre o ponto que deseja medir"}</span>
+              <span>{singleFingerSample ? "Leitura válida no ponto central do dedo" : "Posicione a linha horizontal mais próxima da base do dedo, onde o anel assenta"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
