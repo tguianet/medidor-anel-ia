@@ -199,14 +199,11 @@ export const adjustFingerMeasurementByCalibration = (
   if (!Number.isFinite(rawMm)) return rawMm;
   if (!Number.isFinite(calibrationConfidence)) return rawMm;
 
-  // Fórmula global única para todos os aros, derivada dos testes reais atuais.
-  // Correção = 0,355 + (94 - calibração) * 0,134 mm.
-  const correctionMm = clamp(
-    0.355 + (94 - calibrationConfidence) * 0.134,
-    -0.90,
-    1.20,
-  );
-  return rawMm + correctionMm;
+  // Neste teste a porcentagem não altera a escala. A medida física vem
+  // diretamente da homografia criada pelas quatro bordas do cartão.
+  // Mantemos a função para compatibilidade enquanto validamos a geometria.
+  void calibrationConfidence;
+  return rawMm;
 };
 
 export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
