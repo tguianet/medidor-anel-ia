@@ -14,7 +14,7 @@ import TryOnPanel from "./components/TryOnPanel";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
-const TEST_FIXED_FINGER_SCALE_MM_PER_PX = 0.1121;
+const TEST_FINGER_CARD_NORMALIZATION = 0.908;
 
 export default function App() {
   const camera = useCameraStream();
@@ -1078,15 +1078,18 @@ export default function App() {
     const widthsPx=samples?.length ? samples.map(s=>s.width) : [fallbackWidth];
 
     // TESTE CONTROLADO:
-    // no modo dedo, mantém toda a calibração visual do cartão e os 4 pontos
-    // magnéticos, mas converte a largura em pixels usando uma escala fixa.
-    // Isso serve apenas para validar se a instabilidade restante vem da escala.
-    const mmPerPx =
+    // usa a escala REAL obtida pelo cartão na segunda foto e, no modo dedo,
+    // aplica uma normalização provisória de 0,908 sobre a medida física bruta.
+    const cardScaleMmPerPx = 1/pixelsPerMm;
+    const normalization =
       measurementMode === "finger" && !diameterPhotoTestMode
-        ? TEST_FIXED_FINGER_SCALE_MM_PER_PX
-        : 1/pixelsPerMm;
+        ? TEST_FINGER_CARD_NORMALIZATION
+        : 1;
 
-    const widthsMm=widthsPx.map(w=>w*mmPerPx).filter(v=>Number.isFinite(v)&&v>0&&v<45).sort((a,b)=>a-b);
+    const widthsMm=widthsPx
+      .map(w=>w*cardScaleMmPerPx*normalization)
+      .filter(v=>Number.isFinite(v)&&v>0&&v<45)
+      .sort((a,b)=>a-b);
     if(!widthsMm.length) return null;
     if(widthsMm.length>=4){
       const middle=widthsMm.slice(1,-1);
@@ -1194,25 +1197,17 @@ export default function App() {
         ? 1/pixelsPerMm
         : null;
 
-    const fixedScaleMmPerPx =
-      measurementMode==="finger" && !diameterPhotoTestMode
-        ? TEST_FIXED_FINGER_SCALE_MM_PER_PX
-        : cardScaleMmPerPx;
-
-    const mmUsingFixedScale =
-      fixedScaleMmPerPx!==null
-        ? usedWidthPx*fixedScaleMmPerPx
-        : null;
-
-    const mmUsingCardScale =
+    const rawCardMm =
       cardScaleMmPerPx!==null
         ? usedWidthPx*cardScaleMmPerPx
         : null;
 
-    const scaleDifferencePercent =
-      cardScaleMmPerPx!==null
-        ? ((cardScaleMmPerPx-TEST_FIXED_FINGER_SCALE_MM_PER_PX)/TEST_FIXED_FINGER_SCALE_MM_PER_PX)*100
+    const normalizedMm =
+      rawCardMm!==null
+        ? rawCardMm*TEST_FINGER_CARD_NORMALIZATION
         : null;
+
+    const correctionPercent=(1-TEST_FINGER_CARD_NORMALIZATION)*100;
 
     const spreadPx =
       rawWidthsPx.length
@@ -1228,10 +1223,9 @@ export default function App() {
       rawWidthsPx,
       usedWidthPx,
       cardScaleMmPerPx,
-      fixedScaleMmPerPx,
-      mmUsingFixedScale,
-      mmUsingCardScale,
-      scaleDifferencePercent,
+      rawCardMm,
+      normalizedMm,
+      correctionPercent,
       spreadPx,
       spreadPercent,
     };
@@ -1239,11 +1233,12 @@ export default function App() {
 
   const fourMagnetWidthsMm = (() => {
     if(!fourMagnetSamples?.length||!pixelsPerMm) return [] as number[];
-    const mmPerPx =
+    const cardScaleMmPerPx=1/pixelsPerMm;
+    const normalization =
       measurementMode === "finger" && !diameterPhotoTestMode
-        ? TEST_FIXED_FINGER_SCALE_MM_PER_PX
-        : 1/pixelsPerMm;
-    return fourMagnetSamples.map(s=>Number((s.width*mmPerPx).toFixed(2)));
+        ? TEST_FINGER_CARD_NORMALIZATION
+        : 1;
+    return fourMagnetSamples.map(s=>Number((s.width*cardScaleMmPerPx*normalization).toFixed(2)));
   })();
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
@@ -1576,7 +1571,7 @@ export default function App() {
               )}
               {measurementMode === "finger" && !diameterPhotoTestMode && (
                 <>
-                  <span>Escala fixa de teste aplicada: {TEST_FIXED_FINGER_SCALE_MM_PER_PX.toFixed(4)} mm/px</span>
+                  <span>Normalização provisória aplicada: × {TEST_FINGER_CARD_NORMALIZATION.toFixed(3)}</span>
                   {measurementAudit && (
                     <>
                       <strong>DIAGNÓSTICO DA MEDIÇÃO</strong>
@@ -1584,17 +1579,15 @@ export default function App() {
                       <span>Largura em px usada no cálculo: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
                       <span>Variação dos 4 pontos: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                       {measurementAudit.cardScaleMmPerPx !== null && (
-                        <span>Escala do cartão: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>
+                        <span>Escala real do cartão: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>
                       )}
-                      {measurementAudit.scaleDifferencePercent !== null && (
-                        <span>Diferença cartão × escala fixa: {measurementAudit.scaleDifferencePercent >= 0 ? "+" : ""}{measurementAudit.scaleDifferencePercent.toFixed(2)}%</span>
+                      {measurementAudit.rawCardMm !== null && (
+                        <span>Medida bruta pela escala do cartão: {measurementAudit.rawCardMm.toFixed(2)} mm</span>
                       )}
-                      {measurementAudit.mmUsingCardScale !== null && (
-                        <span>Se usasse a escala do cartão: {measurementAudit.mmUsingCardScale.toFixed(2)} mm</span>
+                      {measurementAudit.normalizedMm !== null && (
+                        <span>Medida após normalização: {measurementAudit.normalizedMm.toFixed(2)} mm</span>
                       )}
-                      {measurementAudit.mmUsingFixedScale !== null && (
-                        <span>Com escala fixa: {measurementAudit.mmUsingFixedScale.toFixed(2)} mm</span>
-                      )}
+                      <span>Correção aplicada: -{measurementAudit.correctionPercent.toFixed(1)}%</span>
                       {referenceCardLengthPx !== null && (
                         <span>Foto 1 do cartão: 85,60 mm = {referenceCardLengthPx.toFixed(1)} px</span>
                       )}
