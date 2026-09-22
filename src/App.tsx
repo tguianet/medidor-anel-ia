@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
 import AdminCalibration from "./AdminCalibration";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "./ringCalculation";
-import { assessCardQuadGeometry, homographyFromQuad, quadFromLines, distance, type Line, type Point } from "./perspective";
+import { assessCardQuadGeometry, homographyFromQuad, localMmPerPixel, quadFromLines, distance, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
@@ -970,7 +970,7 @@ export default function App() {
 
   const result = useMemo(() => {
     if (liveWidthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
-    if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence, 0.05);
+    if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
     return computeRingResult(liveWidthMm, calibrationRules, measurementMode === "anelimetro", calibrationConfidence);
   }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
 
@@ -1021,6 +1021,27 @@ export default function App() {
   const fourMagnetSamples = phase === "finger" && leftLocked && rightLocked
     ? fingerBandSamplesPx()
     : null;
+
+  const geometricScaleMmPerPx = (() => {
+    const source = photoPixelsRef.current;
+    const stage = measureRef.current;
+    if (!source || !stage || phase !== "finger") return null;
+
+    const rect = stage.getBoundingClientRect();
+    const imageX = (((visualBandCenter / 100 * rect.width) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width;
+    const imageY = (((measureY / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
+    const quadPx = cardQuad.map((point)=>({
+      x: point.x / 100 * source.width,
+      y: point.y / 100 * source.height,
+    })) as [Point,Point,Point,Point];
+
+    try {
+      const mmPerPx = localMmPerPixel(quadPx, {x:imageX,y:imageY});
+      return Number.isFinite(mmPerPx) && mmPerPx > 0 ? mmPerPx : null;
+    } catch {
+      return null;
+    }
+  })();
 
   // Guarda as quatro larguras horizontais em milímetros individualmente.
   // Essas medidas formam o perfil do dedo e serão usadas para descobrir a
@@ -1282,6 +1303,9 @@ export default function App() {
                 </>
               )}
               <span>Calibração do cartão: {calibrationConfidence}%</span>
+              {measurementMode === "finger" && geometricScaleMmPerPx !== null && (
+                <span>Escala geométrica: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
+              )}
               {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
             </div>
           )}
