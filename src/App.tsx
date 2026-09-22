@@ -15,7 +15,7 @@ import TryOnPanel from "./components/TryOnPanel";
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 const TEST_FIXED_FINGER_SCALE_MM_PER_PX = 0.1121;
-const TEST_FINGER_EDGE_INSET_PX = 2.5;
+const TEST_FINGER_EDGE_INSET_PX = 1.0;
 
 export default function App() {
   const camera = useCameraStream();
