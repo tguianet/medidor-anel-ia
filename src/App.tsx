@@ -520,11 +520,10 @@ export default function App() {
 
   const startDrag = (target: DragTarget, event: React.PointerEvent) => {
     event.stopPropagation();
-    // Depois que o ímã encontrou a borda, tocar/arrastar a mesma linha entra
-    // em refinamento manual. Ao soltar, não puxamos de volta para o ímã.
+    // Pontos do dedo são 100% manuais; nunca há snap magnético.
     fingerRefineDragRef.current =
-      leftLocked && rightLocked && target === "left" ? "left" :
-      leftLocked && rightLocked && target === "right" ? "right" :
+      target === "left" ? "left" :
+      target === "right" ? "right" :
       null;
     draggingRef.current = target;
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
@@ -727,19 +726,14 @@ export default function App() {
   const finishDrag = (event:React.PointerEvent) => {
     const target=draggingRef.current;
     if(target==="left"||target==="right"){
-      const refining=fingerRefineDragRef.current===target;
-      if(refining){
-        // Mantém exatamente a posição escolhida pelo usuário. A inclinação
-        // detectada pelo ímã continua como referência visual.
-        if(target==="left"){
-          setLeftLocked(true);
-          setLeftManualRefined(true);
-        }else{
-          setRightLocked(true);
-          setRightManualRefined(true);
-        }
+      // Modo manual: a posição escolhida pelo usuário é a medida.
+      // Não há busca de contraste, ímã ou ajuste automático da borda do dedo.
+      if(target==="left"){
+        setLeftLocked(true);
+        setLeftManualRefined(true);
       }else{
-        snapBoundary(target,event.clientX);
+        setRightLocked(true);
+        setRightManualRefined(true);
       }
     }
     if(typeof target==="string"&&target.startsWith("finger-line-")){
@@ -857,39 +851,27 @@ export default function App() {
     if(!source||!stage) return null;
 
     const rect=stage.getBoundingClientRect();
-    const sample=fingerBandSamplePx();
-    const toImageX=(percent:number)=>((((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width);
-    const imageY=(((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height;
-    const fallbackSample = {
-      left: toImageX(leftLine),
-      right: toImageX(rightLine),
-      y: imageY,
-      width: Math.abs(toImageX(rightLine)-toImageX(leftLine)),
-    };
-    const measurementSample = sample ?? fallbackSample;
+    const toImageX=(percent:number)=>(
+      (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
+    );
+
+    const leftX=toImageX(leftLine);
+    const rightX=toImageX(rightLine);
+    const fingerWidthPx=Math.abs(rightX-leftX);
+    if(!Number.isFinite(fingerWidthPx)||fingerWidthPx<=1) return null;
 
     const baseWidthPx=Math.hypot(
       (cardQuad[2].x-cardQuad[3].x)/100*source.width,
       (cardQuad[2].y-cardQuad[3].y)/100*source.height,
     );
     if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
+
     const mmPerPx=85.6/baseWidthPx;
+    const widthMm=fingerWidthPx*mmPerPx;
+    return Number.isFinite(widthMm)&&widthMm>0&&widthMm<45 ? widthMm : null;
+  },[pixelsPerMm,leftLine,rightLine,zoom,panX,leftLocked,rightLocked,cardQuad]);
 
-    const widthMm=measurementSample.width*mmPerPx;
-    if(!Number.isFinite(widthMm)||widthMm<=0||widthMm>=45) return null;
-    return widthMm;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad]);
-
-  const finalMeasurementConfidence = useMemo(() => {
-    const edgeConfidence = leftLocked && rightLocked
-      ? Math.round((leftMagnetConfidence + rightMagnetConfidence) / 2)
-      : 0;
-    if (!edgeConfidence) return calibrationConfidence;
-    return Math.min(
-      calibrationConfidence,
-      Math.round(calibrationConfidence * 0.75 + edgeConfidence * 0.25),
-    );
-  }, [calibrationConfidence, leftLocked, rightLocked, leftMagnetConfidence, rightMagnetConfidence]);
+  const finalMeasurementConfidence = calibrationConfidence;
 
   const calibrationQualityLabel =
     finalMeasurementConfidence >= HIGH_CARD_CALIBRATION_CONFIDENCE ? "alta" :
@@ -957,10 +939,6 @@ export default function App() {
   const visualBandWidth = Math.max(0, visualBandRight - visualBandLeft);
   const visualBandCenter = visualBandLeft + visualBandWidth / 2;
 
-  const singleFingerSample = phase === "finger" && leftLocked && rightLocked
-    ? fingerBandSamplePx()
-    : null;
-
   const geometricScaleMmPerPx = (() => {
     const source = photoPixelsRef.current;
     if (!source || phase !== "finger") return null;
@@ -972,20 +950,7 @@ export default function App() {
     return 85.6/baseWidthPx;
   })();
 
-  // Uma única linha horizontal mede o dedo usando a mesma escala da base do cartão.
-  const singleFingerWidthMm = (() => {
-    if (!singleFingerSample) return null;
-    const source = photoPixelsRef.current;
-    if (!source) return null;
-    const baseWidthPx=Math.hypot(
-      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
-      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
-    );
-    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
-    const mmPerPx=85.6/baseWidthPx;
-    const value=singleFingerSample.width*mmPerPx;
-    return Number.isFinite(value)&&value>0&&value<45 ? Number(value.toFixed(2)) : null;
-  })();
+  const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
 
   return (
     <main className="app">
@@ -1074,47 +1039,29 @@ export default function App() {
             )}
             {phase === "finger" && pixelsPerMm && (
               <>
-                {(["left","right"] as FingerSide[]).map((side)=>{
-                  const locked=side==="left"?leftLocked:rightLocked;
-                  const bothLocked=leftLocked&&rightLocked;
-                  const center=side==="left"?leftLine:rightLine;
-                  const tilt=side==="left"?leftFingerTilt:rightFingerTilt;
-
-                  // Etapa 1: enquanto as DUAS bordas ainda não estiverem verdes,
-                  // mostramos somente a linha magnética simples, sem bolinhas.
-                  if(!bothLocked){
-                    return <button
-                      key={side}
-                      className={`caliper-line ${side}${locked ? " locked" : ""}${tryOn ? " ring-adjust" : ""}`}
-                      style={{ left: `${center}%`, top: `${measureY - 16}%`, transform: `translateX(-50%) rotate(${tilt.toFixed(2)}deg)` }}
-                      onPointerDown={(event)=>startDrag(side,event)}
-                      aria-label={side==="left"?"Alinhar linha esquerda com o ímã":"Alinhar linha direita com o ímã"}
-                    ><span /></button>;
-                  }
-
-                  // Etapa 2: somente depois das duas bordas magnéticas estarem
-                  // travadas em verde aparecem as duas bolinhas para refinamento.
-                  const line=fingerLines[side];
-                  return <svg
-                    key={side}
-                    className={`finger-line-overlay ${side} locked${tryOn?" ring-adjust":""}`}
-                    viewBox="0 0 100 100"
-                    preserveAspectRatio="none"
-                    aria-label={side==="left"?"Refinar linha esquerda do dedo":"Refinar linha direita do dedo"}
-                  >
-                    <line className="finger-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
-                      onPointerDown={(e)=>startFingerLineDrag(side,null,e)} />
-                    <line className="finger-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
-                    {(["a","b"] as const).map((point)=><g key={point}>
-                      <circle className="finger-line-handle-hit" cx={line[point].x} cy={line[point].y} r="4.8"
-                        onPointerDown={(e)=>startFingerLineDrag(side,point,e)} />
-                      <circle className="finger-line-handle" cx={line[point].x} cy={line[point].y} r="1.55" />
-                    </g>)}
-                  </svg>;
-                })}
-                <div className="measurement-band" style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} aria-hidden="true" />
-                <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
-                <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandCenter}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
+                <div
+                  className="manual-finger-line"
+                  style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }}
+                  aria-hidden="true"
+                />
+                <button
+                  className={`finger-side-point left${leftLocked ? " locked" : ""}`}
+                  style={{ left: `${leftLine}%`, top: `${measureY}%` }}
+                  onPointerDown={(event)=>startDrag("left",event)}
+                  aria-label="Ponto manual esquerdo do dedo"
+                />
+                <button
+                  className={`finger-side-point right${rightLocked ? " locked" : ""}`}
+                  style={{ left: `${rightLine}%`, top: `${measureY}%` }}
+                  onPointerDown={(event)=>startDrag("right",event)}
+                  aria-label="Ponto manual direito do dedo"
+                />
+                <button
+                  className={`measure-cross${tryOn ? " ring-adjust" : ""}`}
+                  style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }}
+                  onPointerDown={(event) => startDrag("height", event)}
+                  aria-label="Mover altura da linha de medição"
+                />
               </>
             )}
             {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
@@ -1206,18 +1153,18 @@ export default function App() {
               defaultMeasurementType={measurementMode}
             />
           )}
-          {phase === "finger" && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
+          {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>Linha única de medição ativa</strong>
-              <span>{singleFingerSample ? "Leitura válida no ponto central do dedo" : "Posicione a linha horizontal mais próxima da base do dedo, onde o anel assenta"}</span>
+              <strong>Linha única manual</strong>
+              <span>{leftLocked && rightLocked ? "Medida entre os dois pontos laterais, sem ímã" : "Arraste o ponto esquerdo e o ponto direito exatamente até as bordas do dedo"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
-            <strong>{leftLocked && rightLocked ? "2. Ímã concluído — agora ajuste pelas bolinhas" : "1. Alinhe as duas linhas até ficarem verdes"}</strong>
+            <strong>{leftLocked && rightLocked ? "Pontos manuais posicionados" : "Ajuste os 2 pontos laterais"}</strong>
             <span>
-              {leftLocked ? (leftLocked&&rightLocked&&leftManualRefined ? `✓ Esquerda refinada manualmente` : `✓ Esquerda magnética ${leftMagnetConfidence}%`) : "○ Falta a esquerda"}
+              {leftLocked ? "✓ Esquerda manual" : "○ Ajuste a esquerda"}
               {" · "}
-              {rightLocked ? (leftLocked&&rightLocked&&rightManualRefined ? `✓ Direita refinada manualmente` : `✓ Direita magnética ${rightMagnetConfidence}%`) : "○ Falta a direita"}
+              {rightLocked ? "✓ Direita manual" : "○ Ajuste a direita"}
             </span>
           </div>}
 
