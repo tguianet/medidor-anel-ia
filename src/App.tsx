@@ -611,14 +611,20 @@ export default function App() {
       if(edge.score>=9) points.push({x:edge.x,y,score:edge.score});
     }
 
-    const unlock=()=>{
+    const keepManual=()=>{
       if(side==="left"){
-        setLeftLocked(false); setLeftMagnetConfidence(0); setLeftFingerTilt(0);
+        setLeftLocked(true);
+        setLeftMagnetConfidence(0);
+        setLeftFingerTilt(0);
+        setLeftManualRefined(true);
       }else{
-        setRightLocked(false); setRightMagnetConfidence(0); setRightFingerTilt(0);
+        setRightLocked(true);
+        setRightMagnetConfidence(0);
+        setRightFingerTilt(0);
+        setRightManualRefined(true);
       }
     };
-    if(points.length<5){ unlock(); return; }
+    if(points.length<5){ keepManual(); return; }
 
     const median=(values:number[])=>{
       const ordered=[...values].sort((a,b)=>a-b);
@@ -626,7 +632,7 @@ export default function App() {
     };
     const medianX=median(points.map(p=>p.x));
     const filtered=points.filter(p=>Math.abs(p.x-medianX)<=Math.max(5,radius*0.72));
-    if(filtered.length<5){ unlock(); return; }
+    if(filtered.length<5){ keepManual(); return; }
 
     const cy=filtered.reduce((s,p)=>s+p.y,0)/filtered.length;
     const cx=filtered.reduce((s,p)=>s+p.x,0)/filtered.length;
@@ -647,7 +653,7 @@ export default function App() {
       0, 99,
     ));
 
-    if(confidence<68 || residual>3.8){ unlock(); return; }
+    if(confidence<68 || residual>3.8){ keepManual(); return; }
 
     const snappedScreenX=rect.width/2+(predictedCenterX/source.width*rect.width-rect.width/2)*zoom+panX;
     const snappedPercent=clamp(snappedScreenX/rect.width*100,2,98);
@@ -726,15 +732,9 @@ export default function App() {
   const finishDrag = (event:React.PointerEvent) => {
     const target=draggingRef.current;
     if(target==="left"||target==="right"){
-      // Modo manual: a posição escolhida pelo usuário é a medida.
-      // Não há busca de contraste, ímã ou ajuste automático da borda do dedo.
-      if(target==="left"){
-        setLeftLocked(true);
-        setLeftManualRefined(true);
-      }else{
-        setRightLocked(true);
-        setRightManualRefined(true);
-      }
+      // Linha lateral híbrida: ao soltar, procura o contorno real do dedo.
+      // Se a borda não for confiável, mantém exatamente o ajuste manual.
+      snapBoundary(target,event.clientX);
     }
     if(typeof target==="string"&&target.startsWith("finger-line-")){
       const match=/^finger-line-(left|right)/.exec(target);
@@ -1063,13 +1063,13 @@ export default function App() {
                 />
                 <button
                   className={`finger-side-point left${leftLocked ? " locked" : ""}`}
-                  style={{ left: `${leftLine}%`, top: `${measureY}%` }}
+                  style={{ left: `${leftLine}%`, top: `${measureY}%`, transform: `translate(-50%,-50%) rotate(${leftFingerTilt.toFixed(2)}deg)` }}
                   onPointerDown={(event)=>startDrag("left",event)}
                   aria-label="Ponto manual esquerdo do dedo"
                 />
                 <button
                   className={`finger-side-point right${rightLocked ? " locked" : ""}`}
-                  style={{ left: `${rightLine}%`, top: `${measureY}%` }}
+                  style={{ left: `${rightLine}%`, top: `${measureY}%`, transform: `translate(-50%,-50%) rotate(${rightFingerTilt.toFixed(2)}deg)` }}
                   onPointerDown={(event)=>startDrag("right",event)}
                   aria-label="Ponto manual direito do dedo"
                 />
@@ -1172,16 +1172,16 @@ export default function App() {
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>Linha única manual</strong>
-              <span>{leftLocked && rightLocked ? "Medida entre os dois pontos laterais, sem ímã" : "Arraste o ponto esquerdo e o ponto direito exatamente até as bordas do dedo"}</span>
+              <strong>Linha única + laterais magnéticas</strong>
+              <span>{leftLocked && rightLocked ? "Laterais ajustadas ao contorno; a medida usa a linha central" : "Aproxime cada linha lateral da borda do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
-            <strong>{leftLocked && rightLocked ? "Pontos manuais posicionados" : "Ajuste os 2 pontos laterais"}</strong>
+            <strong>{leftLocked && rightLocked ? "Laterais posicionadas" : "Ajuste as 2 laterais"}</strong>
             <span>
-              {leftLocked ? "✓ Esquerda manual" : "○ Ajuste a esquerda"}
+              {leftLocked ? (leftMagnetConfidence > 0 ? `✓ Esquerda magnética ${leftMagnetConfidence}%` : "✓ Esquerda manual") : "○ Ajuste a esquerda"}
               {" · "}
-              {rightLocked ? "✓ Direita manual" : "○ Ajuste a direita"}
+              {rightLocked ? (rightMagnetConfidence > 0 ? `✓ Direita magnética ${rightMagnetConfidence}%` : "✓ Direita manual") : "○ Ajuste a direita"}
             </span>
           </div>}
 
