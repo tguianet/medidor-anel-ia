@@ -80,40 +80,47 @@ export const RING_DIAMETER_TABLE = [
   { size: 40, diameterMm: 25.46 },
 ];
 
-// Limites do modo dedo definidos pelos PONTOS MÉDIOS entre as referências
-// físicas medidas no paquímetro. Assim cada leitura é classificada pelo aro
-// cuja referência está mais próxima, evitando degraus enviesados para baixo.
-//
-// Exemplo:
-// aro 28 = 21,25 mm
-// aro 29 = 21,45 mm
-// corte = (21,25 + 21,45) / 2 = 21,35 mm
-// Portanto 21,42 mm já pertence ao aro 29.
+// Limites diretos do modo dedo, voltando às faixas físicas medidas no
+// paquímetro. Mantemos apenas uma tolerância experimental de 0,10 mm na
+// transição 25 -> 26, porque os testes repetidos do dedo real aro 25 ficaram
+// estáveis até ~20,72 mm. As demais faixas continuam exatamente na tabela
+// física original para não deslocar os outros aros sem validação.
+export const FINGER_RING_BOUNDARY_TOLERANCE_MM = 0.10;
+
 export const FINGER_RING_THRESHOLDS = [
-  { minMm: Number.NEGATIVE_INFINITY, maxExclusiveMm: 16.275, ringSize: 13 },
-  { minMm: 16.275, maxExclusiveMm: 16.60, ringSize: 14 },
-  { minMm: 16.60, maxExclusiveMm: 16.85, ringSize: 15 },
-  { minMm: 16.85, maxExclusiveMm: 17.20, ringSize: 16 },
-  { minMm: 17.20, maxExclusiveMm: 17.575, ringSize: 17 },
-  { minMm: 17.575, maxExclusiveMm: 17.95, ringSize: 18 },
-  { minMm: 17.95, maxExclusiveMm: 18.275, ringSize: 19 },
-  { minMm: 18.275, maxExclusiveMm: 18.675, ringSize: 20 },
-  { minMm: 18.675, maxExclusiveMm: 19.125, ringSize: 21 },
-  { minMm: 19.125, maxExclusiveMm: 19.375, ringSize: 22 },
-  { minMm: 19.375, maxExclusiveMm: 19.65, ringSize: 23 },
-  { minMm: 19.65, maxExclusiveMm: 20.00, ringSize: 24 },
-  { minMm: 20.00, maxExclusiveMm: 20.425, ringSize: 25 },
-  { minMm: 20.425, maxExclusiveMm: 20.775, ringSize: 26 },
-  { minMm: 20.775, maxExclusiveMm: 21.05, ringSize: 27 },
-  { minMm: 21.05, maxExclusiveMm: 21.35, ringSize: 28 },
-  { minMm: 21.35, maxExclusiveMm: 21.70, ringSize: 29 },
-  { minMm: 21.70, maxExclusiveMm: 22.075, ringSize: 30 },
-  { minMm: 22.075, maxExclusiveMm: 22.375, ringSize: 31 },
-  { minMm: 22.375, maxExclusiveMm: 22.675, ringSize: 32 },
-  { minMm: 22.675, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
+  { minMm: Number.NEGATIVE_INFINITY, maxExclusiveMm: 16.50, ringSize: 13 },
+  { minMm: 16.50, maxExclusiveMm: 16.70, ringSize: 14 },
+  { minMm: 16.70, maxExclusiveMm: 17.00, ringSize: 15 },
+  { minMm: 17.00, maxExclusiveMm: 17.40, ringSize: 16 },
+  { minMm: 17.40, maxExclusiveMm: 17.75, ringSize: 17 },
+  { minMm: 17.75, maxExclusiveMm: 18.15, ringSize: 18 },
+  { minMm: 18.15, maxExclusiveMm: 18.40, ringSize: 19 },
+  { minMm: 18.40, maxExclusiveMm: 18.95, ringSize: 20 },
+  { minMm: 18.95, maxExclusiveMm: 19.30, ringSize: 21 },
+  { minMm: 19.30, maxExclusiveMm: 19.45, ringSize: 22 },
+  { minMm: 19.45, maxExclusiveMm: 19.85, ringSize: 23 },
+  { minMm: 19.85, maxExclusiveMm: 20.15, ringSize: 24 },
+  { minMm: 20.15, maxExclusiveMm: 20.70, ringSize: 25 },
+  { minMm: 20.70, maxExclusiveMm: 20.85, ringSize: 26 },
+  { minMm: 20.85, maxExclusiveMm: 21.25, ringSize: 27 },
+  { minMm: 21.25, maxExclusiveMm: 21.45, ringSize: 28 },
+  { minMm: 21.45, maxExclusiveMm: 21.95, ringSize: 29 },
+  { minMm: 21.95, maxExclusiveMm: 22.20, ringSize: 30 },
+  { minMm: 22.20, maxExclusiveMm: 22.55, ringSize: 31 },
+  { minMm: 22.55, maxExclusiveMm: 22.80, ringSize: 32 },
+  { minMm: 22.80, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
 ] as const;
 
 export const ringSizeFromFingerMeasurement = (measuredMm: number) => {
+  if (!Number.isFinite(measuredMm)) return 33;
+
+  // Zona de tolerância validada no dedo aro 25:
+  // 20,70 a 20,79 mm permanece em 25; 20,80 mm passa para 26.
+  const ring25UpperWithTolerance = 20.70 + FINGER_RING_BOUNDARY_TOLERANCE_MM;
+  if (measuredMm >= 20.15 && measuredMm < ring25UpperWithTolerance) {
+    return 25;
+  }
+
   const match = FINGER_RING_THRESHOLDS.find(
     (range) => measuredMm >= range.minMm && measuredMm < range.maxExclusiveMm,
   );
