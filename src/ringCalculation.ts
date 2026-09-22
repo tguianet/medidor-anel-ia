@@ -80,12 +80,40 @@ export const RING_DIAMETER_TABLE = [
   { size: 40, diameterMm: 25.46 },
 ];
 
-export const FINGER_DIAMETER_BLOCKS = [
-  { name: "bloco_1", minMm: Number.NEGATIVE_INFINITY, maxMm: 18.675, minRing: 13, maxRing: 20 },
-  { name: "bloco_2", minMm: 18.675, maxMm: 19.650, minRing: 21, maxRing: 23 },
-  { name: "bloco_3", minMm: 19.650, maxMm: 20.775, minRing: 24, maxRing: 26 },
-  { name: "bloco_4", minMm: 20.775, maxMm: Number.POSITIVE_INFINITY, minRing: 27, maxRing: 33 },
+// Limites diretos do modo dedo, definidos pelas medições físicas no paquímetro.
+// Não há média, interpolação, curva ou conversão para "diâmetro equivalente".
+// A medida em mm obtida do cartão entra diretamente nesta tabela.
+// Ex.: 20,69 mm -> aro 25; 20,70 mm -> aro 26.
+export const FINGER_RING_THRESHOLDS = [
+  { minMm: Number.NEGATIVE_INFINITY, maxExclusiveMm: 16.50, ringSize: 13 },
+  { minMm: 16.50, maxExclusiveMm: 16.70, ringSize: 14 },
+  { minMm: 16.70, maxExclusiveMm: 17.00, ringSize: 15 },
+  { minMm: 17.00, maxExclusiveMm: 17.40, ringSize: 16 },
+  { minMm: 17.40, maxExclusiveMm: 17.75, ringSize: 17 },
+  { minMm: 17.75, maxExclusiveMm: 18.15, ringSize: 18 },
+  { minMm: 18.15, maxExclusiveMm: 18.40, ringSize: 19 },
+  { minMm: 18.40, maxExclusiveMm: 18.95, ringSize: 20 },
+  { minMm: 18.95, maxExclusiveMm: 19.30, ringSize: 21 },
+  { minMm: 19.30, maxExclusiveMm: 19.45, ringSize: 22 },
+  { minMm: 19.45, maxExclusiveMm: 19.85, ringSize: 23 },
+  { minMm: 19.85, maxExclusiveMm: 20.15, ringSize: 24 },
+  { minMm: 20.15, maxExclusiveMm: 20.70, ringSize: 25 },
+  { minMm: 20.70, maxExclusiveMm: 20.85, ringSize: 26 },
+  { minMm: 20.85, maxExclusiveMm: 21.25, ringSize: 27 },
+  { minMm: 21.25, maxExclusiveMm: 21.45, ringSize: 28 },
+  { minMm: 21.45, maxExclusiveMm: 21.95, ringSize: 29 },
+  { minMm: 21.95, maxExclusiveMm: 22.20, ringSize: 30 },
+  { minMm: 22.20, maxExclusiveMm: 22.55, ringSize: 31 },
+  { minMm: 22.55, maxExclusiveMm: 22.80, ringSize: 32 },
+  { minMm: 22.80, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
 ] as const;
+
+export const ringSizeFromFingerMeasurement = (measuredMm: number) => {
+  const match = FINGER_RING_THRESHOLDS.find(
+    (range) => measuredMm >= range.minMm && measuredMm < range.maxExclusiveMm,
+  );
+  return match?.ringSize ?? 33;
+};
 
 // Conversão 2D calibrada por medições reais de largura marcada e diâmetro
 // interno confirmado do aro. Não usa estimativa de volume/formato do dedo.
@@ -225,35 +253,12 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
 };
 
 export const ringFromInnerDiameter = (diameterMm: number) => {
-  // Entre os aros físicos 13–33 usamos quatro blocos independentes.
-  // Cada bloco escolhe o aro cuja referência medida no paquímetro fica
-  // mais próxima do diâmetro equivalente. Isso evita forçar uma única
-  // curva global sobre regiões com inclinações diferentes.
-  const block = FINGER_DIAMETER_BLOCKS.find(
-    (candidate) => diameterMm >= candidate.minMm && diameterMm < candidate.maxMm,
-  );
-
-  const candidates = block
-    ? RING_DIAMETER_TABLE.filter(
-        (ring) => ring.size >= block.minRing && ring.size <= block.maxRing,
-      )
-    : RING_DIAMETER_TABLE;
-
-  let selectedRing = candidates[0] || RING_DIAMETER_TABLE[0];
-  let bestDistance = Math.abs(diameterMm - selectedRing.diameterMm);
-
-  for (const ring of candidates) {
-    const distanceMm = Math.abs(diameterMm - ring.diameterMm);
-    if (distanceMm < bestDistance) {
-      selectedRing = ring;
-      bestDistance = distanceMm;
-    }
-  }
-
+  const ringSize = ringSizeFromFingerMeasurement(diameterMm);
+  const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
   return {
     selectedRing,
     nearBoundary: false,
-    boundaryDistanceMm: bestDistance,
+    boundaryDistanceMm: Math.abs(diameterMm - selectedRing.diameterMm),
   };
 };
 
@@ -366,24 +371,23 @@ export const computeRingResult = (
     };
   }
 
-  // Novo modo principal do dedo:
-  // largura calibrada -> diâmetro interno equivalente -> tabela de aros.
-  // Não passa mais pela correlação dedo -> MAB do anelímetro.
-  const equivalentDiameterMm = estimateInnerDiameter(widthMm);
-  const { selectedRing, nearBoundary, boundaryDistanceMm } =
-    ringFromInnerDiameter(equivalentDiameterMm);
+  // Modo principal do dedo:
+  // a única conversão contínua acontece antes daqui: pixels -> mm pela escala do cartão.
+  // A medida física do dedo em mm entra diretamente na tabela de limites do paquímetro.
+  const ringSize = ringSizeFromFingerMeasurement(widthMm);
+  const selectedRing = findRingBySize(ringSize) || RING_DIAMETER_TABLE[0];
 
   return {
     rawWidthMm,
     widthMm,
     measurementCorrectionMm: widthMm - rawWidthMm,
-    equivalentDiameterMm,
+    equivalentDiameterMm: widthMm,
     fingerEquivalentMabMm: null,
     ringSize: selectedRing.size,
     calculationMode: "formula",
     appliedRuleOffset: null,
     continuousRing: null,
-    nearBoundary,
-    boundaryDistanceMm,
+    nearBoundary: false,
+    boundaryDistanceMm: null,
   };
 };
