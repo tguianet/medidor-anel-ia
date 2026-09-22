@@ -885,25 +885,19 @@ export default function App() {
     const toImageX=(percent:number)=>(
       (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
     );
-    const toImageY=(percent:number)=>(
-      (((percent/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height
-    );
 
     const leftX=toImageX(leftLine);
     const rightX=toImageX(rightLine);
     const fingerWidthPx=Math.abs(rightX-leftX);
     if(!Number.isFinite(fingerWidthPx)||fingerWidthPx<=1) return null;
 
-    // Corrige a perspectiva do cartão projetando as duas laterais
-    // até a MESMA altura da linha de medição do dedo.
-    const imageY=toImageY(measureY);
-    const projectedCardWidthPx=cardWidthAtImageY(imageY,source.width,source.height);
-    if(!projectedCardWidthPx||!Number.isFinite(projectedCardWidthPx)||projectedCardWidthPx<=1) return null;
-
-    const mmPerPxLocal=85.6/projectedCardWidthPx;
-    const widthMm=fingerWidthPx*mmPerPxLocal;
+    // Escala fixa e estável: a base real do cartão mede 85,60 mm.
+    // pixelsPerMm foi definido quando as interseções das duas laterais
+    // com a linha da base foram confirmadas. Não extrapolamos as laterais
+    // do cartão até a altura do dedo.
+    const widthMm=fingerWidthPx/pixelsPerMm;
     return Number.isFinite(widthMm)&&widthMm>0&&widthMm<45 ? widthMm : null;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardLines]);
+  },[pixelsPerMm,leftLine,rightLine,zoom,panX,leftLocked,rightLocked]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -924,7 +918,8 @@ export default function App() {
   };
 
   const result = useMemo(() => {
-    if (liveWidthMm === null || calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
+    if (liveWidthMm === null) return null;
+    if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
     return computeRingResult(liveWidthMm, calibrationRules, measurementMode === "anelimetro", calibrationConfidence);
   }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
@@ -974,18 +969,8 @@ export default function App() {
   const visualBandCenter = visualBandLeft + visualBandWidth / 2;
 
   const geometricScaleMmPerPx = (() => {
-    const source=photoPixelsRef.current;
-    const stage=measureRef.current;
-    if(!source||!stage||phase!=="finger") return null;
-
-    const rect=stage.getBoundingClientRect();
-    const imageY=(
-      ((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2
-    )/rect.height*source.height;
-
-    const projectedCardWidthPx=cardWidthAtImageY(imageY,source.width,source.height);
-    if(!projectedCardWidthPx||!Number.isFinite(projectedCardWidthPx)||projectedCardWidthPx<=1) return null;
-    return 85.6/projectedCardWidthPx;
+    if(phase!=="finger"||!pixelsPerMm||pixelsPerMm<=0) return null;
+    return 1/pixelsPerMm;
   })();
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
@@ -1151,7 +1136,7 @@ export default function App() {
             </div>
           )}
 
-          {phase === "finger" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE && (
+          {phase === "finger" && measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE && (
             <div className="calibration-warning" role="alert">
               <strong>Calibração do cartão insuficiente: {calibrationConfidence}%</strong>
               <span>O aro foi bloqueado para evitar resultado instável.</span>
@@ -1186,10 +1171,11 @@ export default function App() {
                   <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
                 </>
               )}
-              <span>Calibração do cartão: {calibrationConfidence}%</span>
+              {measurementMode === "finger" && <span>Referência do cartão: base de 85,60 mm</span>}
               {measurementMode === "finger" && geometricScaleMmPerPx !== null && (
-                <span>Escala geométrica: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
+                <span>Escala pela base: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
               )}
+              {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
               {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
             </div>
           )}
