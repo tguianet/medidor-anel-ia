@@ -219,6 +219,9 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
 
 export const ringFromInnerDiameter = (diameterMm: number) => {
   let selectedIndex = RING_DIAMETER_TABLE.length - 1;
+  const DEAD_ZONE_MM = 0.15;
+  let nearestBoundaryDistance = Number.POSITIVE_INFINITY;
+  let usedDeadZone = false;
 
   for (let i = 0; i < RING_DIAMETER_TABLE.length; i++) {
     const current = RING_DIAMETER_TABLE[i];
@@ -227,7 +230,25 @@ export const ringFromInnerDiameter = (diameterMm: number) => {
       ? (current.diameterMm + next.diameterMm) / 2
       : Number.POSITIVE_INFINITY;
 
-    if (diameterMm < upperBoundary) {
+    if (next) {
+      const distanceToBoundary = Math.abs(diameterMm - upperBoundary);
+      nearestBoundaryDistance = Math.min(nearestBoundaryDistance, distanceToBoundary);
+
+      // Zona morta de 0,15 mm: quando a leitura fica até 0,15 mm abaixo
+      // da divisão entre dois aros, favorecemos o aro seguinte. Isso absorve
+      // a pequena variação residual entre fotos sem alterar a escala do cartão.
+      const effectiveBoundary = upperBoundary - DEAD_ZONE_MM;
+      if (diameterMm >= effectiveBoundary && diameterMm < upperBoundary) {
+        selectedIndex = i + 1;
+        usedDeadZone = true;
+        break;
+      }
+
+      if (diameterMm < effectiveBoundary) {
+        selectedIndex = i;
+        break;
+      }
+    } else {
       selectedIndex = i;
       break;
     }
@@ -235,8 +256,8 @@ export const ringFromInnerDiameter = (diameterMm: number) => {
 
   return {
     selectedRing: RING_DIAMETER_TABLE[selectedIndex],
-    nearBoundary: false,
-    boundaryDistanceMm: null,
+    nearBoundary: usedDeadZone,
+    boundaryDistanceMm: Number.isFinite(nearestBoundaryDistance) ? nearestBoundaryDistance : null,
   };
 };
 
