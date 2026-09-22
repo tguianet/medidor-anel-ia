@@ -6,7 +6,7 @@ type Props = {
   torchSupported: boolean;
   onToggleTorch: () => void;
   cardReady: boolean;
-  autoCapturePending: boolean;
+  calibrationStep: "reference" | "measurement" | "done";
   cameraAngleGuide: "forward" | "backward" | "aligned" | "unknown";
   cameraOpening: boolean;
   error: string;
@@ -16,7 +16,7 @@ type Props = {
 };
 
 export default function CameraScreen({
-  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, autoCapturePending, cameraAngleGuide, cameraOpening, error, onClose, onCapture, onRetry,
+  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide, cameraOpening, error, onClose, onCapture, onRetry,
 }: Props) {
   return (
     <section className="camera-screen">
@@ -29,7 +29,7 @@ export default function CameraScreen({
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
           <div className="live-card-frame">
-            <span>{autoCapturePending ? "✓ ALINHADO — FOTO AUTOMÁTICA..." : cardReady ? "✓ CARTÃO E ÂNGULO OK" : "ENCAIXE O CARTÃO"}</span>
+            <span>{cardReady ? "✓ ALINHADO — PODE CAPTURAR" : "ENCAIXE O CARTÃO"}</span>
             <i className="card-guide-corner tl" />
             <i className="card-guide-corner tr" />
             <i className="card-guide-corner br" />
@@ -53,18 +53,18 @@ export default function CameraScreen({
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{autoCapturePending
-        ? "Tudo verde. Fique parado: a foto será tirada automaticamente."
-        : cardReady
-          ? "Cartão e ângulo corretos. Fique parado para a captura automática ou toque no botão."
+      <p>{cardReady
+        ? (calibrationStep === "reference"
+            ? "Tudo verde. Toque no botão para capturar o cartão na base plana."
+            : "Tudo verde. Toque no botão para capturar o cartão sobre a parte mais grossa do dedo.")
         : cameraAngleGuide === "forward"
           ? "Incline levemente a câmera para frente até o indicador ficar verde."
           : cameraAngleGuide === "backward"
             ? "Incline levemente a câmera para trás até o indicador ficar verde."
-            : torchOn
-              ? "Luz ligada • encaixe o cartão na moldura e ajuste o ângulo."
-              : "Encaixe o cartão na moldura e ajuste o ângulo da câmera até ficar verde."}</p>
-      <button className="shutter ready" onClick={onCapture} aria-label="Tirar fotografia"><span /></button>
+            : calibrationStep === "reference"
+              ? "Coloque o cartão em uma base plana, enquadre na moldura e ajuste o ângulo até ficar verde."
+              : "Coloque o cartão sobre o dedo e alinhe a parte mais grossa — junta ou falange — na linha guia até ficar verde."}</p>
+      <button className={`shutter${cardReady ? " ready" : ""}`} onClick={onCapture} aria-label="Capturar foto manualmente"><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
   );
