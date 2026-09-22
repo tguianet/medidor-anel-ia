@@ -82,6 +82,7 @@ export default function App() {
     right:{a:{x:85,y:20},b:{x:85,y:80}},
     bottom:{a:{x:15,y:50},b:{x:85,y:50}},
   });
+  const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -399,9 +400,26 @@ export default function App() {
     return {leftPx,rightPx,lengthPx};
   };
 
+  const cardReferencePreview = (() => {
+    const source=photoPixelsRef.current;
+    if(!source || phase!=="card" || measurementMode!=="finger" || diameterPhotoTestMode) return null;
+    try{
+      const segment=cardReferenceSegment();
+      return {
+        left:{x:segment.leftPx.x/source.width*100,y:segment.leftPx.y/source.height*100},
+        right:{x:segment.rightPx.x/source.width*100,y:segment.rightPx.y/source.height*100},
+        lengthPx:segment.lengthPx,
+        mmPerPx:85.6/segment.lengthPx,
+      };
+    }catch{
+      return null;
+    }
+  })();
+
   const confirmReferenceCardLine = () => {
     try{
-      cardReferenceSegment();
+      const segment=cardReferenceSegment();
+      setReferenceCardLengthPx(segment.lengthPx);
       setReferenceCardLine({a:{...cardLines.bottom.a},b:{...cardLines.bottom.b}});
       setReferenceCardGuideLines({
         left:{a:{...cardLines.left.a},b:{...cardLines.left.b}},
@@ -409,7 +427,7 @@ export default function App() {
         bottom:{a:{...cardLines.bottom.a},b:{...cardLines.bottom.b}},
       });
       setFingerCardCalibrationStep("measurement");
-      camera.setError("Agora coloque o mesmo cartão sobre o dedo e tire a segunda foto.");
+      camera.setError("Referência salva: as duas interseções representam 85,60 mm. Agora tire a segunda foto com o cartão sobre o dedo.");
       void openCamera();
     }catch{
       camera.setError("Ajuste primeiro as duas laterais e depois a linha central para ela cruzar as duas bordas do cartão.");
@@ -1200,6 +1218,29 @@ export default function App() {
                     </g>)}
                   </g>;
                 })}
+                {cardReferencePreview && (
+                  <g className="card-reference-snaps" aria-label="Interseções válidas de 85,60 milímetros">
+                    <line
+                      className="card-reference-segment"
+                      x1={cardReferencePreview.left.x}
+                      y1={cardReferencePreview.left.y}
+                      x2={cardReferencePreview.right.x}
+                      y2={cardReferencePreview.right.y}
+                    />
+                    <circle
+                      className="card-reference-snap"
+                      cx={cardReferencePreview.left.x}
+                      cy={cardReferencePreview.left.y}
+                      r="1.65"
+                    />
+                    <circle
+                      className="card-reference-snap"
+                      cx={cardReferencePreview.right.x}
+                      cy={cardReferencePreview.right.y}
+                      r="1.65"
+                    />
+                  </g>
+                )}
               </svg>
             ) : phase === "card" ? (
               <svg
@@ -1313,6 +1354,15 @@ export default function App() {
                 <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — cartão em superfície reta" : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>Primeiro aproxime as duas linhas laterais das bordas do cartão e solte: elas encaixam magneticamente. Depois ajuste a linha central atravessando o cartão.</span>
                 <small>As bolinhas e as pontas podem ficar para fora. O único segmento que vale 85,60 mm é a distância entre as duas interseções da linha central com as laterais.</small>
+                {cardReferencePreview && (
+                  <>
+                    <small><strong>Segmento válido:</strong> 85,60 mm · {cardReferencePreview.lengthPx.toFixed(1)} px</small>
+                    <small><strong>Escala desta foto:</strong> {cardReferencePreview.mmPerPx.toFixed(4)} mm/px</small>
+                  </>
+                )}
+                {fingerCardCalibrationStep === "measurement" && referenceCardLengthPx !== null && (
+                  <small><strong>Foto 1 salva:</strong> 85,60 mm = {referenceCardLengthPx.toFixed(1)} px</small>
+                )}
                 <small>Na segunda foto repita o mesmo ajuste; a distância entre essas duas interseções gera a escala px/mm usada no dedo.</small>
               </div>
             </>
