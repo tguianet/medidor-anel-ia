@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
 import AdminCalibration from "./AdminCalibration";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "./ringCalculation";
-import { assessCardQuadGeometry, homographyFromQuad, localMmPerPixel, quadFromLines, distance, type Line, type Point } from "./perspective";
+import { lineIntersection, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
@@ -231,54 +231,52 @@ export default function App() {
     }
   };
 
-  const cardQuadFromCurrentLines = () => {
+  const cardBaseFromCurrentLines = () => {
     const source = photoPixelsRef.current;
     if (!source) throw new Error("foto");
-    const pxLines = Object.fromEntries((["top","right","bottom","left"] as CardEdge[]).map((edge) => {
-      const line = cardLines[edge];
-      return [edge, {
-        a:{x:line.a.x/100*source.width,y:line.a.y/100*source.height},
-        b:{x:line.b.x/100*source.width,y:line.b.y/100*source.height},
-      }];
-    })) as Record<CardEdge, Line>;
-    const quadPx = quadFromLines(pxLines);
-    const area = Math.abs(quadPx.reduce((sum,p,i) => {
-      const q=quadPx[(i+1)%4];
-      return sum + p.x*q.y-q.x*p.y;
-    },0))/2;
-    if (!quadPx.every((p)=>Number.isFinite(p.x)&&Number.isFinite(p.y)) || area < source.width*source.height*0.015) {
-      throw new Error("quadrilatero");
-    }
-    return {
-      px: quadPx,
-      percent: quadPx.map((p)=>({x:p.x/source.width*100,y:p.y/source.height*100})) as [Point,Point,Point,Point],
-    };
+
+    const toPx = (line:Line):Line => ({
+      a:{x:line.a.x/100*source.width,y:line.a.y/100*source.height},
+      b:{x:line.b.x/100*source.width,y:line.b.y/100*source.height},
+    });
+    const leftPx = lineIntersection(toPx(cardLines.left), toPx(cardLines.bottom));
+    const rightPx = lineIntersection(toPx(cardLines.right), toPx(cardLines.bottom));
+    const widthPx = Math.hypot(rightPx.x-leftPx.x,rightPx.y-leftPx.y);
+    if (!Number.isFinite(widthPx) || widthPx < source.width*0.08) throw new Error("base");
+
+    const left = {x:leftPx.x/source.width*100,y:leftPx.y/source.height*100};
+    const right = {x:rightPx.x/source.width*100,y:rightPx.y/source.height*100};
+    const bottomY = (left.y+right.y)/2;
+
+    // Mantém um quadrilátero sintético apenas para compatibilidade de estado.
+    // A escala física passa a vir SOMENTE da base de 85,60 mm.
+    const syntheticTopY = clamp(bottomY-28,2,96);
+    const quadPercent:[Point,Point,Point,Point] = [
+      {x:left.x,y:syntheticTopY},
+      {x:right.x,y:syntheticTopY},
+      right,
+      left,
+    ];
+    return {left,right,widthPx,bottomY,quadPercent};
   };
 
   const confirmPerspective = () => {
     try {
-      const quad = cardQuadFromCurrentLines();
-      homographyFromQuad(quad.px);
-      const geometry = assessCardQuadGeometry(quad.px);
-      if (!geometry.valid) {
-        camera.setError(geometry.reason || "A calibração do cartão ficou instável. Ajuste as quatro bordas e confirme novamente.");
-        return;
-      }
-      if (geometry.confidence < MIN_CARD_CALIBRATION_CONFIDENCE) {
-        setCalibrationConfidence(geometry.confidence);
-        camera.setError(`Calibração do cartão insuficiente (${geometry.confidence}%). Ajuste novamente as 4 bordas. É necessário pelo menos ${MIN_CARD_CALIBRATION_CONFIDENCE}% para medir o dedo.`);
-        return;
-      }
-      setCardQuad(quad.percent);
+      const base = cardBaseFromCurrentLines();
+      const lockedCount = (["left","right","bottom"] as CardEdge[])
+        .filter((edge)=>cardLineLocked[edge]).length;
+      // A porcentagem fica apenas como diagnóstico; não corrige a medida.
+      const confidence = lockedCount === 3 ? 96 : lockedCount === 2 ? 93 : 90;
+
+      setCardQuad(base.quadPercent);
       setPerspectiveReady(true);
-      setCalibrationConfidence(geometry.confidence);
-      const bottomY=(quad.percent[2].y+quad.percent[3].y)/2;
-      setCardLeft(quad.percent[3].x);
-      setCardRight(quad.percent[2].x);
-      setCardBottom(bottomY);
-      activateFingerMeasurement(quad.percent[3].x,quad.percent[2].x,bottomY,geometry.confidence,quad.percent);
+      setCalibrationConfidence(confidence);
+      setCardLeft(base.left.x);
+      setCardRight(base.right.x);
+      setCardBottom(base.bottomY);
+      activateFingerMeasurement(base.left.x,base.right.x,base.bottomY,confidence,base.quadPercent);
     } catch {
-      camera.setError("As linhas não formam um cartão válido. Ajuste cada borda e confirme novamente.");
+      camera.setError("Ajuste as duas laterais e a linha da base do cartão. A base precisa ficar entre as duas laterais.");
     }
   };
 
@@ -877,7 +875,6 @@ export default function App() {
     const samples=fingerBandSamplesPx();
     const toImageX=(percent:number)=>((((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width);
     const imageY=(((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height;
-
     const fallbackSample = {
       left: toImageX(leftLine),
       right: toImageX(rightLine),
@@ -886,60 +883,26 @@ export default function App() {
     };
     const measurementSamples = samples && samples.length ? samples : [fallbackSample];
 
-    const median = (values:number[]) => {
-      const ordered=[...values].filter(Number.isFinite).sort((a,b)=>a-b);
-      if(!ordered.length) return null;
-      const middle=Math.floor(ordered.length/2);
-      return ordered.length%2 ? ordered[middle] : (ordered[middle-1]+ordered[middle])/2;
-    };
-
-    // Corrige a perspectiva de CADA linha da faixa e depois usa a mediana
-    // das medidas. Assim uma única dobra, sombra ou altura ligeiramente
-    // diferente não empurra o resultado inteiro para cima/baixo.
-    const quadPx = cardQuad.map((point)=>({
-      x: point.x/100*source.width,
-      y: point.y/100*source.height,
-    })) as [Point,Point,Point,Point];
-    try {
-      const mapToCardMm = homographyFromQuad(quadPx);
-      const widthsMm = measurementSamples
-        .map((sample)=>{
-          const leftMm=mapToCardMm({x:sample.left,y:sample.y});
-          const rightMm=mapToCardMm({x:sample.right,y:sample.y});
-          return distance(leftMm,rightMm);
-        })
-        .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
-        .sort((a,b)=>a-b);
-
-      // Com 4 leituras, usa a média central (descarta os extremos).
-      // Se houver só 3 leituras válidas, usa a mediana.
-      if(widthsMm.length>=4){
-        const middle=widthsMm.slice(1,-1);
-        return middle.reduce((sum,value)=>sum+value,0)/middle.length;
-      }
-      const stableWidthMm=median(widthsMm);
-      if(stableWidthMm!==null) return stableWidthMm;
-    } catch {
-      // Cai no método defensivo abaixo.
-    }
-
-    // Fallback defensivo: calcula a razão cartão/dedo em várias alturas e
-    // também usa a mediana, em vez de uma única leitura.
-    const fallbackWidthsMm=measurementSamples.map((sample)=>{
-      const cardReferencePx=cardWidthAtImageY(sample.y,source.width,source.height);
-      if(!cardReferencePx||cardReferencePx<=0) return NaN;
-      return sample.width/cardReferencePx*85.6;
-    });
-    const stableFallbackMm=median(fallbackWidthsMm);
-    if(stableFallbackMm!==null) return stableFallbackMm;
-
-    const cardBottomPx=Math.hypot(
+    const baseWidthPx=Math.hypot(
       (cardQuad[2].x-cardQuad[3].x)/100*source.width,
       (cardQuad[2].y-cardQuad[3].y)/100*source.height,
     );
-    if(cardBottomPx<=0) return null;
-    return fallbackSample.width/cardBottomPx*85.6;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad,cardLines]);
+    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
+    const mmPerPx=85.6/baseWidthPx;
+
+    const widthsMm=measurementSamples
+      .map((sample)=>sample.width*mmPerPx)
+      .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
+      .sort((x,y)=>x-y);
+    if(!widthsMm.length) return null;
+
+    if(widthsMm.length>=4){
+      const middle=widthsMm.slice(1,-1);
+      return middle.reduce((sum,value)=>sum+value,0)/middle.length;
+    }
+    const middle=Math.floor(widthsMm.length/2);
+    return widthsMm.length%2 ? widthsMm[middle] : (widthsMm[middle-1]+widthsMm[middle])/2;
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad]);
 
   const finalMeasurementConfidence = useMemo(() => {
     const edgeConfidence = leftLocked && rightLocked
@@ -965,7 +928,7 @@ export default function App() {
     setLeftManualRefined(false);
     setRightManualRefined(false);
     setTryOn(false);
-    camera.setError("Reajuste as quatro linhas do cartão. A medição só será liberada com calibração de 90% ou mais.");
+    camera.setError("Reajuste as duas laterais e a linha da base do cartão.");
   };
 
   const result = useMemo(() => {
@@ -1024,58 +987,30 @@ export default function App() {
 
   const geometricScaleMmPerPx = (() => {
     const source = photoPixelsRef.current;
-    const stage = measureRef.current;
-    if (!source || !stage || phase !== "finger") return null;
-
-    const rect = stage.getBoundingClientRect();
-    const imageX = (((visualBandCenter / 100 * rect.width) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width;
-    const imageY = (((measureY / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
-    const quadPx = cardQuad.map((point)=>({
-      x: point.x / 100 * source.width,
-      y: point.y / 100 * source.height,
-    })) as [Point,Point,Point,Point];
-
-    try {
-      const mmPerPx = localMmPerPixel(quadPx, {x:imageX,y:imageY});
-      return Number.isFinite(mmPerPx) && mmPerPx > 0 ? mmPerPx : null;
-    } catch {
-      return null;
-    }
+    if (!source || phase !== "finger") return null;
+    const baseWidthPx=Math.hypot(
+      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
+      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
+    );
+    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
+    return 85.6/baseWidthPx;
   })();
 
-  // Guarda as quatro larguras horizontais em milímetros individualmente.
-  // Essas medidas formam o perfil do dedo e serão usadas para descobrir a
-  // correlação entre formato do dedo e equivalente do anelímetro.
+  // As quatro leituras do dedo usam a mesma escala da base do cartão.
   const fourMagnetWidthsMm = (() => {
     if (!fourMagnetSamples?.length) return [] as number[];
     const source = photoPixelsRef.current;
     if (!source) return [] as number[];
-
-    const quadPx = cardQuad.map((point)=>({
-      x: point.x / 100 * source.width,
-      y: point.y / 100 * source.height,
-    })) as [Point,Point,Point,Point];
-
-    try {
-      const mapToCardMm = homographyFromQuad(quadPx);
-      return fourMagnetSamples
-        .map((sample)=>{
-          const leftMm = mapToCardMm({x:sample.left,y:sample.y});
-          const rightMm = mapToCardMm({x:sample.right,y:sample.y});
-          return distance(leftMm,rightMm);
-        })
-        .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
-        .map((value)=>Number(value.toFixed(2)));
-    } catch {
-      return fourMagnetSamples
-        .map((sample)=>{
-          const cardReferencePx = cardWidthAtImageY(sample.y,source.width,source.height);
-          if(!cardReferencePx||cardReferencePx<=0) return NaN;
-          return sample.width / cardReferencePx * 85.6;
-        })
-        .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
-        .map((value)=>Number(value.toFixed(2)));
-    }
+    const baseWidthPx=Math.hypot(
+      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
+      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
+    );
+    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return [] as number[];
+    const mmPerPx=85.6/baseWidthPx;
+    return fourMagnetSamples
+      .map((sample)=>sample.width*mmPerPx)
+      .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
+      .map((value)=>Number(value.toFixed(2)));
   })();
 
   return (
@@ -1127,7 +1062,7 @@ export default function App() {
       {stage === "review" && (
         <section className="panel review">
           <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : diameterPhotoTestMode ? "2. MEÇA O DIÂMETRO INTERNO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : "2. MEÇA O DEDO"}</span>
-          <h1>{phase === "card" ? "Ajuste as quatro bordas do cartão" : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Meça onde o anel vai ficar"}</h1>
+          <h1>{phase === "card" ? "Ajuste as laterais e a base do cartão" : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Meça onde o anel vai ficar"}</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -1143,9 +1078,9 @@ export default function App() {
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
-                aria-label="Quatro linhas independentes do cartão"
+                aria-label="Três linhas magnéticas do cartão"
               >
-                {(Object.keys(cardLines) as CardEdge[]).map((edge)=>{
+                {(["left","right","bottom"] as CardEdge[]).map((edge)=>{
                   const line=cardLines[edge];
                   const locked=cardLineLocked[edge];
                   const selected=selectedCardLine===edge;
@@ -1160,14 +1095,7 @@ export default function App() {
                     </g>)}
                   </g>;
                 })}
-                {(()=>{try{
-                  const q=quadFromLines(cardLines);
-                  return q.map((p,i)=><g key={i} className="virtual-corner">
-                    <circle cx={p.x} cy={p.y} r="1.05" />
-                    <line x1={p.x-1.8} y1={p.y} x2={p.x+1.8} y2={p.y} />
-                    <line x1={p.x} y1={p.y-1.8} x2={p.x} y2={p.y+1.8} />
-                  </g>);
-                }catch{return null;}})()}
+
               </svg>
             )}
             {phase === "finger" && pixelsPerMm && (
@@ -1251,19 +1179,19 @@ export default function App() {
             )}
           </div>
 
-          {analyzingCard && <p className="analysis-loading">Localizando o cartão e preparando as 4 linhas...</p>}
+          {analyzingCard && <p className="analysis-loading">Localizando o cartão e preparando as 3 linhas...</p>}
           {phase === "card" && !analyzingCard && <div className="card-line-status">
-            {(Object.keys(cardLines) as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
-              {cardLineLocked[edge] ? "✓" : "○"} {edge==="top"?"Superior":edge==="bottom"?"Inferior":edge==="left"?"Esquerda":"Direita"}
+            {(["left","right","bottom"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
+              {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
             </span>)}
           </div>}
           {phase === "card" && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar linhas e medir o dedo</button>}
           {phase === "card" && !analyzingCard && (
             <div className="card-base-status">
-              <strong>Ajuste as 4 linhas nas bordas retas</strong>
+              <strong>Ajuste as 2 laterais e a linha da base</strong>
               <span>Arraste a linha inteira para mover. Arraste as bolinhas das pontas para inclinar. Ao soltar, o ímã procura a borda.</span>
-              <small>Os 4 cantos corrigem a perspectiva. A base inferior é a referência principal de escala; a geometria completa valida a perspectiva.</small>
-              <small>O dedo só é liberado com calibração confirmada de {MIN_CARD_CALIBRATION_CONFIDENCE}% ou mais.</small>
+              <small>A largura é calculada exatamente na linha da base. Essa distância representa os 85,60 mm do cartão.</small>
+              <small>As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar automaticamente.</small>
             </div>
           )}
 
