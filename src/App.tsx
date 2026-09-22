@@ -804,8 +804,10 @@ export default function App() {
     };
 
     // Quatro pares magnéticos independentes, sempre horizontais.
+    // Ficam concentrados perto da linha central, na região onde o anel realmente
+    // apoia no dedo. Isso evita misturar partes mais largas/estreitas do dedo.
     // As linhas laterais servem só como guia; cada par procura a borda local real.
-    const yPercents = [-15, -5, 5, 15].map((offset)=>clamp(measureY + offset, 6, 94));
+    const yPercents = [-4, -1.5, 1.5, 4].map((offset)=>clamp(measureY + offset, 6, 94));
     const samples: {left:number;right:number;y:number;width:number;yPercent:number;leftPercent:number;rightPercent:number;confidence:number}[] = [];
 
     for (const yPercent of yPercents) {
