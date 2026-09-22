@@ -511,29 +511,48 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   opacity:.2;
 }
 
+
 .manual-finger-line {
   position:absolute;
   z-index:4;
   height:0;
   transform:translateY(-50%);
-  border-top:2px solid #52e0a3;
   pointer-events:none;
 }
+.manual-finger-line.main {
+  border-top:1px solid #52e0a3;
+  box-shadow:0 0 4px #52e0a344;
+}
+.manual-finger-line.guide {
+  border-top:1px solid #52e0a399;
+}
+.measure-line-hit {
+  position:absolute;
+  z-index:6;
+  height:24px;
+  padding:0;
+  transform:translateY(-50%);
+  border:0;
+  background:transparent;
+  cursor:ns-resize;
+  touch-action:none;
+}
+.measure-line-hit.ring-adjust { z-index:10; }
 .finger-side-point {
   position:absolute;
   z-index:8;
-  width:28px;
-  height:28px;
+  width:22px;
+  height:22px;
   padding:0;
   transform:translate(-50%,-50%);
   border:2px solid #092118;
   border-radius:50%;
   background:#f2cf73;
-  box-shadow:0 0 8px #000;
+  box-shadow:0 0 7px #000;
   cursor:ew-resize;
   touch-action:none;
 }
 .finger-side-point.locked {
   background:#52e0a3;
-  box-shadow:0 0 10px #52e0a3aa;
+  box-shadow:0 0 9px #52e0a3aa;
 }
