@@ -84,9 +84,6 @@ export default function App() {
     bottom:{a:{x:15,y:50},b:{x:85,y:50}},
   });
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
-  const [autoCapturePending, setAutoCapturePending] = useState(false);
-  const autoCaptureTimerRef = useRef<number | null>(null);
-  const autoCaptureTriggeredRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,12 +135,6 @@ export default function App() {
   }, [stage, camera.cameraOpening]);
 
   const openCamera = async () => {
-    if(autoCaptureTimerRef.current !== null){
-      window.clearTimeout(autoCaptureTimerRef.current);
-      autoCaptureTimerRef.current=null;
-    }
-    autoCaptureTriggeredRef.current=false;
-    setAutoCapturePending(false);
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
     setPhase("card");
@@ -307,55 +298,6 @@ export default function App() {
   };
 
 
-  // Captura automática da calibração do cartão.
-  // Quando o guia ao vivo fica verde (cartão + ângulo corretos) e permanece
-  // estável por 900 ms, a foto é disparada sozinha. Se sair do verde antes,
-  // o temporizador é cancelado.
-  useEffect(() => {
-    const isFingerCardCalibration =
-      stage === "camera" &&
-      measurementMode === "finger" &&
-      !diameterPhotoTestMode &&
-      fingerCardCalibrationStep !== "done" &&
-      !camera.cameraOpening;
-
-    if(!isFingerCardCalibration || !cardReady){
-      if(autoCaptureTimerRef.current !== null){
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current=null;
-      }
-      setAutoCapturePending(false);
-      return;
-    }
-
-    if(autoCaptureTriggeredRef.current || autoCaptureTimerRef.current !== null) return;
-
-    setAutoCapturePending(true);
-    autoCaptureTimerRef.current=window.setTimeout(() => {
-      autoCaptureTimerRef.current=null;
-      setAutoCapturePending(false);
-
-      // Revalida o estado imediatamente antes do disparo.
-      if(!cardReady || autoCaptureTriggeredRef.current) return;
-
-      autoCaptureTriggeredRef.current=true;
-      void capture();
-    }, 900);
-
-    return () => {
-      if(autoCaptureTimerRef.current !== null){
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current=null;
-      }
-    };
-  }, [
-    stage,
-    cardReady,
-    measurementMode,
-    diameterPhotoTestMode,
-    fingerCardCalibrationStep,
-    camera.cameraOpening,
-  ]);
 
   const cardBaseFromCurrentLines = () => {
     const source = photoPixelsRef.current;
@@ -1303,6 +1245,28 @@ export default function App() {
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
 
+  const guidedStep =
+    phase === "card"
+      ? (fingerCardCalibrationStep === "reference" ? 1 : 2)
+      : phase === "finger"
+        ? (result && leftLocked && rightLocked ? 4 : 3)
+        : 1;
+
+  const guideTitle =
+    guidedStep === 1 ? "1. Calibre o cartão em uma base plana" :
+    guidedStep === 2 ? "2. Fotografe o cartão sobre o dedo" :
+    guidedStep === 3 ? "3. Ajuste o contorno na parte mais grossa" :
+    "4. Confira os dois números";
+
+  const guideText =
+    guidedStep === 1
+      ? "Ajuste as duas linhas laterais nas bordas do cartão. Quando elas estiverem verdes, confira a linha central e salve a referência de 85,60 mm."
+      : guidedStep === 2
+        ? "Coloque o cartão sobre o dedo que será medido. Posicione a região mais grossa — junta ou falange — na linha guia. Ajuste as laterais do cartão e confirme."
+        : guidedStep === 3
+          ? "Mova a faixa até a parte mais grossa do dedo, exatamente onde o anel precisa passar. Aproxime as laterais e solte para os 4 pontos magnéticos grudarem no contorno."
+          : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
+
   return (
     <main className="app">
       <header className="brand">
@@ -1326,7 +1290,7 @@ export default function App() {
           torchSupported={camera.torchSupported}
           onToggleTorch={() => void camera.toggleTorch()}
           cardReady={cardReady}
-          autoCapturePending={autoCapturePending && measurementMode === "finger" && fingerCardCalibrationStep !== "done"}
+          calibrationStep={fingerCardCalibrationStep}
           cameraAngleGuide={cameraAngleGuide}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
@@ -1352,6 +1316,24 @@ export default function App() {
 
       {stage === "review" && (
         <section className="panel review">
+          {measurementMode === "finger" && !diameterPhotoTestMode && (
+            <div
+              role="status"
+              style={{
+                margin:"0 0 14px",
+                padding:"14px 16px",
+                border:"1px solid rgba(220,180,90,.65)",
+                borderRadius:16,
+                background:"rgba(34,27,17,.96)",
+                display:"grid",
+                gap:6
+              }}
+            >
+              <small style={{color:"#d7b35f",fontWeight:800,letterSpacing:".12em"}}>PASSO {guidedStep} DE 4</small>
+              <strong style={{fontSize:"1.05rem"}}>{guideTitle}</strong>
+              <span style={{lineHeight:1.45,opacity:.9}}>{guideText}</span>
+            </div>
+          )}
           <span className="step">{
             phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
               ? (fingerCardCalibrationStep === "reference" ? "1. CARTÃO RETO — RETA DE 85,60 MM" : "2. CARTÃO SOBRE O DEDO")
@@ -1528,9 +1510,9 @@ export default function App() {
             )}
             {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
-                <span>ARO AJUSTADO:</span>
+                <span>NÚMERO EXATO:</span>
                 <strong>{result.ringSize}</strong>
-                <small>Conforto: {clamp(result.ringSize + 1, 1, 40)}</small>
+                <small>Conforto: {clamp(result.ringSize + 1, 1, 40)} · recomendado com folga</small>
               </div>
             )}
             {phase === "finger" && pixelsPerMm && tryOn && (
@@ -1557,12 +1539,16 @@ export default function App() {
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
-                {fingerCardCalibrationStep === "reference" ? "Salvar interseções de 85,60 mm e tirar 2ª foto" : "Usar interseções e medir o dedo"}
+                {fingerCardCalibrationStep === "reference" ? "Salvar calibração e ir para a foto 2" : "Confirmar cartão e ajustar o dedo"}
               </button>
               <div className="card-base-status">
-                <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — cartão em superfície reta" : "Foto 2 — cartão sobre o dedo"}</strong>
-                <span>Primeiro aproxime as duas linhas laterais das bordas do cartão e solte: elas encaixam magneticamente. Depois ajuste a linha central atravessando o cartão.</span>
-                <small>As bolinhas e as pontas podem ficar para fora. O único segmento que vale 85,60 mm é a distância entre as duas interseções da linha central com as laterais.</small>
+                <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — calibração do cartão" : "Foto 2 — cartão sobre o dedo"}</strong>
+                <span>{fingerCardCalibrationStep === "reference"
+                  ? "Ajuste somente as duas laterais nas bordas do cartão até encaixarem. A linha central já serve como referência do meio."
+                  : "Confira as laterais do cartão sobre o dedo. A região mais grossa do dedo deve estar alinhada com a guia antes de confirmar."}</span>
+                <small>{fingerCardCalibrationStep === "reference"
+                  ? "Base plana, câmera de cima e cartão sem inclinação. O trecho entre as duas interseções vale 85,60 mm."
+                  : "Meça na parte mais grossa do dedo — junta ou falange — porque é por ali que o anel precisa passar."}</small>
                 {cardReferencePreview && (
                   <>
                     <small><strong>Segmento válido:</strong> 85,60 mm · {cardReferencePreview.lengthPx.toFixed(1)} px</small>
@@ -1610,8 +1596,13 @@ export default function App() {
 
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
-              <strong>Aro ajustado: {result.ringSize}</strong>
-              {measurementMode === "finger" && <span>Aro de conforto: {clamp(result.ringSize + 1, 1, 40)}</span>}
+              <strong>Número exato: {result.ringSize}</strong>
+              {measurementMode === "finger" && (
+                <>
+                  <span><strong>Número de conforto: {clamp(result.ringSize + 1, 1, 40)}</strong></span>
+                  <small>Exato = encaixa no dedo · Conforto = uma folga para passar pela junta.</small>
+                </>
+              )}
               {diameterPhotoTestMode && <span>Diâmetro interno medido: {result.rawWidthMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>Diâmetro ajustado para 94%: {result.widthMm.toFixed(2)} mm</span>}
               {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
@@ -1667,6 +1658,12 @@ export default function App() {
               zoom={zoom}
               defaultMeasurementType={measurementMode}
             />
+          )}
+          {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
+            <div className="edge-status">
+              <strong>Meça na parte mais grossa do dedo</strong>
+              <span>Use a junta ou falange por onde o anel precisa passar. Depois aproxime as laterais e solte.</span>
+            </div>
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
