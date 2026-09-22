@@ -80,6 +80,13 @@ export const RING_DIAMETER_TABLE = [
   { size: 40, diameterMm: 25.46 },
 ];
 
+export const FINGER_DIAMETER_BLOCKS = [
+  { name: "bloco_1", minMm: Number.NEGATIVE_INFINITY, maxMm: 18.675, minRing: 13, maxRing: 20 },
+  { name: "bloco_2", minMm: 18.675, maxMm: 19.650, minRing: 21, maxRing: 23 },
+  { name: "bloco_3", minMm: 19.650, maxMm: 20.775, minRing: 24, maxRing: 26 },
+  { name: "bloco_4", minMm: 20.775, maxMm: Number.POSITIVE_INFINITY, minRing: 27, maxRing: 33 },
+] as const;
+
 // Conversão 2D calibrada por medições reais de largura marcada e diâmetro
 // interno confirmado do aro. Não usa estimativa de volume/formato do dedo.
 export const INNER_DIAMETER_SLOPE = 0.873;
@@ -218,46 +225,35 @@ export const ringSizeFromNormalizedMab = (normalizedMabMm: number) => {
 };
 
 export const ringFromInnerDiameter = (diameterMm: number) => {
-  let selectedIndex = RING_DIAMETER_TABLE.length - 1;
-  const DEAD_ZONE_MM = 0.15;
-  let nearestBoundaryDistance = Number.POSITIVE_INFINITY;
-  let usedDeadZone = false;
+  // Entre os aros físicos 13–33 usamos quatro blocos independentes.
+  // Cada bloco escolhe o aro cuja referência medida no paquímetro fica
+  // mais próxima do diâmetro equivalente. Isso evita forçar uma única
+  // curva global sobre regiões com inclinações diferentes.
+  const block = FINGER_DIAMETER_BLOCKS.find(
+    (candidate) => diameterMm >= candidate.minMm && diameterMm < candidate.maxMm,
+  );
 
-  for (let i = 0; i < RING_DIAMETER_TABLE.length; i++) {
-    const current = RING_DIAMETER_TABLE[i];
-    const next = RING_DIAMETER_TABLE[i + 1];
-    const upperBoundary = next
-      ? (current.diameterMm + next.diameterMm) / 2
-      : Number.POSITIVE_INFINITY;
+  const candidates = block
+    ? RING_DIAMETER_TABLE.filter(
+        (ring) => ring.size >= block.minRing && ring.size <= block.maxRing,
+      )
+    : RING_DIAMETER_TABLE;
 
-    if (next) {
-      const distanceToBoundary = Math.abs(diameterMm - upperBoundary);
-      nearestBoundaryDistance = Math.min(nearestBoundaryDistance, distanceToBoundary);
+  let selectedRing = candidates[0] || RING_DIAMETER_TABLE[0];
+  let bestDistance = Math.abs(diameterMm - selectedRing.diameterMm);
 
-      // Zona morta de 0,15 mm: quando a leitura fica até 0,15 mm abaixo
-      // da divisão entre dois aros, favorecemos o aro seguinte. Isso absorve
-      // a pequena variação residual entre fotos sem alterar a escala do cartão.
-      const effectiveBoundary = upperBoundary - DEAD_ZONE_MM;
-      if (diameterMm >= effectiveBoundary && diameterMm < upperBoundary) {
-        selectedIndex = i + 1;
-        usedDeadZone = true;
-        break;
-      }
-
-      if (diameterMm < effectiveBoundary) {
-        selectedIndex = i;
-        break;
-      }
-    } else {
-      selectedIndex = i;
-      break;
+  for (const ring of candidates) {
+    const distanceMm = Math.abs(diameterMm - ring.diameterMm);
+    if (distanceMm < bestDistance) {
+      selectedRing = ring;
+      bestDistance = distanceMm;
     }
   }
 
   return {
-    selectedRing: RING_DIAMETER_TABLE[selectedIndex],
-    nearBoundary: usedDeadZone,
-    boundaryDistanceMm: Number.isFinite(nearestBoundaryDistance) ? nearestBoundaryDistance : null,
+    selectedRing,
+    nearBoundary: false,
+    boundaryDistanceMm: bestDistance,
   };
 };
 
