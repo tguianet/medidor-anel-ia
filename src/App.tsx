@@ -14,6 +14,7 @@ import TryOnPanel from "./components/TryOnPanel";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
+const TEST_FIXED_FINGER_SCALE_MM_PER_PX = 0.1121;
 
 export default function App() {
   const camera = useCameraStream();
@@ -1028,7 +1029,17 @@ export default function App() {
     );
     const fallbackWidth=Math.abs(toImageX(rightLine)-toImageX(leftLine));
     const widthsPx=samples?.length ? samples.map(s=>s.width) : [fallbackWidth];
-    const widthsMm=widthsPx.map(w=>w/pixelsPerMm).filter(v=>Number.isFinite(v)&&v>0&&v<45).sort((a,b)=>a-b);
+
+    // TESTE CONTROLADO:
+    // no modo dedo, mantém toda a calibração visual do cartão e os 4 pontos
+    // magnéticos, mas converte a largura em pixels usando uma escala fixa.
+    // Isso serve apenas para validar se a instabilidade restante vem da escala.
+    const mmPerPx =
+      measurementMode === "finger" && !diameterPhotoTestMode
+        ? TEST_FIXED_FINGER_SCALE_MM_PER_PX
+        : 1/pixelsPerMm;
+
+    const widthsMm=widthsPx.map(w=>w*mmPerPx).filter(v=>Number.isFinite(v)&&v>0&&v<45).sort((a,b)=>a-b);
     if(!widthsMm.length) return null;
     if(widthsMm.length>=4){
       const middle=widthsMm.slice(1,-1);
@@ -1036,7 +1047,7 @@ export default function App() {
     }
     const mid=Math.floor(widthsMm.length/2);
     return widthsMm.length%2 ? widthsMm[mid] : (widthsMm[mid-1]+widthsMm[mid])/2;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines]);
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines,measurementMode,diameterPhotoTestMode]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1118,7 +1129,11 @@ export default function App() {
   const fourMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
   const fourMagnetWidthsMm = (() => {
     if(!fourMagnetSamples?.length||!pixelsPerMm) return [] as number[];
-    return fourMagnetSamples.map(s=>Number((s.width/pixelsPerMm).toFixed(2)));
+    const mmPerPx =
+      measurementMode === "finger" && !diameterPhotoTestMode
+        ? TEST_FIXED_FINGER_SCALE_MM_PER_PX
+        : 1/pixelsPerMm;
+    return fourMagnetSamples.map(s=>Number((s.width*mmPerPx).toFixed(2)));
   })();
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
@@ -1420,6 +1435,9 @@ export default function App() {
               {measurementMode === "finger" && <span>Referência do cartão: reta ajustada de 85,60 mm na 2ª foto</span>}
               {measurementMode === "finger" && geometricScaleMmPerPx !== null && (
                 <span>Escala pela reta: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
+              )}
+              {measurementMode === "finger" && !diameterPhotoTestMode && (
+                <span>Escala fixa de teste aplicada: {TEST_FIXED_FINGER_SCALE_MM_PER_PX.toFixed(4)} mm/px</span>
               )}
               {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
               {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
