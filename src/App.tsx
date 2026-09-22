@@ -75,6 +75,8 @@ export default function App() {
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
+  const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
+  const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +172,51 @@ export default function App() {
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const capturedPhoto = canvas.toDataURL("image/jpeg", 0.94);
     setPhoto(capturedPhoto);
+
+    // Modo dedo em duas fotos:
+    // 1) cartão reto para definir a reta física de 85,60 mm;
+    // 2) cartão sobre o dedo, reutilizando a mesma reta como gabarito e
+    //    reajustando suas pontas na nova foto. A escala vem SOMENTE da
+    //    reta ajustada na segunda foto.
+    if (measurementMode === "finger" && !diameterPhotoTestMode && fingerCardCalibrationStep !== "done") {
+      setPixelsPerMm(null);
+      setCalibrationConfidence(0);
+      setPhase("card");
+      setZoom(1);
+      setPanX(0);
+      setPanY(0);
+      setLeftLocked(false);
+      setRightLocked(false);
+      camera.stopCamera();
+      setStage("review");
+      setAnalyzingCard(false);
+      setCardLineLocked({top:false,right:false,bottom:false,left:false});
+      setSelectedCardLine("bottom");
+
+      if (fingerCardCalibrationStep === "reference") {
+        try {
+          const calibration = await calibratePhoto(capturedPhoto);
+          const left = clamp(calibration.cardBox.x * 100, 4, 90);
+          const right = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 10, 96);
+          const y = clamp((calibration.cardBox.y + calibration.cardBox.height * 0.5) * 100, 8, 92);
+          setCardLines((current)=>({
+            ...current,
+            bottom:{a:{x:Math.min(left,right-5),y},b:{x:Math.max(right,left+5),y}},
+          }));
+          camera.setError("Foto 1: ajuste a reta exatamente de uma ponta à outra da largura de 85,60 mm do cartão.");
+        } catch {
+          setCardLines((current)=>({
+            ...current,
+            bottom:{a:{x:15,y:50},b:{x:85,y:50}},
+          }));
+          camera.setError("Foto 1: ajuste manualmente a reta de ponta a ponta do cartão. Essa reta vale 85,60 mm.");
+        }
+      } else {
+        setCardLines((current)=>({...current,bottom:{a:{...referenceCardLine.a},b:{...referenceCardLine.b}}}));
+        camera.setError("Foto 2: ajuste a mesma reta sobre as duas pontas do cartão que está sobre o dedo.");
+      }
+      return;
+    }
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
     setPhase("card");
@@ -283,11 +330,12 @@ export default function App() {
   const activateFingerMeasurement = (
     baseLeft:number, baseRight:number, baseBottom:number, confidence=92,
     quadPercent:[Point,Point,Point,Point]=cardQuad,
+    pixelsPerMmOverride?: number,
   ) => {
     const source=photoPixelsRef.current;
-    if(source){
-      // UI scale only. The actual MA calculation below uses the card itself as
-      // the metric reference and never the full photo/canvas width.
+    if(Number.isFinite(pixelsPerMmOverride) && (pixelsPerMmOverride ?? 0) > 0){
+      setPixelsPerMm(pixelsPerMmOverride as number);
+    } else if(source){
       const bottomWidthPx=Math.hypot(
         (quadPercent[2].x-quadPercent[3].x)/100*source.width,
         (quadPercent[2].y-quadPercent[3].y)/100*source.height,
@@ -318,6 +366,38 @@ export default function App() {
     setRightMagnetConfidence(0);
     setLeftManualRefined(false);
     setRightManualRefined(false);
+  };
+
+  const confirmReferenceCardLine = () => {
+    const line=cardLines.bottom;
+    setReferenceCardLine({a:{...line.a},b:{...line.b}});
+    setFingerCardCalibrationStep("measurement");
+    camera.setError("Agora coloque o mesmo cartão sobre o dedo e tire a segunda foto.");
+    void openCamera();
+  };
+
+  const confirmMeasurementCardLine = () => {
+    const source=photoPixelsRef.current;
+    if(!source){
+      camera.setError("A foto ainda está carregando. Tente confirmar novamente.");
+      return;
+    }
+    const line=cardLines.bottom;
+    const ax=line.a.x/100*source.width;
+    const ay=line.a.y/100*source.height;
+    const bx=line.b.x/100*source.width;
+    const by=line.b.y/100*source.height;
+    const lineLengthPx=Math.hypot(bx-ax,by-ay);
+    if(!Number.isFinite(lineLengthPx)||lineLengthPx<source.width*0.08){
+      camera.setError("A reta ficou curta demais. Ajuste as duas pontas exatamente nas extremidades do cartão.");
+      return;
+    }
+
+    const pxPerMm=lineLengthPx/85.6;
+    const lineMidY=(line.a.y+line.b.y)/2;
+    setFingerCardCalibrationStep("done");
+    setCalibrationConfidence(100);
+    activateFingerMeasurement(line.a.x,line.b.x,lineMidY,100,cardQuad,pxPerMm);
   };
 
   const setFingerLineFromCenterTilt = (side:FingerSide, centerX:number, tiltDeg:number) => {
@@ -777,7 +857,14 @@ export default function App() {
     }
     if(typeof target==="string"&&target.startsWith("card-line-")){
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
-      if(match) snapCardLine(match[1] as CardEdge);
+      if(match){
+        const edge=match[1] as CardEdge;
+        if(measurementMode==="finger" && !diameterPhotoTestMode && fingerCardCalibrationStep!=="done"){
+          setCardLineLocked((current)=>({...current,[edge]:true}));
+        }else{
+          snapCardLine(edge);
+        }
+      }
     }
     draggingRef.current=null;
     fingerRefineDragRef.current=null;
@@ -925,6 +1012,9 @@ export default function App() {
   }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
 
   const resetPhoto = () => {
+    if(measurementMode==="finger" && !diameterPhotoTestMode){
+      setFingerCardCalibrationStep(referenceCardLine ? "measurement" : "reference");
+    }
     setPhoto("");
     setTryOn(false);
     setAnalyzingCard(false);
@@ -985,7 +1075,7 @@ export default function App() {
       {stage === "intro" && (
         <IntroScreen
           error={camera.error}
-          onMeasureFinger={() => { setDiameterPhotoTestMode(false); setMeasurementMode("finger"); void openCamera(); }}
+          onMeasureFinger={() => { setDiameterPhotoTestMode(false); setMeasurementMode("finger"); setFingerCardCalibrationStep("reference"); void openCamera(); }}
           onTestGauge={() => { setDiameterPhotoTestMode(false); setMeasurementMode("anelimetro"); void openCamera(); }}
           onTestDiameterPhoto={() => { setDiameterPhotoTestMode(true); setMeasurementMode("finger"); void openCamera(); }}
         />
@@ -1023,8 +1113,22 @@ export default function App() {
 
       {stage === "review" && (
         <section className="panel review">
-          <span className="step">{phase === "card" ? "1. CALIBRE O CARTÃO" : diameterPhotoTestMode ? "2. MEÇA O DIÂMETRO INTERNO" : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO" : "2. MEÇA O DEDO"}</span>
-          <h1>{phase === "card" ? "Ajuste as laterais e a base do cartão" : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel" : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro" : "Meça onde o anel vai ficar"}</h1>
+          <span className="step">{
+            phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
+              ? (fingerCardCalibrationStep === "reference" ? "1. CARTÃO RETO — RETA DE 85,60 MM" : "2. CARTÃO SOBRE O DEDO")
+              : phase === "card" ? "1. CALIBRE O CARTÃO"
+              : diameterPhotoTestMode ? "2. MEÇA O DIÂMETRO INTERNO"
+              : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO"
+              : "3. MEÇA O DEDO"
+          }</span>
+          <h1>{
+            phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
+              ? (fingerCardCalibrationStep === "reference" ? "Ajuste a reta de ponta a ponta do cartão" : "Reajuste a mesma reta no cartão sobre o dedo")
+              : phase === "card" ? "Ajuste as laterais e a base do cartão"
+              : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel"
+              : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro"
+              : "Meça onde o anel vai ficar"
+          }</h1>
           <div
             ref={measureRef}
             className="measurement-stage is-active"
@@ -1034,7 +1138,29 @@ export default function App() {
             onPointerCancel={() => { draggingRef.current = null; }}
           >
             {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
-            {phase === "card" && (
+            {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode ? (
+              <svg
+                className="card-lines-overlay"
+                style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                aria-label="Reta de referência de 85,60 milímetros"
+              >
+                {(()=>{
+                  const line=cardLines.bottom;
+                  return <g className={`card-edge${cardLineLocked.bottom?" locked":""}`}>
+                    <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                      onPointerDown={(e)=>startCardLineDrag("bottom",null,e)} />
+                    <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    {(["a","b"] as const).map((point)=><g key={point}>
+                      <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="5.2"
+                        onPointerDown={(e)=>startCardLineDrag("bottom",point,e)} />
+                      <circle className="card-line-handle" cx={line[point].x} cy={line[point].y} r="1.5" />
+                    </g>)}
+                  </g>;
+                })()}
+              </svg>
+            ) : phase === "card" ? (
               <svg
                 className="card-lines-overlay"
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
@@ -1057,9 +1183,8 @@ export default function App() {
                     </g>)}
                   </g>;
                 })}
-
               </svg>
-            )}
+            ) : null}
             {phase === "finger" && pixelsPerMm && (
               <>
                 <div
@@ -1120,14 +1245,31 @@ export default function App() {
             )}
           </div>
 
-          {analyzingCard && <p className="analysis-loading">Localizando o cartão e preparando as 3 linhas...</p>}
-          {phase === "card" && !analyzingCard && <div className="card-line-status">
+          {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
+          {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
+            <>
+              <button
+                className="primary confirm-perspective"
+                type="button"
+                onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
+              >
+                {fingerCardCalibrationStep === "reference" ? "Salvar reta de 85,60 mm e tirar 2ª foto" : "Usar esta reta e medir o dedo"}
+              </button>
+              <div className="card-base-status">
+                <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — cartão em superfície reta" : "Foto 2 — cartão sobre o dedo"}</strong>
+                <span>Arraste a linha inteira para mover. Arraste as duas pontas para aumentar, diminuir ou inclinar.</span>
+                <small>A distância entre as duas pontas da reta representa exatamente 85,60 mm.</small>
+                <small>Na segunda foto o sistema recalcula px/mm pelo novo comprimento da reta; não reutiliza os pixels da primeira foto.</small>
+              </div>
+            </>
+          )}
+          {phase === "card" && !(measurementMode === "finger" && !diameterPhotoTestMode) && !analyzingCard && <div className="card-line-status">
             {(["left","right","bottom"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
               {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
             </span>)}
           </div>}
-          {phase === "card" && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar linhas e medir o dedo</button>}
-          {phase === "card" && !analyzingCard && (
+          {phase === "card" && !(measurementMode === "finger" && !diameterPhotoTestMode) && !analyzingCard && <button className="primary confirm-perspective" type="button" onClick={confirmPerspective}>Confirmar linhas e medir o dedo</button>}
+          {phase === "card" && !(measurementMode === "finger" && !diameterPhotoTestMode) && !analyzingCard && (
             <div className="card-base-status">
               <strong>Ajuste as 2 laterais e a linha da base</strong>
               <span>Arraste a linha inteira para mover. Arraste as bolinhas das pontas para inclinar. Ao soltar, o ímã procura a borda.</span>
@@ -1171,9 +1313,9 @@ export default function App() {
                   <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
                 </>
               )}
-              {measurementMode === "finger" && <span>Referência do cartão: base de 85,60 mm</span>}
+              {measurementMode === "finger" && <span>Referência do cartão: reta ajustada de 85,60 mm na 2ª foto</span>}
               {measurementMode === "finger" && geometricScaleMmPerPx !== null && (
-                <span>Escala pela base: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
+                <span>Escala pela reta: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
               )}
               {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
               {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
