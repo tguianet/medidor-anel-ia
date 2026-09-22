@@ -6,6 +6,7 @@ type Props = {
   torchSupported: boolean;
   onToggleTorch: () => void;
   cardReady: boolean;
+  autoCapturePending: boolean;
   cameraAngleGuide: "forward" | "backward" | "aligned" | "unknown";
   cameraOpening: boolean;
   error: string;
@@ -15,7 +16,7 @@ type Props = {
 };
 
 export default function CameraScreen({
-  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, cameraAngleGuide, cameraOpening, error, onClose, onCapture, onRetry,
+  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, autoCapturePending, cameraAngleGuide, cameraOpening, error, onClose, onCapture, onRetry,
 }: Props) {
   return (
     <section className="camera-screen">
@@ -28,7 +29,7 @@ export default function CameraScreen({
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
           <div className="live-card-frame">
-            <span>{cardReady ? "✓ CARTÃO E ÂNGULO OK" : "ENCAIXE O CARTÃO"}</span>
+            <span>{autoCapturePending ? "✓ ALINHADO — FOTO AUTOMÁTICA..." : cardReady ? "✓ CARTÃO E ÂNGULO OK" : "ENCAIXE O CARTÃO"}</span>
             <i className="card-guide-corner tl" />
             <i className="card-guide-corner tr" />
             <i className="card-guide-corner br" />
@@ -52,8 +53,10 @@ export default function CameraScreen({
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{cardReady
-        ? "Cartão e ângulo corretos. Mantenha o dedo sobre a linha central e tire a foto."
+      <p>{autoCapturePending
+        ? "Tudo verde. Fique parado: a foto será tirada automaticamente."
+        : cardReady
+          ? "Cartão e ângulo corretos. Fique parado para a captura automática ou toque no botão."
         : cameraAngleGuide === "forward"
           ? "Incline levemente a câmera para frente até o indicador ficar verde."
           : cameraAngleGuide === "backward"
