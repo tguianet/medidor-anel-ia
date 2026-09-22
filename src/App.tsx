@@ -956,37 +956,93 @@ export default function App() {
       return line.a.x+(line.b.x-line.a.x)*t;
     };
 
-    // NOVA ESTRATÉGIA:
-    // os 4 pontos NÃO procuram bordas de forma independente.
-    // A linha lateral esquerda e a direita definem um único contorno contínuo.
-    // As 4 leituras apenas cruzam essas duas linhas nos quatro níveis.
+    const grayscale=(x:number,y:number)=>{
+      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
+      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
+      const o=(iy*source.width+ix)*4;
+      return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
+    };
+
+    const searchRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
     const yPercents=[-4,-1.5,1.5,4].map(off=>clamp(measureY+off,6,94));
-    const samples:{left:number;right:number;y:number;width:number;yPercent:number;leftPercent:number;rightPercent:number;confidence:number}[]=[];
+
+    const findEdge=(side:"left"|"right",guideX:number,y:number,previousX:number|null)=>{
+      const outside=(x:number)=>side==="left"?grayscale(x-4,y):grayscale(x+4,y);
+      const inside=(x:number)=>side==="left"?grayscale(x+4,y):grayscale(x-4,y);
+
+      const expectedPolarityRaw=outside(guideX)-inside(guideX);
+      const expectedPolarity=Math.abs(expectedPolarityRaw)>=3?Math.sign(expectedPolarityRaw):0;
+
+      let bestX=Math.round(guideX);
+      let bestScore=-Infinity;
+      for(let x=Math.round(guideX)-searchRadius;x<=Math.round(guideX)+searchRadius;x++){
+        if(x<6||x>=source.width-6) continue;
+
+        const signed=outside(x)-inside(x);
+        const edgeStrength=expectedPolarity===0?Math.abs(signed):Math.max(0,signed*expectedPolarity);
+        const guidePenalty=Math.abs(x-guideX)*0.45;
+        const continuityPenalty=previousX===null?0:Math.abs(x-previousX)*0.9;
+        const score=edgeStrength-guidePenalty-continuityPenalty;
+
+        if(score>bestScore){
+          bestScore=score;
+          bestX=x;
+        }
+      }
+      return {x:bestX,score:bestScore};
+    };
+
+    // Cada um dos 4 níveis procura localmente a borda mais próxima,
+    // mas com continuidade entre os níveis para formar UM contorno por lado.
+    const leftPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
+    const rightPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
+    let previousLeft:number|null=null;
+    let previousRight:number|null=null;
 
     for(const yPercent of yPercents){
       const y=toImageY(yPercent);
-      if(y<3||y>=source.height-3) continue;
+      if(y<6||y>=source.height-6) continue;
 
-      const leftPercent=lineXAtScreenY(fingerLines.left,yPercent);
-      const rightPercent=lineXAtScreenY(fingerLines.right,yPercent);
+      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
 
-      const leftX=toImageX(leftPercent);
-      const rightX=toImageX(rightPercent);
-      if(!Number.isFinite(leftX)||!Number.isFinite(rightX)||rightX<=leftX) continue;
+      const le=findEdge("left",leftGuide,y,previousLeft);
+      const re=findEdge("right",rightGuide,y,previousRight);
 
-      samples.push({
-        left:leftX,
-        right:rightX,
-        y,
-        width:rightX-leftX,
-        yPercent,
-        leftPercent:toScreenXPercent(leftX),
-        rightPercent:toScreenXPercent(rightX),
-        confidence:Math.round(clamp((leftMagnetConfidence+rightMagnetConfidence)/2 || 90,0,99)),
-      });
+      if(le.score<6||re.score<6||re.x<=le.x) continue;
+
+      leftPoints.push({x:le.x,y,yPercent,score:le.score});
+      rightPoints.push({x:re.x,y,yPercent,score:re.score});
+      previousLeft=le.x;
+      previousRight=re.x;
     }
 
-    return samples.length===4 ? samples : null;
+    if(leftPoints.length!==4||rightPoints.length!==4) return null;
+
+    // Rejeita saltos grandes entre pontos vizinhos: se uma ruga/sombra tentar
+    // puxar um ponto para dentro, mantemos o contorno contínuo.
+    const maxJump=Math.max(5,Math.round(10/Math.max(1,zoom)));
+    for(let i=1;i<4;i++){
+      if(Math.abs(leftPoints[i].x-leftPoints[i-1].x)>maxJump) return null;
+      if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
+    }
+
+    return leftPoints.map((leftPoint,index)=>{
+      const rightPoint=rightPoints[index];
+      return {
+        left:leftPoint.x,
+        right:rightPoint.x,
+        y:leftPoint.y,
+        width:rightPoint.x-leftPoint.x,
+        yPercent:leftPoint.yPercent,
+        leftPercent:toScreenXPercent(leftPoint.x),
+        rightPercent:toScreenXPercent(rightPoint.x),
+        confidence:Math.round(clamp(
+          45+Math.min(26,leftPoint.score*.55)+Math.min(26,rightPoint.score*.55),
+          0,99
+        )),
+      };
+    });
   };
 
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
@@ -1293,6 +1349,34 @@ export default function App() {
                     aria-hidden="true"
                   />
                 ))}
+                {fourMagnetSamples && (
+                  <svg
+                    className="finger-contour-overlay"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:5}}
+                  >
+                    <polyline
+                      points={fourMagnetSamples.map((sample)=>`${sample.leftPercent},${sample.yPercent}`).join(" ")}
+                      fill="none"
+                      stroke="#52e0a3"
+                      strokeWidth="0.45"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <polyline
+                      points={fourMagnetSamples.map((sample)=>`${sample.rightPercent},${sample.yPercent}`).join(" ")}
+                      fill="none"
+                      stroke="#52e0a3"
+                      strokeWidth="0.45"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    {fourMagnetSamples.flatMap((sample,index)=>[
+                      <circle key={`left-contour-${index}`} cx={sample.leftPercent} cy={sample.yPercent} r="0.65" fill="#52e0a3" />,
+                      <circle key={`right-contour-${index}`} cx={sample.rightPercent} cy={sample.yPercent} r="0.65" fill="#52e0a3" />,
+                    ])}
+                  </svg>
+                )}
                 <div
                   className="manual-finger-line main"
                   style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }}
@@ -1446,8 +1530,8 @@ export default function App() {
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>4 leituras no mesmo contorno</strong>
-              <span>{fourMagnetSamples ? `${fourMagnetSamples.length}/4 leituras válidas · as 4 leituras cruzam as mesmas laterais do dedo` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
+              <strong>4 pontos magnéticos no contorno</strong>
+              <span>{fourMagnetSamples ? `${fourMagnetSamples.length}/4 leituras válidas · cada ponto busca a borda próxima e os 4 formam um contorno contínuo` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
