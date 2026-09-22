@@ -84,6 +84,9 @@ export default function App() {
     bottom:{a:{x:15,y:50},b:{x:85,y:50}},
   });
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
+  const [autoCapturePending, setAutoCapturePending] = useState(false);
+  const autoCaptureTimerRef = useRef<number | null>(null);
+  const autoCaptureTriggeredRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +138,12 @@ export default function App() {
   }, [stage, camera.cameraOpening]);
 
   const openCamera = async () => {
+    if(autoCaptureTimerRef.current !== null){
+      window.clearTimeout(autoCaptureTimerRef.current);
+      autoCaptureTimerRef.current=null;
+    }
+    autoCaptureTriggeredRef.current=false;
+    setAutoCapturePending(false);
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
     setPhase("card");
@@ -296,6 +305,57 @@ export default function App() {
       setAnalyzingCard(false);
     }
   };
+
+
+  // Captura automática da calibração do cartão.
+  // Quando o guia ao vivo fica verde (cartão + ângulo corretos) e permanece
+  // estável por 900 ms, a foto é disparada sozinha. Se sair do verde antes,
+  // o temporizador é cancelado.
+  useEffect(() => {
+    const isFingerCardCalibration =
+      stage === "camera" &&
+      measurementMode === "finger" &&
+      !diameterPhotoTestMode &&
+      fingerCardCalibrationStep !== "done" &&
+      !camera.cameraOpening;
+
+    if(!isFingerCardCalibration || !cardReady){
+      if(autoCaptureTimerRef.current !== null){
+        window.clearTimeout(autoCaptureTimerRef.current);
+        autoCaptureTimerRef.current=null;
+      }
+      setAutoCapturePending(false);
+      return;
+    }
+
+    if(autoCaptureTriggeredRef.current || autoCaptureTimerRef.current !== null) return;
+
+    setAutoCapturePending(true);
+    autoCaptureTimerRef.current=window.setTimeout(() => {
+      autoCaptureTimerRef.current=null;
+      setAutoCapturePending(false);
+
+      // Revalida o estado imediatamente antes do disparo.
+      if(!cardReady || autoCaptureTriggeredRef.current) return;
+
+      autoCaptureTriggeredRef.current=true;
+      void capture();
+    }, 900);
+
+    return () => {
+      if(autoCaptureTimerRef.current !== null){
+        window.clearTimeout(autoCaptureTimerRef.current);
+        autoCaptureTimerRef.current=null;
+      }
+    };
+  }, [
+    stage,
+    cardReady,
+    measurementMode,
+    diameterPhotoTestMode,
+    fingerCardCalibrationStep,
+    camera.cameraOpening,
+  ]);
 
   const cardBaseFromCurrentLines = () => {
     const source = photoPixelsRef.current;
@@ -1266,6 +1326,7 @@ export default function App() {
           torchSupported={camera.torchSupported}
           onToggleTorch={() => void camera.toggleTorch()}
           cardReady={cardReady}
+          autoCapturePending={autoCapturePending && measurementMode === "finger" && fingerCardCalibrationStep !== "done"}
           cameraAngleGuide={cameraAngleGuide}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
