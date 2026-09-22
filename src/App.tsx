@@ -577,38 +577,48 @@ export default function App() {
     const stage = measureRef.current;
     const source = photoPixelsRef.current;
     if (!stage || !source) return;
+
     const rect = stage.getBoundingClientRect();
     const screenX = clientX - rect.left;
     const screenY = measureY / 100 * rect.height;
+
     const imageX = ((screenX - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width;
     const imageY = ((screenY - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
-    const radius = Math.max(8, Math.round(20 / zoom));
+
+    // Busca local curta: o usuario aproxima a linha da borda e o ima
+    // apenas refina o encaixe. Isso evita saltar para sombra, fundo ou
+    // outra aresta distante do dedo.
+    const radius = Math.max(5, Math.round(10 / Math.max(1, zoom)));
+
     const grayscale = (x:number,y:number) => {
       const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
       const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
       const offset=(iy*source.width+ix)*4;
       return source.data[offset]*0.299+source.data[offset+1]*0.587+source.data[offset+2]*0.114;
     };
+
     const findEdgeAt = (center:number,y:number) => {
       let bestX=Math.round(center);
       let best=-Infinity;
       for(let candidate=Math.round(center)-radius;candidate<=Math.round(center)+radius;candidate++){
         if(candidate<3||candidate>=source.width-3) continue;
         const contrast=Math.abs(grayscale(candidate-2,y)-grayscale(candidate+2,y));
-        const score=contrast-Math.abs(candidate-center)*0.52;
+        // Penaliza fortemente pontos longe da posicao manual.
+        const score=contrast-Math.abs(candidate-center)*1.15;
         if(score>best){best=score;bestX=candidate;}
       }
       return {x:bestX,score:best};
     };
 
-    // Ímã multiponto: procura a mesma borda em várias alturas próximas e
-    // ajusta uma reta robusta. Dobras/sombras isoladas deixam de mandar na linha.
+    // Tres amostras bem proximas da linha central.
+    // A medida oficial continua sendo exatamente na altura central.
+    const sampleOffsets=[-14,0,14].map(v=>v/Math.max(1,zoom));
     const points:{x:number;y:number;score:number}[]=[];
-    for(const offset of [-42,-32,-22,-12,0,12,22,32,42]){
-      const y=Math.round(imageY+offset/Math.max(1,zoom));
+    for(const off of sampleOffsets){
+      const y=Math.round(imageY+off);
       if(y<4||y>=source.height-4) continue;
       const edge=findEdgeAt(imageX,y);
-      if(edge.score>=9) points.push({x:edge.x,y,score:edge.score});
+      if(edge.score>=8) points.push({x:edge.x,y,score:edge.score});
     }
 
     const keepManual=()=>{
@@ -624,56 +634,52 @@ export default function App() {
         setRightManualRefined(true);
       }
     };
-    if(points.length<5){ keepManual(); return; }
 
-    const median=(values:number[])=>{
-      const ordered=[...values].sort((a,b)=>a-b);
-      return ordered[Math.floor(ordered.length/2)];
-    };
-    const medianX=median(points.map(p=>p.x));
-    const filtered=points.filter(p=>Math.abs(p.x-medianX)<=Math.max(5,radius*0.72));
-    if(filtered.length<5){ keepManual(); return; }
+    if(points.length<2){ keepManual(); return; }
 
-    const cy=filtered.reduce((s,p)=>s+p.y,0)/filtered.length;
-    const cx=filtered.reduce((s,p)=>s+p.x,0)/filtered.length;
+    const cx=points.reduce((s,p)=>s+p.x,0)/points.length;
+    const cy=points.reduce((s,p)=>s+p.y,0)/points.length;
     let yy=0,yx=0;
-    for(const p of filtered){
+    for(const p of points){
       const dy=p.y-cy;
       yy+=dy*dy;
       yx+=dy*(p.x-cx);
     }
-    const slope=yy>1?yx/yy:0; // x = cx + slope * (y-cy)
+    const slope=yy>1?yx/yy:0;
     const predictedCenterX=cx+slope*(imageY-cy);
-    const residuals=filtered.map(p=>Math.abs(p.x-(cx+slope*(p.y-cy))));
-    const residual=median(residuals);
-    const avgScore=filtered.reduce((s,p)=>s+p.score,0)/filtered.length;
-    const coverage=filtered.length/9;
+
+    // Nao deixa o ima mover mais do que a pequena janela local.
+    const delta=predictedCenterX-imageX;
+    if(Math.abs(delta)>radius+1){ keepManual(); return; }
+
+    const avgScore=points.reduce((s,p)=>s+p.score,0)/points.length;
     const confidence=Math.round(clamp(
-      52 + coverage*28 + Math.min(18,avgScore*0.45) - residual*5.5,
+      55 + Math.min(35, avgScore*0.7) + points.length*3,
       0, 99,
     ));
 
-    if(confidence<68 || residual>3.8){ keepManual(); return; }
+    if(confidence<65){ keepManual(); return; }
 
     const snappedScreenX=rect.width/2+(predictedCenterX/source.width*rect.width-rect.width/2)*zoom+panX;
     const snappedPercent=clamp(snappedScreenX/rect.width*100,2,98);
-    // Converte a inclinação no espaço da imagem para o ângulo visual da linha.
-    const tiltDeg=clamp(Math.atan(slope)*180/Math.PI,-12,12);
+    const tiltDeg=clamp(Math.atan(slope)*180/Math.PI,-8,8);
 
     if(side==="left"){
-      setLeftLine(Math.min(snappedPercent,rightLine-3));
+      const next=Math.min(snappedPercent,rightLine-3);
+      setLeftLine(next);
       setLeftFingerTilt(tiltDeg);
       setLeftMagnetConfidence(confidence);
       setLeftManualRefined(false);
       setLeftLocked(true);
-      setFingerLineFromCenterTilt("left",Math.min(snappedPercent,rightLine-3),tiltDeg);
+      setFingerLineFromCenterTilt("left",next,tiltDeg);
     }else{
-      setRightLine(Math.max(snappedPercent,leftLine+3));
+      const next=Math.max(snappedPercent,leftLine+3);
+      setRightLine(next);
       setRightFingerTilt(tiltDeg);
       setRightMagnetConfidence(confidence);
       setRightManualRefined(false);
       setRightLocked(true);
-      setFingerLineFromCenterTilt("right",Math.max(snappedPercent,leftLine+3),tiltDeg);
+      setFingerLineFromCenterTilt("right",next,tiltDeg);
     }
   };
 
