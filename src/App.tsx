@@ -585,10 +585,8 @@ export default function App() {
     const imageX = ((screenX - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width;
     const imageY = ((screenY - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height;
 
-    // Busca local curta: o usuario aproxima a linha da borda e o ima
-    // apenas refina o encaixe. Isso evita saltar para sombra, fundo ou
-    // outra aresta distante do dedo.
-    const radius = Math.max(5, Math.round(10 / Math.max(1, zoom)));
+    // O usuario aproxima a linha da borda. O ima apenas refina localmente.
+    const radius = Math.max(5, Math.round(9 / Math.max(1, zoom)));
 
     const grayscale = (x:number,y:number) => {
       const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
@@ -597,28 +595,47 @@ export default function App() {
       return source.data[offset]*0.299+source.data[offset+1]*0.587+source.data[offset+2]*0.114;
     };
 
+    // Descobre a polaridade esperada entre o lado externo e o interior do dedo.
+    // Assim evitamos grudar em rugas/sombras internas.
+    const outsideAt = (x:number,y:number) => side==="left" ? grayscale(x-8,y) : grayscale(x+8,y);
+    const insideAt = (x:number,y:number) => side==="left" ? grayscale(x+8,y) : grayscale(x-8,y);
+    const polarityRaw = outsideAt(imageX,imageY)-insideAt(imageX,imageY);
+    const polarity = Math.abs(polarityRaw) >= 4 ? Math.sign(polarityRaw) : 0;
+
     const findEdgeAt = (center:number,y:number) => {
       let bestX=Math.round(center);
-      let best=-Infinity;
+      let bestScore=-Infinity;
+
       for(let candidate=Math.round(center)-radius;candidate<=Math.round(center)+radius;candidate++){
-        if(candidate<3||candidate>=source.width-3) continue;
-        const contrast=Math.abs(grayscale(candidate-2,y)-grayscale(candidate+2,y));
-        // Penaliza fortemente pontos longe da posicao manual.
-        const score=contrast-Math.abs(candidate-center)*1.15;
-        if(score>best){best=score;bestX=candidate;}
+        if(candidate<6||candidate>=source.width-6) continue;
+
+        const outside = side==="left" ? grayscale(candidate-4,y) : grayscale(candidate+4,y);
+        const inside = side==="left" ? grayscale(candidate+4,y) : grayscale(candidate-4,y);
+        const signedContrast = outside-inside;
+
+        // Se conseguimos inferir a polaridade do contorno, rejeitamos arestas
+        // com direcao oposta (tipicamente textura/ruga dentro do dedo).
+        const directionalContrast = polarity===0
+          ? Math.abs(signedContrast)
+          : Math.max(0, signedContrast*polarity);
+
+        const distancePenalty=Math.abs(candidate-center)*1.35;
+        const score=directionalContrast-distancePenalty;
+        if(score>bestScore){bestScore=score;bestX=candidate;}
       }
-      return {x:bestX,score:best};
+
+      return {x:bestX,score:bestScore};
     };
 
-    // Tres amostras bem proximas da linha central.
-    // A medida oficial continua sendo exatamente na altura central.
-    const sampleOffsets=[-14,0,14].map(v=>v/Math.max(1,zoom));
-    const points:{x:number;y:number;score:number}[]=[];
+    // Varias amostras verticais curtas para privilegiar um contorno continuo.
+    const sampleOffsets=[-24,-16,-8,0,8,16,24].map(v=>v/Math.max(1,zoom));
+    const rawPoints:{x:number;y:number;score:number}[]=[];
+
     for(const off of sampleOffsets){
       const y=Math.round(imageY+off);
-      if(y<4||y>=source.height-4) continue;
+      if(y<6||y>=source.height-6) continue;
       const edge=findEdgeAt(imageX,y);
-      if(edge.score>=8) points.push({x:edge.x,y,score:edge.score});
+      if(edge.score>=6) rawPoints.push({x:edge.x,y,score:edge.score});
     }
 
     const keepManual=()=>{
@@ -635,12 +652,21 @@ export default function App() {
       }
     };
 
-    if(points.length<2){ keepManual(); return; }
+    if(rawPoints.length<4){ keepManual(); return; }
 
-    const cx=points.reduce((s,p)=>s+p.x,0)/points.length;
-    const cy=points.reduce((s,p)=>s+p.y,0)/points.length;
+    const median=(values:number[])=>{
+      const ordered=[...values].sort((a,b)=>a-b);
+      return ordered[Math.floor(ordered.length/2)];
+    };
+
+    const medianX=median(rawPoints.map(p=>p.x));
+    const coherent=rawPoints.filter(p=>Math.abs(p.x-medianX)<=Math.max(2.5,radius*0.45));
+    if(coherent.length<4){ keepManual(); return; }
+
+    const cx=coherent.reduce((s,p)=>s+p.x,0)/coherent.length;
+    const cy=coherent.reduce((s,p)=>s+p.y,0)/coherent.length;
     let yy=0,yx=0;
-    for(const p of points){
+    for(const p of coherent){
       const dy=p.y-cy;
       yy+=dy*dy;
       yx+=dy*(p.x-cx);
@@ -648,21 +674,20 @@ export default function App() {
     const slope=yy>1?yx/yy:0;
     const predictedCenterX=cx+slope*(imageY-cy);
 
-    // Nao deixa o ima mover mais do que a pequena janela local.
+    const residual=median(coherent.map(p=>Math.abs(p.x-(cx+slope*(p.y-cy)))));
     const delta=predictedCenterX-imageX;
-    if(Math.abs(delta)>radius+1){ keepManual(); return; }
+    if(Math.abs(delta)>radius || residual>2.6){ keepManual(); return; }
 
-    const avgScore=points.reduce((s,p)=>s+p.score,0)/points.length;
+    const avgScore=coherent.reduce((s,p)=>s+p.score,0)/coherent.length;
     const confidence=Math.round(clamp(
-      55 + Math.min(35, avgScore*0.7) + points.length*3,
-      0, 99,
+      50 + coherent.length*5 + Math.min(28,avgScore*0.65) - residual*6,
+      0,99,
     ));
-
-    if(confidence<65){ keepManual(); return; }
+    if(confidence<68){ keepManual(); return; }
 
     const snappedScreenX=rect.width/2+(predictedCenterX/source.width*rect.width-rect.width/2)*zoom+panX;
     const snappedPercent=clamp(snappedScreenX/rect.width*100,2,98);
-    const tiltDeg=clamp(Math.atan(slope)*180/Math.PI,-8,8);
+    const tiltDeg=clamp(Math.atan(slope)*180/Math.PI,-7,7);
 
     if(side==="left"){
       const next=Math.min(snappedPercent,rightLine-3);
