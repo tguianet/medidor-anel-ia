@@ -77,6 +77,11 @@ export default function App() {
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
   const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
+  const [referenceCardGuideLines, setReferenceCardGuideLines] = useState<Pick<Record<CardEdge, Line>,"left"|"right"|"bottom">>({
+    left:{a:{x:15,y:20},b:{x:15,y:80}},
+    right:{a:{x:85,y:20},b:{x:85,y:80}},
+    bottom:{a:{x:15,y:50},b:{x:85,y:50}},
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -199,20 +204,32 @@ export default function App() {
           const left = clamp(calibration.cardBox.x * 100, 4, 90);
           const right = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 10, 96);
           const y = clamp((calibration.cardBox.y + calibration.cardBox.height * 0.5) * 100, 8, 92);
+          const l=Math.min(left,right-5);
+          const r=Math.max(right,left+5);
+          const verticalHalf=20;
           setCardLines((current)=>({
             ...current,
-            bottom:{a:{x:Math.min(left,right-5),y},b:{x:Math.max(right,left+5),y}},
+            left:{a:{x:l,y:clamp(y-verticalHalf,2,98)},b:{x:l,y:clamp(y+verticalHalf,2,98)}},
+            right:{a:{x:r,y:clamp(y-verticalHalf,2,98)},b:{x:r,y:clamp(y+verticalHalf,2,98)}},
+            bottom:{a:{x:l,y},b:{x:r,y}},
           }));
           camera.setError("Foto 1: ajuste a reta exatamente de uma ponta à outra da largura de 85,60 mm do cartão.");
         } catch {
           setCardLines((current)=>({
             ...current,
+            left:{a:{x:15,y:25},b:{x:15,y:75}},
+            right:{a:{x:85,y:25},b:{x:85,y:75}},
             bottom:{a:{x:15,y:50},b:{x:85,y:50}},
           }));
           camera.setError("Foto 1: ajuste manualmente a reta de ponta a ponta do cartão. Essa reta vale 85,60 mm.");
         }
       } else {
-        setCardLines((current)=>({...current,bottom:{a:{...referenceCardLine.a},b:{...referenceCardLine.b}}}));
+        setCardLines((current)=>({
+          ...current,
+          left:{a:{...referenceCardGuideLines.left.a},b:{...referenceCardGuideLines.left.b}},
+          right:{a:{...referenceCardGuideLines.right.a},b:{...referenceCardGuideLines.right.b}},
+          bottom:{a:{...referenceCardGuideLines.bottom.a},b:{...referenceCardGuideLines.bottom.b}},
+        }));
         camera.setError("Foto 2: ajuste a mesma reta sobre as duas pontas do cartão que está sobre o dedo.");
       }
       return;
@@ -368,12 +385,35 @@ export default function App() {
     setRightManualRefined(false);
   };
 
+  const cardReferenceSegment = () => {
+    const source=photoPixelsRef.current;
+    if(!source) throw new Error("foto");
+    const toPx=(line:Line):Line=>({
+      a:{x:line.a.x/100*source.width,y:line.a.y/100*source.height},
+      b:{x:line.b.x/100*source.width,y:line.b.y/100*source.height},
+    });
+    const leftPx=lineIntersection(toPx(cardLines.left),toPx(cardLines.bottom));
+    const rightPx=lineIntersection(toPx(cardLines.right),toPx(cardLines.bottom));
+    const lengthPx=Math.hypot(rightPx.x-leftPx.x,rightPx.y-leftPx.y);
+    if(!Number.isFinite(lengthPx)||lengthPx<source.width*0.08) throw new Error("reta");
+    return {leftPx,rightPx,lengthPx};
+  };
+
   const confirmReferenceCardLine = () => {
-    const line=cardLines.bottom;
-    setReferenceCardLine({a:{...line.a},b:{...line.b}});
-    setFingerCardCalibrationStep("measurement");
-    camera.setError("Agora coloque o mesmo cartão sobre o dedo e tire a segunda foto.");
-    void openCamera();
+    try{
+      cardReferenceSegment();
+      setReferenceCardLine({a:{...cardLines.bottom.a},b:{...cardLines.bottom.b}});
+      setReferenceCardGuideLines({
+        left:{a:{...cardLines.left.a},b:{...cardLines.left.b}},
+        right:{a:{...cardLines.right.a},b:{...cardLines.right.b}},
+        bottom:{a:{...cardLines.bottom.a},b:{...cardLines.bottom.b}},
+      });
+      setFingerCardCalibrationStep("measurement");
+      camera.setError("Agora coloque o mesmo cartão sobre o dedo e tire a segunda foto.");
+      void openCamera();
+    }catch{
+      camera.setError("Ajuste primeiro as duas laterais e depois a linha central para ela cruzar as duas bordas do cartão.");
+    }
   };
 
   const confirmMeasurementCardLine = () => {
@@ -382,22 +422,18 @@ export default function App() {
       camera.setError("A foto ainda está carregando. Tente confirmar novamente.");
       return;
     }
-    const line=cardLines.bottom;
-    const ax=line.a.x/100*source.width;
-    const ay=line.a.y/100*source.height;
-    const bx=line.b.x/100*source.width;
-    const by=line.b.y/100*source.height;
-    const lineLengthPx=Math.hypot(bx-ax,by-ay);
-    if(!Number.isFinite(lineLengthPx)||lineLengthPx<source.width*0.08){
-      camera.setError("A reta ficou curta demais. Ajuste as duas pontas exatamente nas extremidades do cartão.");
-      return;
+    try{
+      const segment=cardReferenceSegment();
+      const pxPerMm=segment.lengthPx/85.6;
+      const leftPercent=segment.leftPx.x/source.width*100;
+      const rightPercent=segment.rightPx.x/source.width*100;
+      const lineMidY=(segment.leftPx.y+segment.rightPx.y)/2/source.height*100;
+      setFingerCardCalibrationStep("done");
+      setCalibrationConfidence(100);
+      activateFingerMeasurement(leftPercent,rightPercent,lineMidY,100,cardQuad,pxPerMm);
+    }catch{
+      camera.setError("Ajuste as duas laterais e depois a linha central para cruzar exatamente as duas bordas do cartão.");
     }
-
-    const pxPerMm=lineLengthPx/85.6;
-    const lineMidY=(line.a.y+line.b.y)/2;
-    setFingerCardCalibrationStep("done");
-    setCalibrationConfidence(100);
-    activateFingerMeasurement(line.a.x,line.b.x,lineMidY,100,cardQuad,pxPerMm);
   };
 
   const setFingerLineFromCenterTilt = (side:FingerSide, centerX:number, tiltDeg:number) => {
@@ -872,76 +908,68 @@ export default function App() {
     cardLineDragStartRef.current=null;
   };
 
-  const fingerBandSamplePx = () => {
-    const stage = measureRef.current;
-    const source = photoPixelsRef.current;
-    if (!stage || !source || !leftLocked || !rightLocked) return null;
-    const rect = stage.getBoundingClientRect();
+  const fingerBandSamplesPx = () => {
+    const stage=measureRef.current;
+    const source=photoPixelsRef.current;
+    if(!stage||!source||!leftLocked||!rightLocked) return null;
+    const rect=stage.getBoundingClientRect();
 
-    const toImageX = (percent: number) => (
-      (((percent / 100 * rect.width) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * source.width
+    const toImageX=(percent:number)=>(
+      (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
     );
-    const toImageY = (percent: number) => (
-      (((percent / 100 * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * source.height
+    const toImageY=(percent:number)=>(
+      (((percent/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height
     );
-    const toScreenXPercent = (imageX: number) => (
-      (rect.width / 2 + (imageX / source.width * rect.width - rect.width / 2) * zoom + panX) / rect.width * 100
+    const toScreenXPercent=(imageX:number)=>(
+      (rect.width/2+(imageX/source.width*rect.width-rect.width/2)*zoom+panX)/rect.width*100
     );
-
-    const lineXAtScreenY = (line:Line, yPercent:number) => {
+    const lineXAtScreenY=(line:Line,yPercent:number)=>{
       const dy=line.b.y-line.a.y;
       if(Math.abs(dy)<1e-6) return (line.a.x+line.b.x)/2;
       const t=clamp((yPercent-line.a.y)/dy,0,1);
       return line.a.x+(line.b.x-line.a.x)*t;
     };
 
-    const yPercent = clamp(measureY, 6, 94);
-    const y = toImageY(yPercent);
-    if (y < 3 || y >= source.height - 3) return null;
-
-    const searchRadius = Math.max(6, Math.round(14 / zoom));
-    const grayscale = (x: number, yy: number) => {
-      const ix = Math.max(0, Math.min(source.width - 1, Math.round(x)));
-      const iy = Math.max(0, Math.min(source.height - 1, Math.round(yy)));
-      const offset = (iy * source.width + ix) * 4;
-      return source.data[offset] * 0.299 + source.data[offset + 1] * 0.587 + source.data[offset + 2] * 0.114;
+    const searchRadius=Math.max(6,Math.round(14/Math.max(1,zoom)));
+    const grayscale=(x:number,y:number)=>{
+      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
+      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
+      const o=(iy*source.width+ix)*4;
+      return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
     };
-
-    const findEdge = (center: number) => {
-      let bestX = Math.round(center);
-      let bestScore = -Infinity;
-      for (let x = Math.round(center) - searchRadius; x <= Math.round(center) + searchRadius; x++) {
-        if (x < 3 || x >= source.width - 3) continue;
-        const contrast = Math.abs(grayscale(x - 2, y) - grayscale(x + 2, y));
-        const score = contrast - Math.abs(x - center) * 0.55;
-        if (score > bestScore) { bestScore = score; bestX = x; }
+    const findEdge=(center:number,y:number)=>{
+      let bestX=Math.round(center),best=-Infinity;
+      for(let x=Math.round(center)-searchRadius;x<=Math.round(center)+searchRadius;x++){
+        if(x<3||x>=source.width-3) continue;
+        const contrast=Math.abs(grayscale(x-2,y)-grayscale(x+2,y));
+        const score=contrast-Math.abs(x-center)*0.55;
+        if(score>best){best=score;bestX=x;}
       }
-      return { x: bestX, score: bestScore };
+      return {x:bestX,score:best};
     };
 
-    const leftGuide = toImageX(lineXAtScreenY(fingerLines.left, yPercent));
-    const rightGuide = toImageX(lineXAtScreenY(fingerLines.right, yPercent));
-    const leftEdge = findEdge(leftGuide);
-    const rightEdge = findEdge(rightGuide);
-
-    if (leftEdge.score < 8 || rightEdge.score < 8 || rightEdge.x <= leftEdge.x) {
-      return null;
+    const yPercents=[-4,-1.5,1.5,4].map(off=>clamp(measureY+off,6,94));
+    const samples:{left:number;right:number;y:number;width:number;yPercent:number;leftPercent:number;rightPercent:number;confidence:number}[]=[];
+    for(const yPercent of yPercents){
+      const y=toImageY(yPercent);
+      if(y<3||y>=source.height-3) continue;
+      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
+      const le=findEdge(leftGuide,y), re=findEdge(rightGuide,y);
+      if(le.score<8||re.score<8||re.x<=le.x) continue;
+      samples.push({
+        left:le.x,right:re.x,y,width:re.x-le.x,yPercent,
+        leftPercent:toScreenXPercent(le.x),
+        rightPercent:toScreenXPercent(re.x),
+        confidence:Math.round(clamp(45+Math.min(28,le.score*.55)+Math.min(28,re.score*.55),0,99)),
+      });
     }
-
-    return {
-      left:leftEdge.x,
-      right:rightEdge.x,
-      y,
-      width:rightEdge.x-leftEdge.x,
-      yPercent,
-      leftPercent:toScreenXPercent(leftEdge.x),
-      rightPercent:toScreenXPercent(rightEdge.x),
-      confidence:Math.round(clamp(
-        45 + Math.min(28, leftEdge.score * 0.55) + Math.min(28, rightEdge.score * 0.55),
-        0,
-        99,
-      )),
-    };
+    if(samples.length<3) return null;
+    const ordered=samples.map(s=>s.width).sort((a,b)=>a-b);
+    const median=ordered[Math.floor(ordered.length/2)];
+    const tolerance=Math.max(3,median*.10);
+    const filtered=samples.filter(s=>Math.abs(s.width-median)<=tolerance);
+    return filtered.length>=3?filtered:samples;
   };
 
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
@@ -969,22 +997,21 @@ export default function App() {
     if(!source||!stage) return null;
 
     const rect=stage.getBoundingClientRect();
+    const samples=fingerBandSamplesPx();
     const toImageX=(percent:number)=>(
       (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
     );
-
-    const leftX=toImageX(leftLine);
-    const rightX=toImageX(rightLine);
-    const fingerWidthPx=Math.abs(rightX-leftX);
-    if(!Number.isFinite(fingerWidthPx)||fingerWidthPx<=1) return null;
-
-    // Escala fixa e estável: a base real do cartão mede 85,60 mm.
-    // pixelsPerMm foi definido quando as interseções das duas laterais
-    // com a linha da base foram confirmadas. Não extrapolamos as laterais
-    // do cartão até a altura do dedo.
-    const widthMm=fingerWidthPx/pixelsPerMm;
-    return Number.isFinite(widthMm)&&widthMm>0&&widthMm<45 ? widthMm : null;
-  },[pixelsPerMm,leftLine,rightLine,zoom,panX,leftLocked,rightLocked]);
+    const fallbackWidth=Math.abs(toImageX(rightLine)-toImageX(leftLine));
+    const widthsPx=samples?.length ? samples.map(s=>s.width) : [fallbackWidth];
+    const widthsMm=widthsPx.map(w=>w/pixelsPerMm).filter(v=>Number.isFinite(v)&&v>0&&v<45).sort((a,b)=>a-b);
+    if(!widthsMm.length) return null;
+    if(widthsMm.length>=4){
+      const middle=widthsMm.slice(1,-1);
+      return middle.reduce((sum,v)=>sum+v,0)/middle.length;
+    }
+    const mid=Math.floor(widthsMm.length/2);
+    return widthsMm.length%2 ? widthsMm[mid] : (widthsMm[mid-1]+widthsMm[mid])/2;
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1061,6 +1088,12 @@ export default function App() {
   const geometricScaleMmPerPx = (() => {
     if(phase!=="finger"||!pixelsPerMm||pixelsPerMm<=0) return null;
     return 1/pixelsPerMm;
+  })();
+
+  const fourMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
+  const fourMagnetWidthsMm = (() => {
+    if(!fourMagnetSamples?.length||!pixelsPerMm) return [] as number[];
+    return fourMagnetSamples.map(s=>Number((s.width/pixelsPerMm).toFixed(2)));
   })();
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
@@ -1144,21 +1177,22 @@ export default function App() {
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
-                aria-label="Reta de referência de 85,60 milímetros"
+                aria-label="Duas laterais e linha central de referência do cartão"
               >
-                {(()=>{
-                  const line=cardLines.bottom;
-                  return <g className={`card-edge${cardLineLocked.bottom?" locked":""}`}>
+                {(["left","right","bottom"] as CardEdge[]).map((edge)=>{
+                  const line=cardLines[edge];
+                  const locked=cardLineLocked[edge];
+                  return <g key={edge} className={`card-edge${locked?" locked":""}`}>
                     <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
-                      onPointerDown={(e)=>startCardLineDrag("bottom",null,e)} />
+                      onPointerDown={(e)=>startCardLineDrag(edge,null,e)} />
                     <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
                     {(["a","b"] as const).map((point)=><g key={point}>
-                      <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="5.2"
-                        onPointerDown={(e)=>startCardLineDrag("bottom",point,e)} />
-                      <circle className="card-line-handle" cx={line[point].x} cy={line[point].y} r="1.5" />
+                      <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="5.0"
+                        onPointerDown={(e)=>startCardLineDrag(edge,point,e)} />
+                      <circle className="card-line-handle" cx={line[point].x} cy={line[point].y} r="1.45" />
                     </g>)}
                   </g>;
-                })()}
+                })}
               </svg>
             ) : phase === "card" ? (
               <svg
@@ -1192,6 +1226,19 @@ export default function App() {
                   style={{ left: `${visualBandLeft}%`, top: `${measureY - 3.2}%`, width: `${visualBandWidth}%` }}
                   aria-hidden="true"
                 />
+                {fourMagnetSamples?.map((sample,index)=>(
+                  <div
+                    key={`magnet-pair-${index}`}
+                    className="measurement-band"
+                    style={{
+                      left:`${sample.leftPercent}%`,
+                      top:`${sample.yPercent}%`,
+                      width:`${Math.max(0,sample.rightPercent-sample.leftPercent)}%`,
+                      opacity:index===1||index===2?0.72:0.48,
+                    }}
+                    aria-hidden="true"
+                  />
+                ))}
                 <div
                   className="manual-finger-line main"
                   style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }}
@@ -1257,9 +1304,9 @@ export default function App() {
               </button>
               <div className="card-base-status">
                 <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — cartão em superfície reta" : "Foto 2 — cartão sobre o dedo"}</strong>
-                <span>Arraste a linha inteira para mover. Arraste as duas pontas para aumentar, diminuir ou inclinar.</span>
-                <small>A distância entre as duas pontas da reta representa exatamente 85,60 mm.</small>
-                <small>Na segunda foto o sistema recalcula px/mm pelo novo comprimento da reta; não reutiliza os pixels da primeira foto.</small>
+                <span>Primeiro ajuste as duas linhas laterais exatamente nas bordas do cartão. Depois ajuste a linha central atravessando o cartão.</span>
+                <small>As interseções da linha central com as duas laterais definem automaticamente o segmento que vale 85,60 mm.</small>
+                <small>Faça o mesmo na segunda foto; a nova distância entre as interseções gera a escala px/mm usada no dedo.</small>
               </div>
             </>
           )}
@@ -1323,7 +1370,7 @@ export default function App() {
           )}
           {phase === "finger" && result && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
             <AdminCalibration
-              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: singleFingerWidthMm !== null ? [singleFingerWidthMm] : [] }}
+              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: fourMagnetWidthsMm.length ? fourMagnetWidthsMm : (singleFingerWidthMm !== null ? [singleFingerWidthMm] : []) }}
               calibrationConfidence={calibrationConfidence}
               zoom={zoom}
               defaultMeasurementType={measurementMode}
@@ -1331,8 +1378,8 @@ export default function App() {
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>Linha única + laterais magnéticas</strong>
-              <span>{leftLocked && rightLocked ? "Laterais ajustadas ao contorno; a medida usa a linha central" : "Aproxime cada linha lateral da borda do dedo e solte para o ímã encaixar"}</span>
+              <strong>4 pontos magnéticos ativos</strong>
+              <span>{fourMagnetSamples ? `${fourMagnetSamples.length}/4 leituras válidas · a linha acompanha o contorno do dedo` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
