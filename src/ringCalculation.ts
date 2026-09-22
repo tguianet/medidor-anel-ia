@@ -52,26 +52,32 @@ export const calibrateMeasuredWidthMm = (rawMm: number) => {
 // Tabela de diâmetro interno informada pelo anelímetro. Ela corresponde à
 // numeração brasileira e evita aproximações que deslocariam aros altos.
 export const RING_DIAMETER_TABLE = [
+  // Aros 1–12 mantêm a referência anterior até termos medições físicas reais.
   { size: 1, diameterMm: 13.05 }, { size: 2, diameterMm: 13.37 },
   { size: 3, diameterMm: 13.68 }, { size: 4, diameterMm: 14.01 },
   { size: 5, diameterMm: 14.32 }, { size: 6, diameterMm: 14.64 },
   { size: 7, diameterMm: 14.95 }, { size: 8, diameterMm: 15.28 },
   { size: 9, diameterMm: 15.60 }, { size: 10, diameterMm: 15.92 },
   { size: 11, diameterMm: 16.24 }, { size: 12, diameterMm: 16.55 },
-  { size: 13, diameterMm: 16.87 }, { size: 14, diameterMm: 17.19 },
-  { size: 15, diameterMm: 17.50 }, { size: 16, diameterMm: 17.83 },
-  { size: 17, diameterMm: 18.14 }, { size: 18, diameterMm: 18.46 },
-  { size: 19, diameterMm: 18.76 }, { size: 20, diameterMm: 19.10 },
-  { size: 21, diameterMm: 19.42 }, { size: 22, diameterMm: 19.77 },
-  { size: 23, diameterMm: 20.05 }, { size: 24, diameterMm: 20.37 },
-  { size: 25, diameterMm: 20.68 }, { size: 26, diameterMm: 21.04 },
-  { size: 27, diameterMm: 21.37 }, { size: 28, diameterMm: 21.68 },
-  { size: 29, diameterMm: 21.96 }, { size: 30, diameterMm: 22.28 },
-  { size: 31, diameterMm: 22.60 }, { size: 32, diameterMm: 22.92 },
-  { size: 33, diameterMm: 23.24 }, { size: 34, diameterMm: 23.55 },
-  { size: 35, diameterMm: 23.87 }, { size: 36, diameterMm: 24.19 },
-  { size: 37, diameterMm: 24.51 }, { size: 38, diameterMm: 24.83 },
-  { size: 39, diameterMm: 25.15 }, { size: 40, diameterMm: 25.46 },
+
+  // Aros 13–33 medidos fisicamente no paquímetro.
+  { size: 13, diameterMm: 16.05 }, { size: 14, diameterMm: 16.50 },
+  { size: 15, diameterMm: 16.70 }, { size: 16, diameterMm: 17.00 },
+  { size: 17, diameterMm: 17.40 }, { size: 18, diameterMm: 17.75 },
+  { size: 19, diameterMm: 18.15 }, { size: 20, diameterMm: 18.40 },
+  { size: 21, diameterMm: 18.95 }, { size: 22, diameterMm: 19.30 },
+  { size: 23, diameterMm: 19.45 }, { size: 24, diameterMm: 19.85 },
+  { size: 25, diameterMm: 20.15 }, { size: 26, diameterMm: 20.70 },
+  { size: 27, diameterMm: 20.85 }, { size: 28, diameterMm: 21.25 },
+  { size: 29, diameterMm: 21.45 }, { size: 30, diameterMm: 21.95 },
+  { size: 31, diameterMm: 22.20 }, { size: 32, diameterMm: 22.55 },
+  { size: 33, diameterMm: 22.80 },
+
+  // Aros acima de 33 permanecem na referência anterior até nova medição física.
+  { size: 34, diameterMm: 23.55 }, { size: 35, diameterMm: 23.87 },
+  { size: 36, diameterMm: 24.19 }, { size: 37, diameterMm: 24.51 },
+  { size: 38, diameterMm: 24.83 }, { size: 39, diameterMm: 25.15 },
+  { size: 40, diameterMm: 25.46 },
 ];
 
 // Conversão 2D calibrada por medições reais de largura marcada e diâmetro
