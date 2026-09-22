@@ -760,7 +760,7 @@ export default function App() {
     cardLineDragStartRef.current=null;
   };
 
-  const fingerBandSamplesPx = () => {
+  const fingerBandSamplePx = () => {
     const stage = measureRef.current;
     const source = photoPixelsRef.current;
     if (!stage || !source || !leftLocked || !rightLocked) return null;
@@ -783,15 +783,19 @@ export default function App() {
       return line.a.x+(line.b.x-line.a.x)*t;
     };
 
+    const yPercent = clamp(measureY, 6, 94);
+    const y = toImageY(yPercent);
+    if (y < 3 || y >= source.height - 3) return null;
+
     const searchRadius = Math.max(6, Math.round(14 / zoom));
-    const grayscale = (x: number, y: number) => {
+    const grayscale = (x: number, yy: number) => {
       const ix = Math.max(0, Math.min(source.width - 1, Math.round(x)));
-      const iy = Math.max(0, Math.min(source.height - 1, Math.round(y)));
+      const iy = Math.max(0, Math.min(source.height - 1, Math.round(yy)));
       const offset = (iy * source.width + ix) * 4;
       return source.data[offset] * 0.299 + source.data[offset + 1] * 0.587 + source.data[offset + 2] * 0.114;
     };
 
-    const findEdge = (center: number, y: number) => {
+    const findEdge = (center: number) => {
       let bestX = Math.round(center);
       let bestScore = -Infinity;
       for (let x = Math.round(center) - searchRadius; x <= Math.round(center) + searchRadius; x++) {
@@ -803,50 +807,29 @@ export default function App() {
       return { x: bestX, score: bestScore };
     };
 
-    // Quatro pares magnéticos independentes, sempre horizontais.
-    // Ficam concentrados perto da linha central, na região onde o anel realmente
-    // apoia no dedo. Isso evita misturar partes mais largas/estreitas do dedo.
-    // As linhas laterais servem só como guia; cada par procura a borda local real.
-    const yPercents = [-4, -1.5, 1.5, 4].map((offset)=>clamp(measureY + offset, 6, 94));
-    const samples: {left:number;right:number;y:number;width:number;yPercent:number;leftPercent:number;rightPercent:number;confidence:number}[] = [];
+    const leftGuide = toImageX(lineXAtScreenY(fingerLines.left, yPercent));
+    const rightGuide = toImageX(lineXAtScreenY(fingerLines.right, yPercent));
+    const leftEdge = findEdge(leftGuide);
+    const rightEdge = findEdge(rightGuide);
 
-    for (const yPercent of yPercents) {
-      const y = toImageY(yPercent);
-      if (y < 3 || y >= source.height - 3) continue;
-
-      const leftGuidePercent = lineXAtScreenY(fingerLines.left, yPercent);
-      const rightGuidePercent = lineXAtScreenY(fingerLines.right, yPercent);
-      const leftGuide = toImageX(leftGuidePercent);
-      const rightGuide = toImageX(rightGuidePercent);
-
-      const leftEdge = findEdge(leftGuide, y);
-      const rightEdge = findEdge(rightGuide, y);
-      if (leftEdge.score < 8 || rightEdge.score < 8 || rightEdge.x <= leftEdge.x) continue;
-
-      const confidence = Math.round(clamp(
-        45 + Math.min(28, leftEdge.score * 0.55) + Math.min(28, rightEdge.score * 0.55),
-        0, 99,
-      ));
-
-      samples.push({
-        left:leftEdge.x,
-        right:rightEdge.x,
-        y,
-        width:rightEdge.x-leftEdge.x,
-        yPercent,
-        leftPercent:toScreenXPercent(leftEdge.x),
-        rightPercent:toScreenXPercent(rightEdge.x),
-        confidence,
-      });
+    if (leftEdge.score < 8 || rightEdge.score < 8 || rightEdge.x <= leftEdge.x) {
+      return null;
     }
 
-    if (samples.length < 3) return null;
-
-    const orderedWidths = samples.map((sample)=>sample.width).sort((a,b)=>a-b);
-    const medianWidth = orderedWidths[Math.floor(orderedWidths.length/2)];
-    const tolerancePx = Math.max(3, medianWidth * 0.10);
-    const filtered = samples.filter((sample)=>Math.abs(sample.width-medianWidth)<=tolerancePx);
-    return filtered.length >= 3 ? filtered : samples;
+    return {
+      left:leftEdge.x,
+      right:rightEdge.x,
+      y,
+      width:rightEdge.x-leftEdge.x,
+      yPercent,
+      leftPercent:toScreenXPercent(leftEdge.x),
+      rightPercent:toScreenXPercent(rightEdge.x),
+      confidence:Math.round(clamp(
+        45 + Math.min(28, leftEdge.score * 0.55) + Math.min(28, rightEdge.score * 0.55),
+        0,
+        99,
+      )),
+    };
   };
 
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
@@ -874,7 +857,7 @@ export default function App() {
     if(!source||!stage) return null;
 
     const rect=stage.getBoundingClientRect();
-    const samples=fingerBandSamplesPx();
+    const sample=fingerBandSamplePx();
     const toImageX=(percent:number)=>((((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width);
     const imageY=(((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height;
     const fallbackSample = {
@@ -883,7 +866,7 @@ export default function App() {
       y: imageY,
       width: Math.abs(toImageX(rightLine)-toImageX(leftLine)),
     };
-    const measurementSamples = samples && samples.length ? samples : [fallbackSample];
+    const measurementSample = sample ?? fallbackSample;
 
     const baseWidthPx=Math.hypot(
       (cardQuad[2].x-cardQuad[3].x)/100*source.width,
@@ -892,18 +875,9 @@ export default function App() {
     if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
     const mmPerPx=85.6/baseWidthPx;
 
-    const widthsMm=measurementSamples
-      .map((sample)=>sample.width*mmPerPx)
-      .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
-      .sort((x,y)=>x-y);
-    if(!widthsMm.length) return null;
-
-    if(widthsMm.length>=4){
-      const middle=widthsMm.slice(1,-1);
-      return middle.reduce((sum,value)=>sum+value,0)/middle.length;
-    }
-    const middle=Math.floor(widthsMm.length/2);
-    return widthsMm.length%2 ? widthsMm[middle] : (widthsMm[middle-1]+widthsMm[middle])/2;
+    const widthMm=measurementSample.width*mmPerPx;
+    if(!Number.isFinite(widthMm)||widthMm<=0||widthMm>=45) return null;
+    return widthMm;
   },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,leftFingerTilt,rightFingerTilt,leftManualRefined,rightManualRefined,fingerLines,cardQuad]);
 
   const finalMeasurementConfidence = useMemo(() => {
@@ -983,8 +957,8 @@ export default function App() {
   const visualBandWidth = Math.max(0, visualBandRight - visualBandLeft);
   const visualBandCenter = visualBandLeft + visualBandWidth / 2;
 
-  const fourMagnetSamples = phase === "finger" && leftLocked && rightLocked
-    ? fingerBandSamplesPx()
+  const singleFingerSample = phase === "finger" && leftLocked && rightLocked
+    ? fingerBandSamplePx()
     : null;
 
   const geometricScaleMmPerPx = (() => {
@@ -998,21 +972,19 @@ export default function App() {
     return 85.6/baseWidthPx;
   })();
 
-  // As quatro leituras do dedo usam a mesma escala da base do cartão.
-  const fourMagnetWidthsMm = (() => {
-    if (!fourMagnetSamples?.length) return [] as number[];
+  // Uma única linha horizontal mede o dedo usando a mesma escala da base do cartão.
+  const singleFingerWidthMm = (() => {
+    if (!singleFingerSample) return null;
     const source = photoPixelsRef.current;
-    if (!source) return [] as number[];
+    if (!source) return null;
     const baseWidthPx=Math.hypot(
       (cardQuad[2].x-cardQuad[3].x)/100*source.width,
       (cardQuad[2].y-cardQuad[3].y)/100*source.height,
     );
-    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return [] as number[];
+    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
     const mmPerPx=85.6/baseWidthPx;
-    return fourMagnetSamples
-      .map((sample)=>sample.width*mmPerPx)
-      .filter((value)=>Number.isFinite(value)&&value>0&&value<45)
-      .map((value)=>Number(value.toFixed(2)));
+    const value=singleFingerSample.width*mmPerPx;
+    return Number.isFinite(value)&&value>0&&value<45 ? Number(value.toFixed(2)) : null;
   })();
 
   return (
@@ -1140,19 +1112,6 @@ export default function App() {
                     </g>)}
                   </svg>;
                 })}
-                {fourMagnetSamples?.map((sample,index)=>(
-                  <div
-                    key={`magnet-pair-${index}`}
-                    className="measurement-band"
-                    style={{
-                      left: `${sample.leftPercent}%`,
-                      top: `${sample.yPercent}%`,
-                      width: `${Math.max(0, sample.rightPercent-sample.leftPercent)}%`,
-                      opacity: index===1 || index===2 ? 0.72 : 0.48,
-                    }}
-                    aria-hidden="true"
-                  />
-                ))}
                 <div className="measurement-band" style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} aria-hidden="true" />
                 <button className={`measure-cross${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }} onPointerDown={(event) => startDrag("height", event)} aria-label="Mover altura da medição" />
                 <button className={`measure-height-handle${tryOn ? " ring-adjust" : ""}`} style={{ left: `${visualBandCenter}%`, top: `${Math.min(measureY + 19, 95)}%` }} onPointerDown={(event) => startDrag("height", event)}>{tryOn ? "AJUSTAR" : "ARRASTE"}</button>
@@ -1241,16 +1200,16 @@ export default function App() {
           )}
           {phase === "finger" && result && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
             <AdminCalibration
-              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: fourMagnetWidthsMm }}
+              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: singleFingerWidthMm !== null ? [singleFingerWidthMm] : [] }}
               calibrationConfidence={calibrationConfidence}
               zoom={zoom}
               defaultMeasurementType={measurementMode}
             />
           )}
-          {phase === "finger" && leftLocked && rightLocked && fourMagnetSamples && !tryOn && !diameterPhotoTestMode && (
+          {phase === "finger" && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>4 ímãs horizontais ativos</strong>
-              <span>{fourMagnetSamples.length}/4 leituras válidas · cálculo pela média central das medidas</span>
+              <strong>Linha única de medição ativa</strong>
+              <span>{singleFingerSample ? "Leitura válida no ponto central do dedo" : "Ajuste a linha horizontal sobre o ponto que deseja medir"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
