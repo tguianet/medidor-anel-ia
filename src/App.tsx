@@ -1040,8 +1040,18 @@ export default function App() {
             {phase === "finger" && pixelsPerMm && (
               <>
                 <div
-                  className="manual-finger-line"
+                  className="manual-finger-line guide top"
+                  style={{ left: `${visualBandLeft}%`, top: `${measureY - 3.2}%`, width: `${visualBandWidth}%` }}
+                  aria-hidden="true"
+                />
+                <div
+                  className="manual-finger-line main"
                   style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }}
+                  aria-hidden="true"
+                />
+                <div
+                  className="manual-finger-line guide bottom"
+                  style={{ left: `${visualBandLeft}%`, top: `${measureY + 3.2}%`, width: `${visualBandWidth}%` }}
                   aria-hidden="true"
                 />
                 <button
@@ -1057,7 +1067,7 @@ export default function App() {
                   aria-label="Ponto manual direito do dedo"
                 />
                 <button
-                  className={`measure-cross${tryOn ? " ring-adjust" : ""}`}
+                  className={`measure-line-hit${tryOn ? " ring-adjust" : ""}`}
                   style={{ left: `${visualBandLeft}%`, top: `${measureY}%`, width: `${visualBandWidth}%` }}
                   onPointerDown={(event) => startDrag("height", event)}
                   aria-label="Mover altura da linha de medição"
