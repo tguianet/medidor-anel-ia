@@ -1013,7 +1013,7 @@ export default function App() {
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
-      setFingerCardCalibrationStep(referenceCardLine ? "measurement" : "reference");
+      setFingerCardCalibrationStep((current)=>current==="done" ? "measurement" : current);
     }
     setPhoto("");
     setTryOn(false);
