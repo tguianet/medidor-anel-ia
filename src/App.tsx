@@ -1223,7 +1223,7 @@ export default function App() {
               {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
               {!diameterPhotoTestMode && measurementMode === "finger" && (
                 <>
-                  <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
+                  <span>Medida do dedo: {result.widthMm.toFixed(2)} mm</span>
                 </>
               )}
               {!diameterPhotoTestMode && measurementMode === "anelimetro" && (
