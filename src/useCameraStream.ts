@@ -35,6 +35,10 @@ export function useCameraStream() {
     }
 
     const attempts: MediaStreamConstraints[] = [
+      // Primeiro tenta a câmera traseira principal com resolução moderada.
+      // Em alguns Androids o torch só aparece em determinados modos de captura.
+      { video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+      { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
       { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
       { video: { facingMode: { ideal: "environment" } }, audio: false },
       { video: true, audio: false },
@@ -47,13 +51,34 @@ export function useCameraStream() {
         streamRef.current = stream;
         const track = stream.getVideoTracks()[0];
         const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+        const settings = track?.getSettings?.() as MediaTrackSettings & { facingMode?: string };
+
+        // Alguns navegadores reportam torch apenas depois que a câmera já iniciou.
+        // Mantemos a detecção inicial e fazemos nova checagem após o play().
         setTorchSupported(Boolean(capabilities?.torch));
+
+        // Se o fallback acabou abrindo a câmera frontal, não oferecemos lanterna.
+        if (settings?.facingMode && settings.facingMode !== "environment") {
+          setTorchSupported(false);
+        }
         const video = videoRef.current;
         if (!video) throw new Error("A tela da câmera não ficou pronta.");
         video.srcObject = stream;
         video.muted = true;
         video.setAttribute("playsinline", "true");
         await video.play();
+
+        // Segunda leitura de capabilities após a câmera estar efetivamente ativa.
+        // Em alguns aparelhos Android o suporte ao torch só aparece neste ponto.
+        try {
+          const refreshedCapabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+          const refreshedSettings = track?.getSettings?.() as MediaTrackSettings & { facingMode?: string };
+          const rearCamera = !refreshedSettings?.facingMode || refreshedSettings.facingMode === "environment";
+          setTorchSupported(Boolean(refreshedCapabilities?.torch) && rearCamera);
+        } catch {
+          // Mantém o valor detectado anteriormente.
+        }
+
         setCameraOpening(false);
         setError("");
         return;
@@ -81,16 +106,57 @@ export function useCameraStream() {
       setError("A câmera ainda não está pronta. Aguarde um instante e tente novamente.");
       return;
     }
+
     const next = !torchOn;
+
+    // Faz uma checagem fresca antes de tentar ligar a lanterna.
+    let capabilities: (MediaTrackCapabilities & { torch?: boolean }) | undefined;
     try {
-      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet & { torch: boolean }] });
-      setTorchOn(next);
-      setTorchSupported(true);
-      setError("");
+      capabilities = track.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
     } catch {
-      setError("Este celular ou navegador não permite controlar a lanterna pela câmera. Use uma boa iluminação externa.");
+      capabilities = undefined;
+    }
+
+    if (!capabilities?.torch) {
+      setTorchSupported(false);
+      setTorchOn(false);
+      setError("A lanterna não está disponível neste celular ou navegador. Use uma boa iluminação externa e mantenha a câmera de cima.");
+      return;
+    }
+
+    const attempts: MediaTrackConstraints[] = [
+      { advanced: [{ torch: next } as MediaTrackConstraintSet & { torch: boolean }] },
+      { torch: next } as MediaTrackConstraints & { torch: boolean },
+    ];
+
+    let lastError: unknown;
+
+    for (const constraints of attempts) {
+      try {
+        await track.applyConstraints(constraints);
+        setTorchOn(next);
+        setTorchSupported(true);
+        setError("");
+        return;
+      } catch (reason) {
+        lastError = reason;
+      }
+    }
+
+    // Em alguns aparelhos a câmera precisa de uma pequena revalidação de estado.
+    try {
+      const refreshed = track.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+      setTorchSupported(Boolean(refreshed?.torch));
+    } catch {
       setTorchSupported(false);
     }
+
+    setTorchOn(false);
+    setError(
+      lastError
+        ? "Não foi possível acionar a lanterna neste aparelho. Use iluminação externa ou tente o Chrome atualizado."
+        : "A lanterna não está disponível neste aparelho."
+    );
   };
 
   return {
