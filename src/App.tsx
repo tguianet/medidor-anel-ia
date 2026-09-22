@@ -15,7 +15,6 @@ import TryOnPanel from "./components/TryOnPanel";
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 const TEST_FIXED_FINGER_SCALE_MM_PER_PX = 0.1121;
-const TEST_FINGER_EDGE_INSET_PX = 1.0;
 
 export default function App() {
   const camera = useCameraStream();
@@ -957,55 +956,37 @@ export default function App() {
       return line.a.x+(line.b.x-line.a.x)*t;
     };
 
-    const searchRadius=Math.max(6,Math.round(14/Math.max(1,zoom)));
-    const grayscale=(x:number,y:number)=>{
-      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
-      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
-      const o=(iy*source.width+ix)*4;
-      return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
-    };
-    const findEdge=(center:number,y:number)=>{
-      let bestX=Math.round(center),best=-Infinity;
-      for(let x=Math.round(center)-searchRadius;x<=Math.round(center)+searchRadius;x++){
-        if(x<3||x>=source.width-3) continue;
-        const contrast=Math.abs(grayscale(x-2,y)-grayscale(x+2,y));
-        const score=contrast-Math.abs(x-center)*0.55;
-        if(score>best){best=score;bestX=x;}
-      }
-      return {x:bestX,score:best};
-    };
-
+    // NOVA ESTRATÉGIA:
+    // os 4 pontos NÃO procuram bordas de forma independente.
+    // A linha lateral esquerda e a direita definem um único contorno contínuo.
+    // As 4 leituras apenas cruzam essas duas linhas nos quatro níveis.
     const yPercents=[-4,-1.5,1.5,4].map(off=>clamp(measureY+off,6,94));
     const samples:{left:number;right:number;y:number;width:number;yPercent:number;leftPercent:number;rightPercent:number;confidence:number}[]=[];
+
     for(const yPercent of yPercents){
       const y=toImageY(yPercent);
       if(y<3||y>=source.height-3) continue;
-      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
-      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
-      const le=findEdge(leftGuide,y), re=findEdge(rightGuide,y);
-      if(le.score<8||re.score<8||re.x<=le.x) continue;
 
-      // TESTE DE CONTORNO:
-      // depois de detectar a transição pele/fundo, deslocamos o ponto útil
-      // levemente para dentro do dedo. Isso evita medir a sombra/halo externo
-      // do contorno como parte da largura física.
-      const leftInner=le.x+TEST_FINGER_EDGE_INSET_PX;
-      const rightInner=re.x-TEST_FINGER_EDGE_INSET_PX;
-      if(rightInner<=leftInner) continue;
+      const leftPercent=lineXAtScreenY(fingerLines.left,yPercent);
+      const rightPercent=lineXAtScreenY(fingerLines.right,yPercent);
+
+      const leftX=toImageX(leftPercent);
+      const rightX=toImageX(rightPercent);
+      if(!Number.isFinite(leftX)||!Number.isFinite(rightX)||rightX<=leftX) continue;
 
       samples.push({
-        left:leftInner,right:rightInner,y,width:rightInner-leftInner,yPercent,
-        leftPercent:toScreenXPercent(leftInner),
-        rightPercent:toScreenXPercent(rightInner),
-        confidence:Math.round(clamp(45+Math.min(28,le.score*.55)+Math.min(28,re.score*.55),0,99)),
+        left:leftX,
+        right:rightX,
+        y,
+        width:rightX-leftX,
+        yPercent,
+        leftPercent:toScreenXPercent(leftX),
+        rightPercent:toScreenXPercent(rightX),
+        confidence:Math.round(clamp((leftMagnetConfidence+rightMagnetConfidence)/2 || 90,0,99)),
       });
     }
-    if(samples.length<3) return null;
-    const ordered=samples.map(s=>s.width).sort((a,b)=>a-b);
-    const median=ordered[Math.floor(ordered.length/2)];
-    const tolerance=Math.max(3,median*.10);
-    const filtered=samples.filter(s=>Math.abs(s.width-median)<=tolerance);
-    return filtered.length>=3?filtered:samples;
+
+    return samples.length===4 ? samples : null;
   };
 
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
@@ -1449,7 +1430,6 @@ export default function App() {
               {measurementMode === "finger" && !diameterPhotoTestMode && (
                 <>
                   <span>Escala fixa de teste aplicada: {TEST_FIXED_FINGER_SCALE_MM_PER_PX.toFixed(4)} mm/px</span>
-                  <span>Refino interno do contorno: {TEST_FINGER_EDGE_INSET_PX.toFixed(1)} px por lado</span>
                 </>
               )}
               {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
@@ -1466,8 +1446,8 @@ export default function App() {
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>4 pontos magnéticos ativos</strong>
-              <span>{fourMagnetSamples ? `${fourMagnetSamples.length}/4 leituras válidas · a linha acompanha o contorno do dedo` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
+              <strong>4 leituras no mesmo contorno</strong>
+              <span>{fourMagnetSamples ? `${fourMagnetSamples.length}/4 leituras válidas · as 4 leituras cruzam as mesmas laterais do dedo` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
