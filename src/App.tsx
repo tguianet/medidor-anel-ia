@@ -854,22 +854,25 @@ export default function App() {
     const toImageX=(percent:number)=>(
       (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
     );
+    const toImageY=(percent:number)=>(
+      (((percent/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height
+    );
 
     const leftX=toImageX(leftLine);
     const rightX=toImageX(rightLine);
     const fingerWidthPx=Math.abs(rightX-leftX);
     if(!Number.isFinite(fingerWidthPx)||fingerWidthPx<=1) return null;
 
-    const baseWidthPx=Math.hypot(
-      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
-      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
-    );
-    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
+    // Corrige a perspectiva do cartão projetando as duas laterais
+    // até a MESMA altura da linha de medição do dedo.
+    const imageY=toImageY(measureY);
+    const projectedCardWidthPx=cardWidthAtImageY(imageY,source.width,source.height);
+    if(!projectedCardWidthPx||!Number.isFinite(projectedCardWidthPx)||projectedCardWidthPx<=1) return null;
 
-    const mmPerPx=85.6/baseWidthPx;
-    const widthMm=fingerWidthPx*mmPerPx;
+    const mmPerPxLocal=85.6/projectedCardWidthPx;
+    const widthMm=fingerWidthPx*mmPerPxLocal;
     return Number.isFinite(widthMm)&&widthMm>0&&widthMm<45 ? widthMm : null;
-  },[pixelsPerMm,leftLine,rightLine,zoom,panX,leftLocked,rightLocked,cardQuad]);
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,cardLines]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -940,14 +943,18 @@ export default function App() {
   const visualBandCenter = visualBandLeft + visualBandWidth / 2;
 
   const geometricScaleMmPerPx = (() => {
-    const source = photoPixelsRef.current;
-    if (!source || phase !== "finger") return null;
-    const baseWidthPx=Math.hypot(
-      (cardQuad[2].x-cardQuad[3].x)/100*source.width,
-      (cardQuad[2].y-cardQuad[3].y)/100*source.height,
-    );
-    if(!Number.isFinite(baseWidthPx)||baseWidthPx<=0) return null;
-    return 85.6/baseWidthPx;
+    const source=photoPixelsRef.current;
+    const stage=measureRef.current;
+    if(!source||!stage||phase!=="finger") return null;
+
+    const rect=stage.getBoundingClientRect();
+    const imageY=(
+      ((measureY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2
+    )/rect.height*source.height;
+
+    const projectedCardWidthPx=cardWidthAtImageY(imageY,source.width,source.height);
+    if(!projectedCardWidthPx||!Number.isFinite(projectedCardWidthPx)||projectedCardWidthPx<=1) return null;
+    return 85.6/projectedCardWidthPx;
   })();
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
