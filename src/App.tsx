@@ -15,6 +15,7 @@ import TryOnPanel from "./components/TryOnPanel";
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 const TEST_FIXED_FINGER_SCALE_MM_PER_PX = 0.1121;
+const TEST_FINGER_EDGE_INSET_PX = 2.5;
 
 export default function App() {
   const camera = useCameraStream();
@@ -983,10 +984,19 @@ export default function App() {
       const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
       const le=findEdge(leftGuide,y), re=findEdge(rightGuide,y);
       if(le.score<8||re.score<8||re.x<=le.x) continue;
+
+      // TESTE DE CONTORNO:
+      // depois de detectar a transição pele/fundo, deslocamos o ponto útil
+      // levemente para dentro do dedo. Isso evita medir a sombra/halo externo
+      // do contorno como parte da largura física.
+      const leftInner=le.x+TEST_FINGER_EDGE_INSET_PX;
+      const rightInner=re.x-TEST_FINGER_EDGE_INSET_PX;
+      if(rightInner<=leftInner) continue;
+
       samples.push({
-        left:le.x,right:re.x,y,width:re.x-le.x,yPercent,
-        leftPercent:toScreenXPercent(le.x),
-        rightPercent:toScreenXPercent(re.x),
+        left:leftInner,right:rightInner,y,width:rightInner-leftInner,yPercent,
+        leftPercent:toScreenXPercent(leftInner),
+        rightPercent:toScreenXPercent(rightInner),
         confidence:Math.round(clamp(45+Math.min(28,le.score*.55)+Math.min(28,re.score*.55),0,99)),
       });
     }
@@ -1437,7 +1447,10 @@ export default function App() {
                 <span>Escala pela reta: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
               )}
               {measurementMode === "finger" && !diameterPhotoTestMode && (
-                <span>Escala fixa de teste aplicada: {TEST_FIXED_FINGER_SCALE_MM_PER_PX.toFixed(4)} mm/px</span>
+                <>
+                  <span>Escala fixa de teste aplicada: {TEST_FIXED_FINGER_SCALE_MM_PER_PX.toFixed(4)} mm/px</span>
+                  <span>Refino interno do contorno: {TEST_FINGER_EDGE_INSET_PX.toFixed(1)} px por lado</span>
+                </>
               )}
               {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
               {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
