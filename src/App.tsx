@@ -897,28 +897,44 @@ export default function App() {
     const polarity = Math.abs(polarityRaw) >= 4 ? Math.sign(polarityRaw) : 0;
 
     const findEdgeAt = (center:number,y:number) => {
-      let bestX=Math.round(center);
-      let bestScore=-Infinity;
+      const candidates:{x:number;contrast:number;score:number}[]=[];
+      const start=Math.round(center)-radius;
+      const end=Math.round(center)+radius;
 
-      for(let candidate=Math.round(center)-radius;candidate<=Math.round(center)+radius;candidate++){
+      for(let candidate=start;candidate<=end;candidate++){
         if(candidate<6||candidate>=source.width-6) continue;
 
         const outside = side==="left" ? grayscale(candidate-4,y) : grayscale(candidate+4,y);
         const inside = side==="left" ? grayscale(candidate+4,y) : grayscale(candidate-4,y);
         const signedContrast = outside-inside;
 
-        // Se conseguimos inferir a polaridade do contorno, rejeitamos arestas
-        // com direcao oposta (tipicamente textura/ruga dentro do dedo).
+        // Mantem somente transicoes com a polaridade esperada da borda externa.
         const directionalContrast = polarity===0
           ? Math.abs(signedContrast)
           : Math.max(0, signedContrast*polarity);
 
-        const distancePenalty=Math.abs(candidate-center)*1.35;
-        const score=directionalContrast-distancePenalty;
-        if(score>bestScore){bestScore=score;bestX=candidate;}
+        if(directionalContrast<5) continue;
+
+        const distancePenalty=Math.abs(candidate-center)*0.55;
+        candidates.push({
+          x:candidate,
+          contrast:directionalContrast,
+          score:directionalContrast-distancePenalty,
+        });
       }
 
-      return {x:bestX,score:bestScore};
+      if(!candidates.length) return {x:Math.round(center),score:-Infinity};
+
+      // Primeiro identifica quanto e uma aresta realmente forte nesta faixa.
+      const strongest=Math.max(...candidates.map(item=>item.contrast));
+      const strongEnough=Math.max(7,strongest*0.62);
+      const valid=candidates.filter(item=>item.contrast>=strongEnough);
+
+      // REGRA NOVA: entre bordas fortes, escolhe a MAIS EXTERNA.
+      // Esquerda: menor X. Direita: maior X.
+      // Isso impede rugas/sombras internas de roubarem o snap da pele.
+      const ordered=[...valid].sort((a,b)=>side==="left" ? a.x-b.x : b.x-a.x);
+      return ordered[0] ?? candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
     // Varias amostras verticais curtas para privilegiar um contorno continuo.
@@ -1219,24 +1235,42 @@ export default function App() {
 
       const expectedPolarityRaw=outside(guideX)-inside(guideX);
       const expectedPolarity=Math.abs(expectedPolarityRaw)>=3?Math.sign(expectedPolarityRaw):0;
+      const candidates:{x:number;strength:number;score:number}[]=[];
 
-      let bestX=Math.round(guideX);
-      let bestScore=-Infinity;
       for(let x=Math.round(guideX)-searchRadius;x<=Math.round(guideX)+searchRadius;x++){
         if(x<6||x>=source.width-6) continue;
 
         const signed=outside(x)-inside(x);
         const edgeStrength=expectedPolarity===0?Math.abs(signed):Math.max(0,signed*expectedPolarity);
-        const guidePenalty=Math.abs(x-guideX)*0.45;
-        const continuityPenalty=previousX===null?0:Math.abs(x-previousX)*0.9;
-        const score=edgeStrength-guidePenalty-continuityPenalty;
+        if(edgeStrength<5) continue;
 
-        if(score>bestScore){
-          bestScore=score;
-          bestX=x;
-        }
+        const guidePenalty=Math.abs(x-guideX)*0.28;
+        const continuityPenalty=previousX===null?0:Math.abs(x-previousX)*0.55;
+        candidates.push({
+          x,
+          strength:edgeStrength,
+          score:edgeStrength-guidePenalty-continuityPenalty,
+        });
       }
-      return {x:bestX,score:bestScore};
+
+      if(!candidates.length) return {x:Math.round(guideX),score:-Infinity};
+
+      const strongest=Math.max(...candidates.map(item=>item.strength));
+      const strongEnough=Math.max(7,strongest*0.60);
+      let valid=candidates.filter(item=>item.strength>=strongEnough);
+
+      // Mantem continuidade vertical, mas nunca prefere uma ruga interna a uma
+      // borda externa forte. A tolerancia aumenta um pouco com o zoom.
+      if(previousX!==null){
+        const continuityLimit=Math.max(5,Math.round(8/Math.max(1,zoom)));
+        const continuous=valid.filter(item=>Math.abs(item.x-previousX)<=continuityLimit);
+        if(continuous.length) valid=continuous;
+      }
+
+      // Busca de fora para dentro:
+      // esquerda => menor X valido; direita => maior X valido.
+      valid.sort((a,b)=>side==="left" ? a.x-b.x : b.x-a.x);
+      return valid[0] ?? candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
     // Cada um dos 4 níveis procura localmente a borda mais próxima,
@@ -1272,6 +1306,25 @@ export default function App() {
     for(let i=1;i<4;i++){
       if(Math.abs(leftPoints[i].x-leftPoints[i-1].x)>maxJump) return null;
       if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
+    }
+
+    // Consenso lateral: um ponto pode ser puxado por textura interna mesmo
+    // quando os outros tres acertam. Corrigimos APENAS desvios para dentro.
+    const medianValue=(values:number[])=>{
+      const ordered=[...values].sort((a,b)=>a-b);
+      return (ordered[1]+ordered[2])/2;
+    };
+    const leftMedian=medianValue(leftPoints.map(p=>p.x));
+    const rightMedian=medianValue(rightPoints.map(p=>p.x));
+    const inwardTolerance=Math.max(2.5,Math.round(4/Math.max(1,zoom)));
+
+    for(const point of leftPoints){
+      // No lado esquerdo, X maior significa que o ponto entrou no dedo.
+      if(point.x-leftMedian>inwardTolerance) point.x=leftMedian;
+    }
+    for(const point of rightPoints){
+      // No lado direito, X menor significa que o ponto entrou no dedo.
+      if(rightMedian-point.x>inwardTolerance) point.x=rightMedian;
     }
 
     // Ajusta uma reta para cada lateral do dedo no plano da imagem.
