@@ -1253,7 +1253,12 @@ export default function App() {
     };
 
     const searchRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
-    const yPercents=[-4,-1.5,1.5,4].map(off=>clamp(measureY+off,6,94));
+    // 10 cortes ao longo de uma faixa maior do dedo para localizar a regiao
+    // mais larga sem depender de uma unica linha.
+    const yPercents=Array.from({length:10},(_,index)=>{
+      const off=-6+(index*(12/9));
+      return clamp(measureY+off,6,94);
+    });
 
     const findEdge=(side:"left"|"right",guideX:number,y:number,previousX:number|null)=>{
       const outside=(x:number)=>side==="left"?grayscale(x-4,y):grayscale(x+4,y);
@@ -1314,8 +1319,8 @@ export default function App() {
       return candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
-    // Cada um dos 4 níveis procura localmente a borda mais próxima,
-    // mas com continuidade entre os níveis para formar UM contorno por lado.
+    // Cada um dos 10 niveis procura localmente a borda mais proxima,
+    // mantendo continuidade para formar UM contorno por lado.
     const leftPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
     const rightPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
     let previousLeft:number|null=null;
@@ -1339,21 +1344,25 @@ export default function App() {
       previousRight=re.x;
     }
 
-    if(leftPoints.length!==4||rightPoints.length!==4) return null;
+    // Busca 10 cortes e aceita no minimo 8 leituras validas. Uma pequena
+    // regiao com reflexo/ruga nao deve invalidar toda a medicao.
+    if(leftPoints.length<8||rightPoints.length<8||leftPoints.length!==rightPoints.length) return null;
 
     // Rejeita saltos grandes entre pontos vizinhos: se uma ruga/sombra tentar
-    // puxar um ponto para dentro, mantemos o contorno contínuo.
+    // puxar um ponto para dentro, mantemos o contorno continuo.
     const maxJump=Math.max(5,Math.round(10/Math.max(1,zoom)));
-    for(let i=1;i<4;i++){
+    for(let i=1;i<leftPoints.length;i++){
       if(Math.abs(leftPoints[i].x-leftPoints[i-1].x)>maxJump) return null;
       if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
     }
 
-    // Consenso lateral: um ponto pode ser puxado por textura interna mesmo
-    // quando os outros tres acertam. Corrigimos APENAS desvios para dentro.
+    // Consenso lateral robusto para 8-10 amostras.
     const medianValue=(values:number[])=>{
       const ordered=[...values].sort((a,b)=>a-b);
-      return (ordered[1]+ordered[2])/2;
+      const mid=Math.floor(ordered.length/2);
+      return ordered.length%2
+        ? ordered[mid]
+        : (ordered[mid-1]+ordered[mid])/2;
     };
     const leftMedian=medianValue(leftPoints.map(p=>p.x));
     const rightMedian=medianValue(rightPoints.map(p=>p.x));
@@ -1430,6 +1439,31 @@ export default function App() {
     });
   };
 
+  // Usa as maiores larguras ESTAVEIS, porque o anel precisa passar pela
+  // parte mais grossa. Um pico isolado nao manda no resultado: primeiro
+  // removemos outlier alto e depois tiramos a media das 3 maiores validas.
+  const selectUpperStableWidths = (values:number[]) => {
+    const ordered=values.filter(Number.isFinite).filter(v=>v>0).sort((a,b)=>a-b);
+    if(!ordered.length) return {stable:[] as number[],selected:[] as number[],used:null as number|null};
+
+    const median=(items:number[])=>{
+      const mid=Math.floor(items.length/2);
+      return items.length%2 ? items[mid] : (items[mid-1]+items[mid])/2;
+    };
+
+    const center=median(ordered);
+    const deviations=ordered.map(v=>Math.abs(v-center)).sort((a,b)=>a-b);
+    const mad=median(deviations);
+    const upperTolerance=Math.max(center*0.03,mad*4,1.5);
+    const stable=ordered.filter(v=>v<=center+upperTolerance);
+    const selected=stable.slice(-Math.min(3,stable.length));
+    const used=selected.length
+      ? selected.reduce((sum,v)=>sum+v,0)/selected.length
+      : null;
+
+    return {stable,selected,used};
+  };
+
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
     const toPx=(line:Line):Line=>({
       a:{x:line.a.x/100*sourceWidth,y:line.a.y/100*sourceHeight},
@@ -1473,15 +1507,9 @@ export default function App() {
 
     const widthsMm=widthsPx
       .map(w=>w*cardScaleMmPerPx*normalization)
-      .filter(v=>Number.isFinite(v)&&v>0&&v<45)
-      .sort((a,b)=>a-b);
-    if(!widthsMm.length) return null;
-    if(widthsMm.length>=4){
-      const middle=widthsMm.slice(1,-1);
-      return middle.reduce((sum,v)=>sum+v,0)/middle.length;
-    }
-    const mid=Math.floor(widthsMm.length/2);
-    return widthsMm.length%2 ? widthsMm[mid] : (widthsMm[mid-1]+widthsMm[mid])/2;
+      .filter(v=>Number.isFinite(v)&&v>0&&v<45);
+
+    return selectUpperStableWidths(widthsMm).used;
   },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines,measurementMode,diameterPhotoTestMode]);
 
   const finalMeasurementConfidence = calibrationConfidence;
@@ -1561,21 +1589,17 @@ export default function App() {
     return 1/pixelsPerMm;
   })();
 
-  const fourMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
+  const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
 
   const measurementAudit = (() => {
-    if(!fourMagnetSamples?.length) return null;
+    if(!fingerMagnetSamples?.length) return null;
 
-    const rawWidthsPx=fourMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite).sort((a,b)=>a-b);
+    const rawWidthsPx=fingerMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite).sort((a,b)=>a-b);
     if(!rawWidthsPx.length) return null;
 
-    const centralWidthsPx =
-      rawWidthsPx.length>=4
-        ? rawWidthsPx.slice(1,-1)
-        : rawWidthsPx;
-
-    const usedWidthPx =
-      centralWidthsPx.reduce((sum,value)=>sum+value,0)/centralWidthsPx.length;
+    const upperSelection=selectUpperStableWidths(rawWidthsPx);
+    if(upperSelection.used===null) return null;
+    const usedWidthPx=upperSelection.used;
 
     const cardScaleMmPerPx =
       pixelsPerMm && pixelsPerMm>0
@@ -1613,18 +1637,19 @@ export default function App() {
       correctionPercent,
       spreadPx,
       spreadPercent,
-      fingerAxisAngleDeg: fourMagnetSamples[0]?.axisAngleDeg ?? 0,
+      selectedUpperWidthsPx: upperSelection.selected,
+      fingerAxisAngleDeg: fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
 
   const fourMagnetWidthsMm = (() => {
-    if(!fourMagnetSamples?.length||!pixelsPerMm) return [] as number[];
+    if(!fingerMagnetSamples?.length||!pixelsPerMm) return [] as number[];
     const cardScaleMmPerPx=1/pixelsPerMm;
     const normalization =
       measurementMode === "finger" && !diameterPhotoTestMode
         ? TEST_FINGER_CARD_NORMALIZATION
         : 1;
-    return fourMagnetSamples.map(s=>Number((s.width*cardScaleMmPerPx*normalization).toFixed(2)));
+    return fingerMagnetSamples.map(s=>Number((s.width*cardScaleMmPerPx*normalization).toFixed(2)));
   })();
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
@@ -1648,7 +1673,7 @@ export default function App() {
       : guidedStep === 2
         ? "Coloque o cartão sobre o dedo que será medido. Posicione a região mais grossa — junta ou falange — na linha guia. Ajuste as laterais do cartão e confirme."
         : guidedStep === 3
-          ? "Mova a faixa até a parte mais grossa do dedo, exatamente onde o anel precisa passar. Aproxime as laterais e solte para os 4 pontos magnéticos grudarem no contorno."
+          ? "Mova a faixa até a região por onde o anel precisa passar. Aproxime as laterais e solte para os 10 pontos magnéticos seguirem o contorno; o cálculo usa as 3 maiores medidas estáveis."
           : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
 
   return (
@@ -1838,7 +1863,7 @@ export default function App() {
                   style={{ left: `${visualBandLeft}%`, top: `${measureY - 3.2}%`, width: `${visualBandWidth}%` }}
                   aria-hidden="true"
                 />
-                {fourMagnetSamples && (
+                {fingerMagnetSamples && (
                   <svg
                     className="finger-contour-overlay"
                     viewBox="0 0 100 100"
@@ -1846,7 +1871,7 @@ export default function App() {
                     aria-hidden="true"
                     style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:5}}
                   >
-                    {fourMagnetSamples.map((sample,index)=>(
+                    {fingerMagnetSamples.map((sample,index)=>(
                       <line
                         key={`orthogonal-sample-${index}`}
                         x1={sample.leftPercent}
@@ -1854,26 +1879,26 @@ export default function App() {
                         x2={sample.rightPercent}
                         y2={sample.rightYPercent}
                         stroke="#52e0a3"
-                        strokeWidth={index===1||index===2 ? "0.58" : "0.4"}
-                        opacity={index===1||index===2 ? 0.82 : 0.56}
+                        strokeWidth={index>=7 ? "0.55" : "0.4"}
+                        opacity={index>=7 ? 0.86 : 0.58}
                         vectorEffect="non-scaling-stroke"
                       />
                     ))}
                     <polyline
-                      points={fourMagnetSamples.map((sample)=>`${sample.leftPercent},${sample.yPercent}`).join(" ")}
+                      points={fingerMagnetSamples.map((sample)=>`${sample.leftPercent},${sample.yPercent}`).join(" ")}
                       fill="none"
                       stroke="#52e0a3"
                       strokeWidth="0.45"
                       vectorEffect="non-scaling-stroke"
                     />
                     <polyline
-                      points={fourMagnetSamples.map((sample)=>`${sample.rightPercent},${sample.rightYPercent}`).join(" ")}
+                      points={fingerMagnetSamples.map((sample)=>`${sample.rightPercent},${sample.rightYPercent}`).join(" ")}
                       fill="none"
                       stroke="#52e0a3"
                       strokeWidth="0.45"
                       vectorEffect="non-scaling-stroke"
                     />
-                    {fourMagnetSamples.flatMap((sample,index)=>[
+                    {fingerMagnetSamples.flatMap((sample,index)=>[
                       <circle key={`left-contour-${index}`} cx={sample.leftPercent} cy={sample.yPercent} r="0.65" fill="#52e0a3" />,
                       <circle key={`right-contour-${index}`} cx={sample.rightPercent} cy={sample.rightYPercent} r="0.65" fill="#52e0a3" />,
                     ])}
@@ -1999,7 +2024,8 @@ export default function App() {
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
-                  <span>Larguras: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>10 larguras: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>3 maiores válidas: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
@@ -2025,8 +2051,8 @@ export default function App() {
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>4 pontos magnéticos no contorno</strong>
-              <span>{fourMagnetSamples ? `${fourMagnetSamples.length}/4 leituras válidas · cada ponto busca a borda próxima e os 4 formam um contorno contínuo` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
+              <strong>10 pontos magnéticos no contorno</strong>
+              <span>{fingerMagnetSamples ? `${fingerMagnetSamples.length}/10 leituras válidas · cálculo pela média das 3 maiores medidas estáveis` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
