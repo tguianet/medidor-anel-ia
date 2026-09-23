@@ -238,7 +238,7 @@ export default function App() {
           right:{a:{...referenceCardGuideLines.right.a},b:{...referenceCardGuideLines.right.b}},
           bottom:{a:{...referenceCardGuideLines.bottom.a},b:{...referenceCardGuideLines.bottom.b}},
         }));
-        camera.setError("Foto 2: ajuste a mesma reta sobre as duas pontas do cartão que está sobre o dedo.");
+        camera.setError("Foto 2: encaixe somente as duas laterais nas bordas do cartão. A reta de 85,60 mm será criada automaticamente entre os dois snaps.");
       }
       return;
     }
@@ -395,6 +395,20 @@ export default function App() {
     setRightManualRefined(false);
   };
 
+  const automaticCardReferenceLine = (left: Line, right: Line): Line => {
+    // A reta de 85,60 mm nasce exclusivamente das duas laterais encaixadas.
+    // Assim o usuario nunca precisa esticar a linha central e nao consegue
+    // alterar a escala por acidente.
+    const midpoint = (line: Line): Point => ({
+      x: (line.a.x + line.b.x) / 2,
+      y: (line.a.y + line.b.y) / 2,
+    });
+    return {
+      a: midpoint(left),
+      b: midpoint(right),
+    };
+  };
+
   const cardReferenceSegment = () => {
     const source=photoPixelsRef.current;
     if(!source) throw new Error("foto");
@@ -412,8 +426,19 @@ export default function App() {
     const leftMeasureLine = requiresLockedSideSnaps ? cardSnapLines.left : cardLines.left;
     const rightMeasureLine = requiresLockedSideSnaps ? cardSnapLines.right : cardLines.right;
     if(!leftMeasureLine || !rightMeasureLine) throw new Error("snap-lateral");
-    const leftPx=lineIntersection(toPx(leftMeasureLine),toPx(cardLines.bottom));
-    const rightPx=lineIntersection(toPx(rightMeasureLine),toPx(cardLines.bottom));
+
+    // No fluxo de duas fotos a reta central e totalmente automatica:
+    // liga os centros geometricos das duas laterais que realmente deram snap.
+    // O comprimento manual de cardLines.bottom deixa de participar da escala.
+    const referenceLine = requiresLockedSideSnaps
+      ? automaticCardReferenceLine(leftMeasureLine, rightMeasureLine)
+      : cardLines.bottom;
+    const leftPx = requiresLockedSideSnaps
+      ? toPx(referenceLine).a
+      : lineIntersection(toPx(leftMeasureLine), toPx(referenceLine));
+    const rightPx = requiresLockedSideSnaps
+      ? toPx(referenceLine).b
+      : lineIntersection(toPx(rightMeasureLine), toPx(referenceLine));
     const lengthPx=Math.hypot(rightPx.x-leftPx.x,rightPx.y-leftPx.y);
     if(!Number.isFinite(lengthPx)||lengthPx<source.width*0.08) throw new Error("reta");
     return {leftPx,rightPx,lengthPx};
@@ -439,17 +464,21 @@ export default function App() {
     try{
       const segment=cardReferenceSegment();
       setReferenceCardLengthPx(segment.lengthPx);
-      setReferenceCardLine({a:{...cardLines.bottom.a},b:{...cardLines.bottom.b}});
+      const lockedLeft = cardSnapLines.left;
+      const lockedRight = cardSnapLines.right;
+      if (!lockedLeft || !lockedRight) throw new Error("snap-lateral");
+      const autoReferenceLine = automaticCardReferenceLine(lockedLeft, lockedRight);
+      setReferenceCardLine(autoReferenceLine);
       setReferenceCardGuideLines({
-        left:{a:{...cardLines.left.a},b:{...cardLines.left.b}},
-        right:{a:{...cardLines.right.a},b:{...cardLines.right.b}},
-        bottom:{a:{...cardLines.bottom.a},b:{...cardLines.bottom.b}},
+        left:{a:{...lockedLeft.a},b:{...lockedLeft.b}},
+        right:{a:{...lockedRight.a},b:{...lockedRight.b}},
+        bottom:{a:{...autoReferenceLine.a},b:{...autoReferenceLine.b}},
       });
       setFingerCardCalibrationStep("measurement");
       camera.setError("Referência salva: as duas interseções representam 85,60 mm. Agora tire a segunda foto com o cartão sobre o dedo.");
       void openCamera();
     }catch{
-      camera.setError("Encaixe as duas laterais no snap da borda do cartão. A linha central pode ser ajustada, mas a medida usa os snaps laterais travados.");
+      camera.setError("Encaixe as duas laterais no snap da borda do cartão. A linha central de 85,60 mm será criada automaticamente.");
     }
   };
 
@@ -469,7 +498,7 @@ export default function App() {
       setCalibrationConfidence(100);
       activateFingerMeasurement(leftPercent,rightPercent,lineMidY,100,cardQuad,pxPerMm);
     }catch{
-      camera.setError("As duas laterais precisam estar encaixadas no snap do cartão. A linha central não altera as bordas matemáticas travadas.");
+      camera.setError("As duas laterais precisam estar encaixadas no snap do cartão. A linha central é automática e não altera mais a calibração.");
     }
   };
 
@@ -941,7 +970,24 @@ export default function App() {
     setCardLines((current)=>({...current,[edge]:snapped}));
     // Guarda a borda magnetica separada da guia visual. O calculo do cartao
     // usa esta linha travada ate que um novo snap valido seja encontrado.
-    setCardSnapLines((current)=>({...current,[edge]:snapped}));
+    setCardSnapLines((current)=>{
+      const next={...current,[edge]:snapped};
+      if (
+        measurementMode==="finger" &&
+        !diameterPhotoTestMode &&
+        fingerCardCalibrationStep!=="done" &&
+        next.left &&
+        next.right
+      ) {
+        const autoLine=automaticCardReferenceLine(next.left,next.right);
+        // Assim que as duas laterais encaixam, a linha de 85,60 mm e
+        // reconstruida automaticamente e fica visualmente presa aos snaps.
+        setCardLines((lines)=>({...lines,bottom:autoLine}));
+        setCardLineLocked((locked)=>({...locked,bottom:true}));
+        setSelectedCardLine(null);
+      }
+      return next;
+    });
     setCardLineLocked((current)=>({...current,[edge]:true}));
   };
 
@@ -969,9 +1015,19 @@ export default function App() {
             // Laterais magnéticas: ao soltar, encaixam na borda real do cartão.
             snapCardLine(edge);
           }else if(edge==="bottom"){
-            // Linha central continua manual. As bolinhas são apenas handles;
-            // a medida válida é SEMPRE o trecho entre as duas interseções.
-            setCardLineLocked((current)=>({...current,bottom:true}));
+            // No fluxo de duas fotos a linha central nao e mais calibracao
+            // manual. Se as duas laterais ja deram snap, ela volta
+            // automaticamente para a geometria correta.
+            const leftSnap=cardSnapLines.left;
+            const rightSnap=cardSnapLines.right;
+            if(leftSnap && rightSnap){
+              const autoLine=automaticCardReferenceLine(leftSnap,rightSnap);
+              setCardLines((current)=>({...current,bottom:autoLine}));
+              setCardLineLocked((current)=>({...current,bottom:true}));
+              setSelectedCardLine(null);
+            }else{
+              setCardLineLocked((current)=>({...current,bottom:false}));
+            }
           }
         }else{
           snapCardLine(edge);
