@@ -90,6 +90,7 @@ export const RING_DIAMETER_TABLE = [
 // aro 24 ~= 19,89 mm
 // aro 25 ~= 20,34 mm
 // aro 29 ~= 21,15 mm
+// aro 30 ~= 21,30 mm
 //
 // Entre as âncoras usamos interpolação linear. Isso mantém os pontos reais
 // intactos e preenche apenas os aros ainda não validados diretamente.
@@ -118,10 +119,10 @@ export const FINGER_RING_HYBRID_CENTERS = [
   { ringSize: 27, widthMm: 20.75, confirmed: false },
   { ringSize: 28, widthMm: 20.95, confirmed: false },
   { ringSize: 29, widthMm: 21.15, confirmed: true },
+  { ringSize: 30, widthMm: 21.30, confirmed: true },
 
-  // Acima de 29 mantemos a continuação provisória da curva anterior
-  // até existirem novas âncoras reais nessa região.
-  { ringSize: 30, widthMm: 21.38, confirmed: false },
+  // Acima de 30 mantemos continuação provisória até existirem novas
+  // âncoras reais nessa região.
   { ringSize: 31, widthMm: 21.52, confirmed: false },
   { ringSize: 32, widthMm: 21.69, confirmed: false },
   { ringSize: 33, widthMm: 21.92, confirmed: false },
@@ -158,10 +159,10 @@ export const FINGER_RING_THRESHOLDS = [
   { minMm: 20.44, maxExclusiveMm: 20.645, ringSize: 26 },
   { minMm: 20.645, maxExclusiveMm: 20.85, ringSize: 27 },
   { minMm: 20.85, maxExclusiveMm: 21.05, ringSize: 28 },
-  { minMm: 21.05, maxExclusiveMm: 21.265, ringSize: 29 },
+  { minMm: 21.05, maxExclusiveMm: 21.225, ringSize: 29 },
 
-  { minMm: 21.265, maxExclusiveMm: 21.45, ringSize: 30 },
-  { minMm: 21.45, maxExclusiveMm: 21.605, ringSize: 31 },
+  { minMm: 21.225, maxExclusiveMm: 21.410, ringSize: 30 },
+  { minMm: 21.410, maxExclusiveMm: 21.605, ringSize: 31 },
   { minMm: 21.605, maxExclusiveMm: 21.805, ringSize: 32 },
   { minMm: 21.805, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
 ] as const;
