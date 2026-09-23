@@ -84,7 +84,7 @@ export const RING_DIAMETER_TABLE = [
 //
 // Âncoras confirmadas:
 // aro 10 ~= 14,64 mm
-// aro 17 confirmado novamente em 16,49 mm com o snap externo corrigido
+// aro 17 ~= 16,93 mm
 // aro 21 ~= 18,37 mm
 // aro 22 ~= 18,65 mm
 // aro 24 ~= 19,89 mm
@@ -143,8 +143,8 @@ export const FINGER_RING_THRESHOLDS = [
   { minMm: 15.455, maxExclusiveMm: 15.785, ringSize: 13 },
   { minMm: 15.785, maxExclusiveMm: 16.115, ringSize: 14 },
   { minMm: 16.115, maxExclusiveMm: 16.44, ringSize: 15 },
-  { minMm: 16.44, maxExclusiveMm: 16.47, ringSize: 16 },
-  { minMm: 16.47, maxExclusiveMm: 17.11, ringSize: 17 },
+  { minMm: 16.44, maxExclusiveMm: 16.765, ringSize: 16 },
+  { minMm: 16.765, maxExclusiveMm: 17.11, ringSize: 17 },
 
   { minMm: 17.11, maxExclusiveMm: 17.47, ringSize: 18 },
   { minMm: 17.47, maxExclusiveMm: 17.83, ringSize: 19 },
