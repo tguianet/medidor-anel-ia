@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { calibratePhoto } from "../vision";
 import { useCameraStream } from "../useCameraStream";
 import { scaleFromLockedCardSides } from "./cardCalibration";
@@ -24,6 +24,7 @@ export default function AppV2() {
   const [mmPerPx,setMmPerPx]=useState<number|null>(null);
   const [cardConfidence,setCardConfidence]=useState<number|null>(null);
   const [status,setStatus]=useState("Abra a camera e tire uma foto com o cartao junto do dedo.");
+  const resultRef=useRef<HTMLElement|null>(null);
 
   const numericMm=Number(fingerMm.replace(",","."));
   const result=useMemo(()=>{
@@ -112,13 +113,17 @@ export default function AppV2() {
       return;
     }
     setFingerMm(measuredMm.toFixed(3));
-    setStatus("Medicao V2 concluida: pixels -> mm -> tabela fisica.");
+    const classification=classifyFingerWidthMm(measuredMm);
+    setStatus(`Medicao concluida: ${measuredMm.toFixed(3)} mm -> aro ${classification.exactRingSize} (conforto ${classification.comfortRingSize}).`);
+    window.setTimeout(()=>{
+      resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"});
+    },80);
   };
 
   return (
     <main className="v2-page" style={{fontFamily:"Inter,system-ui,sans-serif",maxWidth:980,margin:"0 auto",padding:"24px"}}>
       <style>{`
-        .v2-page *{box-sizing:border-box}
+        .v2-page *{box-sizing:border-box}\n        .v2-page{color:#f7f1e6;background:#0d0b08;min-height:100vh}\n        .v2-card{background:#17130f;border:1px solid #6f5b39!important;color:#f7f1e6}\n        .v2-light{background:#f7f7f7!important;color:#111!important}\n        .v2-result-banner{background:#1d1811;border:2px solid #d5a84f;border-radius:16px;padding:18px;margin-bottom:16px;color:#fff}\n        .v2-result-number{font-size:52px;font-weight:900;line-height:1;color:#f2c35f}
         .v2-camera-wrap{position:relative;width:100%;background:#111;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center}
         .v2-camera-video{display:block;width:100%;height:auto;max-height:72vh;object-fit:contain;background:#111}
         .v2-photo{display:block;width:100%;height:auto;max-height:72vh;object-fit:contain}
@@ -151,7 +156,7 @@ export default function AppV2() {
         </p>
       </header>
 
-      <section style={{border:"1px solid #ddd",borderRadius:16,padding:20,marginBottom:20}}>
+      <section className="v2-card" style={{borderRadius:16,padding:20,marginBottom:20}}>
         <h2 style={{marginTop:0,fontSize:22}}>1. Camera + calibracao do cartao</h2>
 
         {!photo && (
@@ -191,7 +196,7 @@ export default function AppV2() {
               <button onClick={()=>{setPhoto(null);setMmPerPx(null);setStatus("Abra a camera e tire uma nova foto.");}} style={buttonStyle}>Nova foto</button>
             </div>
 
-            <div style={{marginTop:14,padding:12,borderRadius:12,background:"#f7f7f7",fontSize:14,lineHeight:1.5}}>
+            <div className="v2-light" style={{marginTop:14,padding:12,borderRadius:12,fontSize:14,lineHeight:1.5}}>
               <strong>Status:</strong> {status}<br/>
               {cardConfidence!==null && <>Confianca da localizacao inicial: {cardConfidence.toFixed(0)}%<br/></>}
               {mmPerPx!==null && <>Escala: {mmPerPx.toFixed(5)} mm/px</>}
@@ -202,18 +207,25 @@ export default function AppV2() {
         {camera.error && <div style={{marginTop:12,padding:12,borderRadius:10,background:"#fff3f3"}}>{camera.error}</div>}
       </section>
 
-      <section className="v2-grid">
-        <div style={{border:"1px solid #ddd",borderRadius:16,padding:20}}>
+      <section ref={resultRef} className="v2-grid">
+        <div className="v2-card" style={{borderRadius:16,padding:20}}>
           <label style={{display:"block",fontWeight:700,marginBottom:8}}>2. Largura final do dedo (mm)</label>
           <input
             value={fingerMm}
             onChange={(event)=>setFingerMm(event.target.value)}
             inputMode="decimal"
-            style={{width:"100%",boxSizing:"border-box",fontSize:28,padding:"14px 16px",borderRadius:12,border:"1px solid #bbb"}}
+            style={{width:"100%",boxSizing:"border-box",fontSize:28,padding:"14px 16px",borderRadius:12,border:"1px solid #bbb",background:"#fff",color:"#111"}}
           />
 
           {result ? (
-            <div className="v2-metrics">
+            <>
+              <div className="v2-result-banner">
+                <div style={{fontSize:13,fontWeight:800,letterSpacing:1,textTransform:"uppercase",opacity:.75}}>Resultado V2</div>
+                <div className="v2-result-number">{result.exactRingSize}</div>
+                <div style={{fontSize:18,fontWeight:700,marginTop:6}}>Conforto: {result.comfortRingSize}</div>
+                <div style={{fontSize:14,opacity:.8,marginTop:6}}>Medida do dedo: {numericMm.toFixed(3)} mm</div>
+              </div>
+              <div className="v2-metrics">
               <Metric label="Aro exato" value={String(result.exactRingSize)} />
               <Metric label="Aro conforto" value={String(result.comfortRingSize)} />
               <Metric label="Centro deste aro" value={result.targetWidthMm.toFixed(3)+" mm"} />
@@ -221,12 +233,13 @@ export default function AppV2() {
               <Metric label="Limite inferior" value={Number.isFinite(result.lowerBoundaryMm)?result.lowerBoundaryMm.toFixed(3)+" mm":"-∞"} />
               <Metric label="Limite superior" value={Number.isFinite(result.upperBoundaryMm)?result.upperBoundaryMm.toFixed(3)+" mm":"+∞"} />
             </div>
+            </>
           ) : (
-            <div style={{marginTop:16,padding:14,borderRadius:12,background:"#f6f6f6"}}>Digite uma medida valida em mm.</div>
+            <div className="v2-light" style={{marginTop:16,padding:14,borderRadius:12}}>Digite uma medida valida em mm.</div>
           )}
         </div>
 
-        <aside style={{border:"1px solid #ddd",borderRadius:16,padding:20}}>
+        <aside className="v2-card" style={{borderRadius:16,padding:20}}>
           <div style={{fontWeight:700,marginBottom:10}}>Marco inicial</div>
           <div style={{fontSize:28,fontWeight:800}}>Aro 29 = {INITIAL_REFERENCE_FINGER_WIDTH_MM.toFixed(2)} mm</div>
           <p style={{opacity:.7,lineHeight:1.5}}>
@@ -237,10 +250,10 @@ export default function AppV2() {
 
       <section style={{marginTop:24}}>
         <h2 style={{fontSize:22}}>Regua V2</h2>
-        <div style={{overflowX:"auto",border:"1px solid #ddd",borderRadius:16}}>
+        <div style={{overflowX:"auto",border:"1px solid #6f5b39",borderRadius:16,background:"#fff",color:"#111"}}>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:720}}>
             <thead>
-              <tr style={{textAlign:"left",background:"#f7f7f7"}}>
+              <tr style={{textAlign:"left",background:"#f1f1f1",color:"#111"}}>
                 <Th>Aro</Th><Th>Centro dedo</Th><Th>Limite inferior</Th><Th>Limite superior</Th><Th>Media anel fisico</Th><Th>Crescimento fisico</Th>
               </tr>
             </thead>
@@ -297,7 +310,7 @@ function OverlayText({children}:{children:ReactNode}){
 }
 
 function Metric({label,value}:{label:string;value:string}){
-  return <div style={{padding:14,borderRadius:12,background:"#f7f7f7"}}><div style={{fontSize:12,opacity:.6,marginBottom:4}}>{label}</div><div style={{fontSize:22,fontWeight:800}}>{value}</div></div>;
+  return <div className="v2-light" style={{padding:14,borderRadius:12}}><div style={{fontSize:12,opacity:.65,marginBottom:4}}>{label}</div><div style={{fontSize:22,fontWeight:800}}>{value}</div></div>;
 }
 function Th({children}:{children:ReactNode}){ return <th style={{padding:"12px 14px",fontSize:13}}>{children}</th>; }
 function Td({children}:{children:ReactNode}){ return <td style={{padding:"11px 14px",fontSize:14}}>{children}</td>; }
