@@ -1188,6 +1188,9 @@ export default function App() {
     const toScreenXPercent=(imageX:number)=>(
       (rect.width/2+(imageX/source.width*rect.width-rect.width/2)*zoom+panX)/rect.width*100
     );
+    const toScreenYPercent=(imageY:number)=>(
+      (rect.height/2+(imageY/source.height*rect.height-rect.height/2)*zoom+panY)/rect.height*100
+    );
     const lineXAtScreenY=(line:Line,yPercent:number)=>{
       const dy=line.b.y-line.a.y;
       if(Math.abs(dy)<1e-6) return (line.a.x+line.b.x)/2;
@@ -1266,16 +1269,60 @@ export default function App() {
       if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
     }
 
+    // Ajusta uma reta para cada lateral do dedo no plano da imagem.
+    // A largura correta deve ser medida PERPENDICULARMENTE ao eixo do dedo,
+    // e nao horizontalmente em relacao a tela.
+    const fitXByY=(points:{x:number;y:number}[])=>{
+      const meanY=points.reduce((s,p)=>s+p.y,0)/points.length;
+      const meanX=points.reduce((s,p)=>s+p.x,0)/points.length;
+      let yy=0,yx=0;
+      for(const p of points){
+        const dy=p.y-meanY;
+        yy+=dy*dy;
+        yx+=dy*(p.x-meanX);
+      }
+      const slope=yy>1e-6?yx/yy:0;
+      const intercept=meanX-slope*meanY;
+      return {slope,intercept};
+    };
+
+    const leftFit=fitXByY(leftPoints);
+    const rightFit=fitXByY(rightPoints);
+    const axisSlope=clamp((leftFit.slope+rightFit.slope)/2,-0.45,0.45);
+    const normalLength=Math.hypot(1,axisSlope);
+    const nx=1/normalLength;
+    const ny=-axisSlope/normalLength;
+    const axisAngleDeg=Math.atan(axisSlope)*180/Math.PI;
+
     return leftPoints.map((leftPoint,index)=>{
       const rightPoint=rightPoints[index];
+
+      // Intersecao da normal do eixo do dedo com a lateral direita ajustada.
+      // Como (nx,ny) e unitario, |t| ja e a largura ortogonal em pixels.
+      const denominator=nx-rightFit.slope*ny;
+      let t=denominator!==0
+        ? (rightFit.slope*leftPoint.y+rightFit.intercept-leftPoint.x)/denominator
+        : rightPoint.x-leftPoint.x;
+
+      if(!Number.isFinite(t) || t<=0){
+        t=(rightPoint.x-leftPoint.x)*Math.cos(Math.atan(axisSlope));
+      }
+
+      const orthogonalRightX=leftPoint.x+t*nx;
+      const orthogonalRightY=leftPoint.y+t*ny;
+
       return {
         left:leftPoint.x,
-        right:rightPoint.x,
+        right:orthogonalRightX,
         y:leftPoint.y,
-        width:rightPoint.x-leftPoint.x,
+        rightY:orthogonalRightY,
+        width:Math.abs(t),
+        horizontalWidth:rightPoint.x-leftPoint.x,
+        axisAngleDeg,
         yPercent:leftPoint.yPercent,
+        rightYPercent:toScreenYPercent(orthogonalRightY),
         leftPercent:toScreenXPercent(leftPoint.x),
-        rightPercent:toScreenXPercent(rightPoint.x),
+        rightPercent:toScreenXPercent(orthogonalRightX),
         confidence:Math.round(clamp(
           45+Math.min(26,leftPoint.score*.55)+Math.min(26,rightPoint.score*.55),
           0,99
@@ -1467,6 +1514,7 @@ export default function App() {
       correctionPercent,
       spreadPx,
       spreadPercent,
+      fingerAxisAngleDeg: fourMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
 
@@ -1674,19 +1722,6 @@ export default function App() {
                   style={{ left: `${visualBandLeft}%`, top: `${measureY - 3.2}%`, width: `${visualBandWidth}%` }}
                   aria-hidden="true"
                 />
-                {fourMagnetSamples?.map((sample,index)=>(
-                  <div
-                    key={`magnet-pair-${index}`}
-                    className="measurement-band"
-                    style={{
-                      left:`${sample.leftPercent}%`,
-                      top:`${sample.yPercent}%`,
-                      width:`${Math.max(0,sample.rightPercent-sample.leftPercent)}%`,
-                      opacity:index===1||index===2?0.72:0.48,
-                    }}
-                    aria-hidden="true"
-                  />
-                ))}
                 {fourMagnetSamples && (
                   <svg
                     className="finger-contour-overlay"
@@ -1695,6 +1730,19 @@ export default function App() {
                     aria-hidden="true"
                     style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:5}}
                   >
+                    {fourMagnetSamples.map((sample,index)=>(
+                      <line
+                        key={`orthogonal-sample-${index}`}
+                        x1={sample.leftPercent}
+                        y1={sample.yPercent}
+                        x2={sample.rightPercent}
+                        y2={sample.rightYPercent}
+                        stroke="#52e0a3"
+                        strokeWidth={index===1||index===2 ? "0.58" : "0.4"}
+                        opacity={index===1||index===2 ? 0.82 : 0.56}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
                     <polyline
                       points={fourMagnetSamples.map((sample)=>`${sample.leftPercent},${sample.yPercent}`).join(" ")}
                       fill="none"
@@ -1703,7 +1751,7 @@ export default function App() {
                       vectorEffect="non-scaling-stroke"
                     />
                     <polyline
-                      points={fourMagnetSamples.map((sample)=>`${sample.rightPercent},${sample.yPercent}`).join(" ")}
+                      points={fourMagnetSamples.map((sample)=>`${sample.rightPercent},${sample.rightYPercent}`).join(" ")}
                       fill="none"
                       stroke="#52e0a3"
                       strokeWidth="0.45"
@@ -1711,7 +1759,7 @@ export default function App() {
                     />
                     {fourMagnetSamples.flatMap((sample,index)=>[
                       <circle key={`left-contour-${index}`} cx={sample.leftPercent} cy={sample.yPercent} r="0.65" fill="#52e0a3" />,
-                      <circle key={`right-contour-${index}`} cx={sample.rightPercent} cy={sample.yPercent} r="0.65" fill="#52e0a3" />,
+                      <circle key={`right-contour-${index}`} cx={sample.rightPercent} cy={sample.rightYPercent} r="0.65" fill="#52e0a3" />,
                     ])}
                   </svg>
                 )}
@@ -1867,6 +1915,7 @@ export default function App() {
                       <span>Larguras detectadas: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                       <span>Largura em px usada no cálculo: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
                       <span>Variação dos 4 pontos: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
+                      <span>Inclinação do dedo compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
                       {measurementAudit.cardScaleMmPerPx !== null && (
                         <span>Escala real do cartão: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>
                       )}
