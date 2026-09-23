@@ -42,3 +42,23 @@ Se nao responder claramente a uma delas, nao entra na V2.
 Branch: `medidor-anel-2-0`
 
 A branch `main` continua sendo o sistema atual e nao deve ser alterada pelos testes da V2.
+
+
+## Classificador mm -> aro
+
+Arquivo: `src/v2/ringClassifier.ts`
+
+A classificacao usa o aro 29 como ancora inicial em 21,15 mm de largura de dedo.
+Os demais centros sao construidos acumulando somente o crescimento fisico medido
+entre aneis consecutivos no paquimetro.
+
+Importante: a tabela fisica dos aneis permanece intacta. A ancora do dedo e uma
+camada separada e pode ser recalibrada mais tarde sem alterar as medicoes fisicas.
+
+As fronteiras entre dois aros sao o ponto medio entre os dois centros consecutivos.
+O classificador retorna:
+- aro exato;
+- aro conforto (+1, separado da classificacao);
+- centro esperado;
+- distancia em mm ate o centro;
+- limites inferior e superior usados na decisao.
