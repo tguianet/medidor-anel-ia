@@ -94,6 +94,8 @@ export default function App() {
   });
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
   const [measurementCardLengthPx, setMeasurementCardLengthPx] = useState<number | null>(null);
+  const [perspectiveMismatchPercent, setPerspectiveMismatchPercent] = useState<number | null>(null);
+  const MAX_PERSPECTIVE_MISMATCH_PERCENT = 2;
 
   useEffect(() => {
     let cancelled = false;
@@ -602,6 +604,18 @@ export default function App() {
     try{
       const segment=cardReferenceSegment();
       setMeasurementCardLengthPx(segment.lengthPx);
+
+      if (referenceCardLengthPx !== null && referenceCardLengthPx > 0) {
+        const mismatch = Math.abs((segment.lengthPx / referenceCardLengthPx - 1) * 100);
+        setPerspectiveMismatchPercent(mismatch);
+        if (mismatch > MAX_PERSPECTIVE_MISMATCH_PERCENT) {
+          camera.setError(`A perspectiva mudou ${mismatch.toFixed(1)}% entre as fotos. Refaça a segunda foto mantendo o cartão na mesma distância e o celular mais paralelo.`);
+          return;
+        }
+      } else {
+        setPerspectiveMismatchPercent(null);
+      }
+
       const pxPerMm=segment.lengthPx/85.6;
       const leftPercent=segment.leftPx.x/source.width*100;
       const rightPercent=segment.rightPx.x/source.width*100;
@@ -1998,6 +2012,9 @@ export default function App() {
                   {measurementCardLengthPx !== null && <span>Cartão foto 2: {measurementCardLengthPx.toFixed(1)} px</span>}
                   {referenceCardLengthPx !== null && measurementCardLengthPx !== null && (
                     <span>Diferença cartão 1→2: {(((measurementCardLengthPx/referenceCardLengthPx)-1)*100).toFixed(2)}%</span>
+                  )}
+                  {perspectiveMismatchPercent !== null && (
+                    <span>Validação de perspectiva: {perspectiveMismatchPercent <= MAX_PERSPECTIVE_MISMATCH_PERCENT ? "OK" : "REFazer foto 2"} · limite {MAX_PERSPECTIVE_MISMATCH_PERCENT.toFixed(1)}%</span>
                   )}
                 </>
               )}
