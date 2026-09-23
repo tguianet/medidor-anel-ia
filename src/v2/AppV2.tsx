@@ -116,7 +116,33 @@ export default function AppV2() {
   };
 
   return (
-    <main style={{fontFamily:"Inter,system-ui,sans-serif",maxWidth:980,margin:"0 auto",padding:"24px"}}>
+    <main className="v2-page" style={{fontFamily:"Inter,system-ui,sans-serif",maxWidth:980,margin:"0 auto",padding:"24px"}}>
+      <style>{`
+        .v2-page *{box-sizing:border-box}
+        .v2-camera-wrap{position:relative;width:100%;background:#111;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+        .v2-camera-video{display:block;width:100%;height:auto;max-height:72vh;object-fit:contain;background:#111}
+        .v2-photo{display:block;width:100%;height:auto;max-height:72vh;object-fit:contain}
+        .v2-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+        .v2-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.7fr);gap:18px;align-items:start}
+        .v2-ranges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+        .v2-metrics{margin-top:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+        @media (max-width:700px){
+          .v2-page{padding:12px!important}
+          .v2-page h1{font-size:26px!important;line-height:1.08}
+          .v2-grid{grid-template-columns:1fr}
+          .v2-ranges{grid-template-columns:1fr}
+          .v2-metrics{grid-template-columns:1fr 1fr}
+          .v2-actions{display:grid;grid-template-columns:1fr 1fr}
+          .v2-actions button:last-child:nth-child(odd){grid-column:1/-1}
+          .v2-camera-video,.v2-photo{max-height:68vh}
+        }
+        @media (max-width:430px){
+          .v2-actions{grid-template-columns:1fr}
+          .v2-actions button{width:100%}
+          .v2-actions button:last-child:nth-child(odd){grid-column:auto}
+          .v2-metrics{grid-template-columns:1fr}
+        }
+      `}</style>
       <header style={{marginBottom:24}}>
         <div style={{fontSize:12,fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",opacity:.6}}>Medidor de Anel 2.0</div>
         <h1 style={{margin:"6px 0 8px",fontSize:32}}>Laboratorio limpo V2</h1>
@@ -130,11 +156,11 @@ export default function AppV2() {
 
         {!photo && (
           <>
-            <div style={{position:"relative",aspectRatio:"3 / 4",maxHeight:620,background:"#111",borderRadius:14,overflow:"hidden"}}>
-              <video ref={camera.videoRef} playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}} />
+            <div className="v2-camera-wrap">
+              <video ref={camera.videoRef} playsInline muted className="v2-camera-video" />
               {camera.cameraOpening && <OverlayText>Abrindo camera...</OverlayText>}
             </div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:12}}>
+            <div className="v2-actions">
               <button onClick={()=>void camera.startCameraStream()} style={buttonStyle}>Abrir camera</button>
               <button onClick={()=>void capturePhoto()} style={buttonStyle}>Tirar foto</button>
               {camera.torchSupported && <button onClick={()=>void camera.toggleTorch()} style={buttonStyle}>{camera.torchOn?"Desligar flash":"Ligar flash"}</button>}
@@ -144,22 +170,22 @@ export default function AppV2() {
 
         {photo && (
           <>
-            <div style={{position:"relative",width:"100%",overflow:"hidden",borderRadius:14,background:"#111"}}>
-              <img src={photo.src} alt="Captura V2" style={{display:"block",width:"100%",height:"auto"}} />
+            <div className="v2-camera-wrap">
+              <img src={photo.src} alt="Captura V2" className="v2-photo" />
               <Guide pct={cardLeftPct} color="#1976d2" label="cartao E" />
               <Guide pct={cardRightPct} color="#1976d2" label="cartao D" />
               <Guide pct={fingerLeftPct} color="#00a86b" label="dedo E" />
               <Guide pct={fingerRightPct} color="#00a86b" label="dedo D" />
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginTop:14}}>
+            <div className="v2-ranges">
               <Range label="Cartao esquerda" value={cardLeftPct} onChange={setCardLeftPct} />
               <Range label="Cartao direita" value={cardRightPct} onChange={setCardRightPct} />
               <Range label="Dedo esquerda" value={fingerLeftPct} onChange={setFingerLeftPct} />
               <Range label="Dedo direita" value={fingerRightPct} onChange={setFingerRightPct} />
             </div>
 
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:14}}>
+            <div className="v2-actions">
               <button onClick={calibrateCard} style={buttonStyle}>Calibrar cartao</button>
               <button onClick={measureFinger} style={buttonStyle}>Medir dedo</button>
               <button onClick={()=>{setPhoto(null);setMmPerPx(null);setStatus("Abra a camera e tire uma nova foto.");}} style={buttonStyle}>Nova foto</button>
@@ -176,7 +202,7 @@ export default function AppV2() {
         {camera.error && <div style={{marginTop:12,padding:12,borderRadius:10,background:"#fff3f3"}}>{camera.error}</div>}
       </section>
 
-      <section style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(280px,.7fr)",gap:18,alignItems:"start"}}>
+      <section className="v2-grid">
         <div style={{border:"1px solid #ddd",borderRadius:16,padding:20}}>
           <label style={{display:"block",fontWeight:700,marginBottom:8}}>2. Largura final do dedo (mm)</label>
           <input
@@ -187,7 +213,7 @@ export default function AppV2() {
           />
 
           {result ? (
-            <div style={{marginTop:18,display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12}}>
+            <div className="v2-metrics">
               <Metric label="Aro exato" value={String(result.exactRingSize)} />
               <Metric label="Aro conforto" value={String(result.comfortRingSize)} />
               <Metric label="Centro deste aro" value={result.targetWidthMm.toFixed(3)+" mm"} />
