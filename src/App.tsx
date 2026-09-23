@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
-import AdminCalibration from "./AdminCalibration";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "./ringCalculation";
 import { lineIntersection, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
@@ -1563,8 +1562,6 @@ export default function App() {
         <IntroScreen
           error={camera.error}
           onMeasureFinger={() => { setDiameterPhotoTestMode(false); setMeasurementMode("finger"); setFingerCardCalibrationStep("reference"); void openCamera(); }}
-          onTestGauge={() => { setDiameterPhotoTestMode(false); setMeasurementMode("anelimetro"); void openCamera(); }}
-          onTestDiameterPhoto={() => { setDiameterPhotoTestMode(true); setMeasurementMode("finger"); void openCamera(); }}
         />
       )}
 
@@ -1621,7 +1618,7 @@ export default function App() {
           )}
           <span className="step">{
             phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
-              ? (fingerCardCalibrationStep === "reference" ? "1. CARTÃO RETO — RETA DE 85,60 MM" : "2. CARTÃO SOBRE O DEDO")
+              ? (fingerCardCalibrationStep === "reference" ? "1. ALINHE O CARTÃO" : "2. CARTÃO SOBRE O DEDO")
               : phase === "card" ? "1. CALIBRE O CARTÃO"
               : diameterPhotoTestMode ? "2. MEÇA O DIÂMETRO INTERNO"
               : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO"
@@ -1629,7 +1626,7 @@ export default function App() {
           }</span>
           <h1>{
             phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
-              ? (fingerCardCalibrationStep === "reference" ? "Ajuste a reta de ponta a ponta do cartão" : "Reajuste a mesma reta no cartão sobre o dedo")
+              ? (fingerCardCalibrationStep === "reference" ? "Alinhe o cartão nas guias" : "Alinhe o cartão sobre o dedo")
               : phase === "card" ? "Ajuste as laterais e a base do cartão"
               : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel"
               : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro"
@@ -1834,16 +1831,7 @@ export default function App() {
                 <small>{fingerCardCalibrationStep === "reference"
                   ? "Base plana, câmera de cima e cartão sem inclinação. O trecho entre as duas interseções vale 85,60 mm."
                   : "Meça na parte mais grossa do dedo — junta ou falange — porque é por ali que o anel precisa passar."}</small>
-                {cardReferencePreview && (
-                  <>
-                    <small><strong>Segmento válido:</strong> 85,60 mm · {cardReferencePreview.lengthPx.toFixed(1)} px</small>
-                    <small><strong>Escala desta foto:</strong> {cardReferencePreview.mmPerPx.toFixed(4)} mm/px</small>
-                  </>
-                )}
-                {fingerCardCalibrationStep === "measurement" && referenceCardLengthPx !== null && (
-                  <small><strong>Foto 1 salva:</strong> 85,60 mm = {referenceCardLengthPx.toFixed(1)} px</small>
-                )}
-                <small>Na segunda foto repita o mesmo ajuste; a distância entre essas duas interseções gera a escala px/mm usada no dedo.</small>
+                <small>Quando as laterais estiverem alinhadas, avance para a próxima etapa.</small>
               </div>
             </>
           )}
@@ -1880,70 +1868,11 @@ export default function App() {
           )}
 
           {phase === "finger" && result && leftLocked && rightLocked && (
-            <div className="analysis-result">
+            <div className="analysis-result commercial-result">
               <strong>Número exato: {result.ringSize}</strong>
-              {measurementMode === "finger" && (
-                <>
-                  <span><strong>Número de conforto: {clamp(result.ringSize + 1, 1, 40)}</strong></span>
-                  <small>Exato = encaixa no dedo · Conforto = uma folga para passar pela junta.</small>
-                </>
-              )}
-              {diameterPhotoTestMode && <span>Diâmetro interno medido: {result.rawWidthMm.toFixed(2)} mm</span>}
-              {diameterPhotoTestMode && <span>Diâmetro ajustado para 94%: {result.widthMm.toFixed(2)} mm</span>}
-              {diameterPhotoTestMode && <span>Referência do aro: {result.equivalentDiameterMm.toFixed(2)} mm</span>}
-              {!diameterPhotoTestMode && measurementMode === "finger" && (
-                <>
-                  <span>Medida do dedo: {result.widthMm.toFixed(2)} mm</span>
-                </>
-              )}
-              {!diameterPhotoTestMode && measurementMode === "anelimetro" && (
-                <>
-                  <span>Medida normalizada: {result.widthMm.toFixed(2)} mm</span>
-                  <span>Diâmetro interno equivalente: {result.equivalentDiameterMm.toFixed(2)} mm</span>
-                </>
-              )}
-              {measurementMode === "finger" && <span>Referência do cartão: reta ajustada de 85,60 mm na 2ª foto</span>}
-              {measurementMode === "finger" && geometricScaleMmPerPx !== null && (
-                <span>Escala pela reta: {geometricScaleMmPerPx.toFixed(4)} mm/px</span>
-              )}
-              {measurementMode === "finger" && !diameterPhotoTestMode && (
-                <>
-                  <span>Normalização provisória aplicada: × {TEST_FINGER_CARD_NORMALIZATION.toFixed(3)}</span>
-                  {measurementAudit && (
-                    <>
-                      <strong>DIAGNÓSTICO DA MEDIÇÃO</strong>
-                      <span>Larguras detectadas: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
-                      <span>Largura em px usada no cálculo: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
-                      <span>Variação dos 4 pontos: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
-                      <span>Inclinação do dedo compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
-                      {measurementAudit.cardScaleMmPerPx !== null && (
-                        <span>Escala real do cartão: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>
-                      )}
-                      {measurementAudit.rawCardMm !== null && (
-                        <span>Medida bruta pela escala do cartão: {measurementAudit.rawCardMm.toFixed(2)} mm</span>
-                      )}
-                      {measurementAudit.normalizedMm !== null && (
-                        <span>Medida após normalização: {measurementAudit.normalizedMm.toFixed(2)} mm</span>
-                      )}
-                      <span>Correção aplicada: -{measurementAudit.correctionPercent.toFixed(1)}%</span>
-                      {referenceCardLengthPx !== null && (
-                        <span>Foto 1 do cartão: 85,60 mm = {referenceCardLengthPx.toFixed(1)} px</span>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-              {measurementMode === "anelimetro" && <span>Calibração do cartão: {calibrationConfidence}%</span>}
-              {measurementMode === "anelimetro" && <span>Confiança final: {finalMeasurementConfidence}% · {calibrationQualityLabel}</span>}
+              <span><strong>Número de conforto: {clamp(result.ringSize + 1, 1, 40)}</strong></span>
+              <small>Exato = encaixe mais justo · Conforto = uma folga para passar pela junta.</small>
             </div>
-          )}
-          {phase === "finger" && result && leftLocked && rightLocked && !tryOn && !diameterPhotoTestMode && (
-            <AdminCalibration
-              measurement={{ widthMm: result.widthMm, ringSize: result.ringSize, magnetWidthsMm: fourMagnetWidthsMm.length ? fourMagnetWidthsMm : (singleFingerWidthMm !== null ? [singleFingerWidthMm] : []) }}
-              calibrationConfidence={calibrationConfidence}
-              zoom={zoom}
-              defaultMeasurementType={measurementMode}
-            />
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
