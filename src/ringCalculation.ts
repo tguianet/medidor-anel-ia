@@ -89,7 +89,7 @@ export const RING_DIAMETER_TABLE = [
 // aro 22 ~= 18,65 mm
 // aro 24 ~= 19,89 mm
 // aro 25 ~= 20,34 mm
-// aro 29 ~= 21,15 mm
+// aro 29 confirmado em faixa real de aproximadamente 20,96 a 21,15 mm
 // aro 30 ~= 21,30 mm
 //
 // Entre as âncoras usamos interpolação linear. Isso mantém os pontos reais
@@ -158,8 +158,8 @@ export const FINGER_RING_THRESHOLDS = [
   { minMm: 20.115, maxExclusiveMm: 20.44, ringSize: 25 },
   { minMm: 20.44, maxExclusiveMm: 20.645, ringSize: 26 },
   { minMm: 20.645, maxExclusiveMm: 20.85, ringSize: 27 },
-  { minMm: 20.85, maxExclusiveMm: 21.05, ringSize: 28 },
-  { minMm: 21.05, maxExclusiveMm: 21.225, ringSize: 29 },
+  { minMm: 20.85, maxExclusiveMm: 20.95, ringSize: 28 },
+  { minMm: 20.95, maxExclusiveMm: 21.225, ringSize: 29 },
 
   { minMm: 21.225, maxExclusiveMm: 21.410, ringSize: 30 },
   { minMm: 21.410, maxExclusiveMm: 21.605, ringSize: 31 },
