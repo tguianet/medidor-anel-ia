@@ -80,72 +80,88 @@ export const RING_DIAMETER_TABLE = [
   { size: 40, diameterMm: 25.46 },
 ];
 
-// Curva híbrida provisória do modo dedo.
+// Curva híbrida do modo dedo baseada nas âncoras reais mais recentes.
 //
-// Importante: esta curva NÃO é a tabela de diâmetro interno do anel.
-// Ela converte a largura do dedo medida pela câmera para o aro, usando:
-// 1) dedos reais confirmados como âncoras;
-// 2) progressão física dos anéis apenas para dar forma entre as âncoras;
-// 3) uma pequena zona prática na transição 25 -> 26.
+// Âncoras confirmadas:
+// aro 10 ~= 14,64 mm
+// aro 17 ~= 16,93 mm
+// aro 21 ~= 18,37 mm
+// aro 22 ~= 18,65 mm
+// aro 24 ~= 19,89 mm
+// aro 25 ~= 20,34 mm
+// aro 29 ~= 21,15 mm
 //
-// Âncoras reais atualmente confirmadas:
-// aro 16 ~= 17,19 mm
-// aro 20 ~= 18,82 mm
-// aro 25 ~= 20,34 mm (20,21 / 20,47 em testes recentes)
-// aro 29 ~= 21,15 mm (21,12 / 21,15 / 21,18 em três testes consecutivos)
-//
-// Aros 30-33 ainda são provisórios e serão refinados conforme surgirem
-// novos dedos reais conhecidos. Esta passa a ser a base de calibração
-// para as próximas alterações, sem mexer na escala física da câmera.
+// Entre as âncoras usamos interpolação linear. Isso mantém os pontos reais
+// intactos e preenche apenas os aros ainda não validados diretamente.
 export const FINGER_RING_HYBRID_CENTERS = [
-  { ringSize: 16, widthMm: 17.19, confirmed: true },
-  { ringSize: 17, widthMm: 17.60, confirmed: false },
-  { ringSize: 18, widthMm: 18.01, confirmed: false },
-  { ringSize: 19, widthMm: 18.41, confirmed: false },
-  { ringSize: 20, widthMm: 18.82, confirmed: true },
-  { ringSize: 21, widthMm: 19.12, confirmed: false },
-  { ringSize: 22, widthMm: 19.56, confirmed: false },
-  { ringSize: 23, widthMm: 19.78, confirmed: false },
-  { ringSize: 24, widthMm: 19.99, confirmed: false },
+  { ringSize: 10, widthMm: 14.64, confirmed: true },
+  { ringSize: 11, widthMm: 14.97, confirmed: false },
+  { ringSize: 12, widthMm: 15.29, confirmed: false },
+  { ringSize: 13, widthMm: 15.62, confirmed: false },
+  { ringSize: 14, widthMm: 15.95, confirmed: false },
+  { ringSize: 15, widthMm: 16.28, confirmed: false },
+  { ringSize: 16, widthMm: 16.60, confirmed: false },
+  { ringSize: 17, widthMm: 16.93, confirmed: true },
+
+  { ringSize: 18, widthMm: 17.29, confirmed: false },
+  { ringSize: 19, widthMm: 17.65, confirmed: false },
+  { ringSize: 20, widthMm: 18.01, confirmed: false },
+  { ringSize: 21, widthMm: 18.37, confirmed: true },
+
+  { ringSize: 22, widthMm: 18.65, confirmed: true },
+  { ringSize: 23, widthMm: 19.27, confirmed: false },
+  { ringSize: 24, widthMm: 19.89, confirmed: true },
+
   { ringSize: 25, widthMm: 20.34, confirmed: true },
-  { ringSize: 26, widthMm: 20.60, confirmed: false },
+
+  { ringSize: 26, widthMm: 20.54, confirmed: false },
   { ringSize: 27, widthMm: 20.75, confirmed: false },
-  { ringSize: 28, widthMm: 20.92, confirmed: false },
+  { ringSize: 28, widthMm: 20.95, confirmed: false },
   { ringSize: 29, widthMm: 21.15, confirmed: true },
+
+  // Acima de 29 mantemos a continuação provisória da curva anterior
+  // até existirem novas âncoras reais nessa região.
   { ringSize: 30, widthMm: 21.38, confirmed: false },
   { ringSize: 31, widthMm: 21.52, confirmed: false },
   { ringSize: 32, widthMm: 21.69, confirmed: false },
   { ringSize: 33, widthMm: 21.92, confirmed: false },
 ] as const;
 
-// Os limites ficam nos pontos médios entre os centros híbridos.
-// Na transição 25 -> 26 usamos 20,50 mm para preservar o teste real
-// de 20,47 mm que confirmou aro 25 com a calibração atual.
+// Converte centros em fronteiras pelos pontos médios entre aros consecutivos.
+// Para aros abaixo de 10, mantemos a referência antiga até existirem dados reais.
 export const FINGER_RING_THRESHOLDS = [
-  // Abaixo do aro 16 mantemos a referência anterior até existirem novas
-  // âncoras reais suficientes nessa faixa.
-  { minMm: Number.NEGATIVE_INFINITY, maxExclusiveMm: 16.50, ringSize: 13 },
-  { minMm: 16.50, maxExclusiveMm: 16.70, ringSize: 14 },
-  { minMm: 16.70, maxExclusiveMm: 17.00, ringSize: 15 },
+  { minMm: Number.NEGATIVE_INFINITY, maxExclusiveMm: 13.37, ringSize: 1 },
+  { minMm: 13.37, maxExclusiveMm: 13.68, ringSize: 2 },
+  { minMm: 13.68, maxExclusiveMm: 14.01, ringSize: 3 },
+  { minMm: 14.01, maxExclusiveMm: 14.32, ringSize: 4 },
+  { minMm: 14.32, maxExclusiveMm: 14.64, ringSize: 5 },
+  { minMm: 14.64, maxExclusiveMm: 14.805, ringSize: 10 },
 
-  { minMm: 17.00, maxExclusiveMm: 17.395, ringSize: 16 },
-  { minMm: 17.395, maxExclusiveMm: 17.805, ringSize: 17 },
-  { minMm: 17.805, maxExclusiveMm: 18.210, ringSize: 18 },
-  { minMm: 18.210, maxExclusiveMm: 18.615, ringSize: 19 },
-  { minMm: 18.615, maxExclusiveMm: 18.970, ringSize: 20 },
-  { minMm: 18.970, maxExclusiveMm: 19.340, ringSize: 21 },
-  { minMm: 19.340, maxExclusiveMm: 19.670, ringSize: 22 },
-  { minMm: 19.670, maxExclusiveMm: 19.885, ringSize: 23 },
-  { minMm: 19.885, maxExclusiveMm: 20.165, ringSize: 24 },
+  { minMm: 14.805, maxExclusiveMm: 15.13, ringSize: 11 },
+  { minMm: 15.13, maxExclusiveMm: 15.455, ringSize: 12 },
+  { minMm: 15.455, maxExclusiveMm: 15.785, ringSize: 13 },
+  { minMm: 15.785, maxExclusiveMm: 16.115, ringSize: 14 },
+  { minMm: 16.115, maxExclusiveMm: 16.44, ringSize: 15 },
+  { minMm: 16.44, maxExclusiveMm: 16.765, ringSize: 16 },
+  { minMm: 16.765, maxExclusiveMm: 17.11, ringSize: 17 },
 
-  { minMm: 20.165, maxExclusiveMm: 20.500, ringSize: 25 },
-  { minMm: 20.500, maxExclusiveMm: 20.675, ringSize: 26 },
-  { minMm: 20.675, maxExclusiveMm: 20.835, ringSize: 27 },
-  { minMm: 20.835, maxExclusiveMm: 21.035, ringSize: 28 },
-  { minMm: 21.035, maxExclusiveMm: 21.265, ringSize: 29 },
+  { minMm: 17.11, maxExclusiveMm: 17.47, ringSize: 18 },
+  { minMm: 17.47, maxExclusiveMm: 17.83, ringSize: 19 },
+  { minMm: 17.83, maxExclusiveMm: 18.19, ringSize: 20 },
+  { minMm: 18.19, maxExclusiveMm: 18.51, ringSize: 21 },
 
-  { minMm: 21.265, maxExclusiveMm: 21.450, ringSize: 30 },
-  { minMm: 21.450, maxExclusiveMm: 21.605, ringSize: 31 },
+  { minMm: 18.51, maxExclusiveMm: 18.96, ringSize: 22 },
+  { minMm: 18.96, maxExclusiveMm: 19.58, ringSize: 23 },
+  { minMm: 19.58, maxExclusiveMm: 20.115, ringSize: 24 },
+
+  { minMm: 20.115, maxExclusiveMm: 20.44, ringSize: 25 },
+  { minMm: 20.44, maxExclusiveMm: 20.645, ringSize: 26 },
+  { minMm: 20.645, maxExclusiveMm: 20.85, ringSize: 27 },
+  { minMm: 20.85, maxExclusiveMm: 21.05, ringSize: 28 },
+  { minMm: 21.05, maxExclusiveMm: 21.265, ringSize: 29 },
+
+  { minMm: 21.265, maxExclusiveMm: 21.45, ringSize: 30 },
+  { minMm: 21.45, maxExclusiveMm: 21.605, ringSize: 31 },
   { minMm: 21.605, maxExclusiveMm: 21.805, ringSize: 32 },
   { minMm: 21.805, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
 ] as const;
@@ -153,10 +169,11 @@ export const FINGER_RING_THRESHOLDS = [
 export const ringSizeFromFingerMeasurement = (measuredMm: number) => {
   if (!Number.isFinite(measuredMm)) return 33;
 
-  const match = FINGER_RING_THRESHOLDS.find(
+  // Prioriza a curva híbrida a partir do aro 10.
+  const hybridMatch = FINGER_RING_THRESHOLDS.find(
     (range) => measuredMm >= range.minMm && measuredMm < range.maxExclusiveMm,
   );
-  return match?.ringSize ?? 33;
+  return hybridMatch?.ringSize ?? 33;
 };
 
 // Conversão 2D calibrada por medições reais de largura marcada e diâmetro
