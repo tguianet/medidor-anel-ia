@@ -1253,12 +1253,12 @@ export default function App() {
     };
 
     const searchRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
-    // 20 cortes em uma faixa longitudinal maior do dedo. Assim o sistema
-    // procura automaticamente a regiao mais grossa por onde o anel precisa
-    // passar, em vez de depender da altura exata escolhida pelo usuario.
-    const yPercents=Array.from({length:20},(_,index)=>{
-      const off=-12+(index*(24/19));
-      return clamp(measureY+off,6,94);
+    // Varredura longitudinal automatica: 50 cortes percorrem uma faixa bem
+    // maior do dedo. O usuario nao precisa acertar uma altura exata; o sistema
+    // procura sozinho a regiao mais larga por onde o anel precisa passar.
+    const yPercents=Array.from({length:50},(_,index)=>{
+      const off=-26+(index*(52/49));
+      return clamp(measureY+off,4,96);
     });
 
     const findEdge=(side:"left"|"right",guideX:number,y:number,previousX:number|null)=>{
@@ -1320,7 +1320,7 @@ export default function App() {
       return candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
-    // Cada um dos 20 niveis procura localmente a borda mais proxima,
+    // Cada um dos 50 niveis procura localmente a borda mais proxima,
     // mantendo continuidade para formar UM contorno por lado.
     const leftPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
     const rightPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
@@ -1345,9 +1345,9 @@ export default function App() {
       previousRight=re.x;
     }
 
-    // Busca 20 cortes e aceita no minimo 16 leituras validas. Uma pequena
-    // regiao com reflexo/ruga nao deve invalidar toda a medicao.
-    if(leftPoints.length<16||rightPoints.length<16||leftPoints.length!==rightPoints.length) return null;
+    // Com a varredura maior aceitamos a medicao quando ha pelo menos 32
+    // cortes coerentes. Reflexos isolados nao devem invalidar o dedo inteiro.
+    if(leftPoints.length<32||rightPoints.length<32||leftPoints.length!==rightPoints.length) return null;
 
     // Rejeita saltos grandes entre pontos vizinhos: se uma ruga/sombra tentar
     // puxar um ponto para dentro, mantemos o contorno continuo.
@@ -1440,15 +1440,14 @@ export default function App() {
     });
   };
 
-  // Procura a regiao MAIS LARGA ESTAVEL ao longo do dedo.
-  // Em vez de escolher pontos altos soltos, avaliamos janelas de 5 cortes
-  // consecutivos. Isso exige que a maior largura exista numa regiao anatomica
-  // continua e impede uma ruga/sombra isolada de comandar o resultado.
+  // Procura a regiao MAIS LARGA ESTAVEL ao longo de toda a varredura.
+  // A maior largura so vale quando forma um plato continuo; um pico isolado
+  // causado por sombra/ruga nunca comanda o resultado.
   const selectWidestStableRun = (values:number[]) => {
     const valid=values.filter(Number.isFinite).filter(v=>v>0);
     if(!valid.length) return {selected:[] as number[],used:null as number|null,startIndex:-1};
 
-    const windowSize=Math.min(5,valid.length);
+    const windowSize=Math.min(7,valid.length);
     let best:{selected:number[];used:number;startIndex:number;spreadPercent:number}|null=null;
 
     for(let start=0;start<=valid.length-windowSize;start++){
@@ -1458,9 +1457,9 @@ export default function App() {
       const mean=window.reduce((sum,v)=>sum+v,0)/window.length;
       const spreadPercent=mean>0 ? ((max-min)/mean)*100 : 999;
 
-      // A regiao grossa precisa ser continua. Ate 2,5% de variacao local
-      // permite a anatomia real do dedo sem aceitar um pico isolado.
-      if(spreadPercent>2.5) continue;
+      // A regiao grossa precisa ser continua. Com 7 cortes exigimos um plato
+      // anatomico estavel e ainda toleramos pequenas mudancas reais do contorno.
+      if(spreadPercent>2.2) continue;
 
       if(!best || mean>best.used){
         best={selected:window,used:mean,startIndex:start,spreadPercent};
@@ -2051,9 +2050,9 @@ export default function App() {
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
-                  <span>20 larguras: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
-                  <span>5 medidas usadas: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
@@ -2074,13 +2073,13 @@ export default function App() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Use a junta ou falange por onde o anel precisa passar. Depois aproxime as laterais e solte.</span>
+              <span>Ajuste apenas as laterais do dedo. A varredura percorre uma faixa maior e procura automaticamente o ponto mais grosso estável.</span>
             </div>
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
-              <strong>20 pontos magnéticos no contorno</strong>
-              <span>{fingerMagnetSamples ? `${fingerMagnetSamples.length}/20 leituras válidas · o sistema procura automaticamente a região mais larga estável` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
+              <strong>Varredura automática do dedo</strong>
+              <span>{fingerMagnetSamples ? `${fingerMagnetSamples.length}/50 cortes válidos · o sistema escolhe o maior platô estável` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
