@@ -957,6 +957,7 @@ export default function App() {
     const baseRadius = edge==="left" || edge==="right" ? 6 : 9;
     const radius=Math.max(3,Math.round(baseRadius/Math.max(1,zoom)));
     const points:Point[]=[];
+    const snapOffsets:number[]=[];
     let totalScore=0;
     for(let i=1;i<=18;i++){
       const t=i/19;
@@ -972,25 +973,50 @@ export default function App() {
         const score=contrast-distancePenalty;
         if(score>best){best=score;bestOffset=off;}
       }
-      if(best>8){ points.push({x:px+nx*bestOffset,y:py+ny*bestOffset}); totalScore+=best; }
+      if(best>8){
+        points.push({x:px+nx*bestOffset,y:py+ny*bestOffset});
+        snapOffsets.push(bestOffset);
+        totalScore+=best;
+      }
     }
     if(points.length<10 || totalScore/points.length<10){
       setCardLineLocked((current)=>({...current,[edge]:false}));
       return;
     }
-    const cx=points.reduce((s,p)=>s+p.x,0)/points.length;
-    const cy=points.reduce((s,p)=>s+p.y,0)/points.length;
-    let xx=0,xy=0,yy=0;
-    for(const p of points){const x=p.x-cx,y=p.y-cy;xx+=x*x;xy+=x*y;yy+=y*y;}
-    let theta=.5*Math.atan2(2*xy,xx-yy);
-    let fx=Math.cos(theta),fy=Math.sin(theta);
-    if(fx*ux+fy*uy<0){fx=-fx;fy=-fy;}
-    const ta=(a.x-cx)*fx+(a.y-cy)*fy;
-    const tb=(b.x-cx)*fx+(b.y-cy)*fy;
-    const snapped:Line={
-      a:{x:clamp((cx+fx*ta)/source.width*100,1,99),y:clamp((cy+fy*ta)/source.height*100,1,99)},
-      b:{x:clamp((cx+fx*tb)/source.width*100,1,99),y:clamp((cy+fy*tb)/source.height*100,1,99)},
-    };
+    let snapped:Line;
+
+    if(edge==="left" || edge==="right"){
+      // IMPORTANTE: nas laterais o snap agora SOMENTE TRANSLADA a guia.
+      // Ele nao gira, nao alonga e nao encurta a linha desenhada pelo usuario.
+      // Isso evita que o ima altere indiretamente a largura usada na calibracao.
+      const orderedOffsets=[...snapOffsets].sort((v1,v2)=>v1-v2);
+      const medianOffset=orderedOffsets[Math.floor(orderedOffsets.length/2)] ?? 0;
+      snapped={
+        a:{
+          x:clamp((a.x+nx*medianOffset)/source.width*100,1,99),
+          y:clamp((a.y+ny*medianOffset)/source.height*100,1,99),
+        },
+        b:{
+          x:clamp((b.x+nx*medianOffset)/source.width*100,1,99),
+          y:clamp((b.y+ny*medianOffset)/source.height*100,1,99),
+        },
+      };
+    }else{
+      // Para linhas nao laterais mantemos o ajuste angular existente.
+      const cx=points.reduce((s,p)=>s+p.x,0)/points.length;
+      const cy=points.reduce((s,p)=>s+p.y,0)/points.length;
+      let xx=0,xy=0,yy=0;
+      for(const p of points){const x=p.x-cx,y=p.y-cy;xx+=x*x;xy+=x*y;yy+=y*y;}
+      let theta=.5*Math.atan2(2*xy,xx-yy);
+      let fx=Math.cos(theta),fy=Math.sin(theta);
+      if(fx*ux+fy*uy<0){fx=-fx;fy=-fy;}
+      const ta=(a.x-cx)*fx+(a.y-cy)*fy;
+      const tb=(b.x-cx)*fx+(b.y-cy)*fy;
+      snapped={
+        a:{x:clamp((cx+fx*ta)/source.width*100,1,99),y:clamp((cy+fy*ta)/source.height*100,1,99)},
+        b:{x:clamp((cx+fx*tb)/source.width*100,1,99),y:clamp((cy+fy*tb)/source.height*100,1,99)},
+      };
+    }
     // Validacao extra das laterais: elas precisam continuar em lados
     // diferentes e manter uma largura plausivel antes de substituir o snap.
     if(edge==="left" || edge==="right"){
