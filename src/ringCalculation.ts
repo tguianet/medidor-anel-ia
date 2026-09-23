@@ -95,37 +95,33 @@ export const RING_DIAMETER_TABLE = [
 // Entre as âncoras usamos interpolação linear. Isso mantém os pontos reais
 // intactos e preenche apenas os aros ainda não validados diretamente.
 export const FINGER_RING_HYBRID_CENTERS = [
+  // TESTE 29 = marco zero.
+  // A partir do centro confirmado do aro 29 (21,15 mm), cada aro e deslocado
+  // pela diferenca fisica medida no paquimetro entre aneis consecutivos.
   { ringSize: 10, widthMm: 14.64, confirmed: true },
-  { ringSize: 11, widthMm: 14.97, confirmed: false },
-  { ringSize: 12, widthMm: 15.29, confirmed: false },
-  { ringSize: 13, widthMm: 15.62, confirmed: false },
-  { ringSize: 14, widthMm: 15.95, confirmed: false },
-  { ringSize: 15, widthMm: 16.28, confirmed: false },
-  { ringSize: 16, widthMm: 16.60, confirmed: false },
-  { ringSize: 17, widthMm: 16.93, confirmed: true },
-
-  { ringSize: 18, widthMm: 17.29, confirmed: false },
-  { ringSize: 19, widthMm: 17.65, confirmed: false },
-  { ringSize: 20, widthMm: 18.01, confirmed: false },
-  { ringSize: 21, widthMm: 18.37, confirmed: true },
-
-  { ringSize: 22, widthMm: 18.65, confirmed: true },
-  { ringSize: 23, widthMm: 19.27, confirmed: false },
-  { ringSize: 24, widthMm: 19.89, confirmed: true },
-
-  { ringSize: 25, widthMm: 20.34, confirmed: true },
-
-  { ringSize: 26, widthMm: 20.54, confirmed: false },
-  { ringSize: 27, widthMm: 20.75, confirmed: false },
-  { ringSize: 28, widthMm: 20.95, confirmed: false },
+  { ringSize: 11, widthMm: 15.00, confirmed: false },
+  { ringSize: 12, widthMm: 15.40, confirmed: false },
+  { ringSize: 13, widthMm: 15.75, confirmed: false },
+  { ringSize: 14, widthMm: 16.05, confirmed: false },
+  { ringSize: 15, widthMm: 16.35, confirmed: false },
+  { ringSize: 16, widthMm: 16.75, confirmed: false },
+  { ringSize: 17, widthMm: 17.05, confirmed: false },
+  { ringSize: 18, widthMm: 17.35, confirmed: false },
+  { ringSize: 19, widthMm: 17.80, confirmed: false },
+  { ringSize: 20, widthMm: 18.05, confirmed: false },
+  { ringSize: 21, widthMm: 18.40, confirmed: false },
+  { ringSize: 22, widthMm: 18.90, confirmed: false },
+  { ringSize: 23, widthMm: 19.15, confirmed: false },
+  { ringSize: 24, widthMm: 19.40, confirmed: false },
+  { ringSize: 25, widthMm: 19.80, confirmed: false },
+  { ringSize: 26, widthMm: 20.25, confirmed: false },
+  { ringSize: 27, widthMm: 20.45, confirmed: false },
+  { ringSize: 28, widthMm: 20.85, confirmed: false },
   { ringSize: 29, widthMm: 21.15, confirmed: true },
-  { ringSize: 30, widthMm: 21.30, confirmed: true },
-
-  // Acima de 30 mantemos continuação provisória até existirem novas
-  // âncoras reais nessa região.
-  { ringSize: 31, widthMm: 21.52, confirmed: false },
-  { ringSize: 32, widthMm: 21.69, confirmed: false },
-  { ringSize: 33, widthMm: 21.92, confirmed: false },
+  { ringSize: 30, widthMm: 21.60, confirmed: false },
+  { ringSize: 31, widthMm: 21.85, confirmed: false },
+  { ringSize: 32, widthMm: 22.15, confirmed: false },
+  { ringSize: 33, widthMm: 22.55, confirmed: false },
 ] as const;
 
 // Converte centros em fronteiras pelos pontos médios entre aros consecutivos.
@@ -136,35 +132,32 @@ export const FINGER_RING_THRESHOLDS = [
   { minMm: 13.68, maxExclusiveMm: 14.01, ringSize: 3 },
   { minMm: 14.01, maxExclusiveMm: 14.32, ringSize: 4 },
   { minMm: 14.32, maxExclusiveMm: 14.64, ringSize: 5 },
-  { minMm: 14.64, maxExclusiveMm: 14.805, ringSize: 10 },
+  { minMm: 14.64, maxExclusiveMm: 14.82, ringSize: 10 },
 
-  { minMm: 14.805, maxExclusiveMm: 15.13, ringSize: 11 },
-  { minMm: 15.13, maxExclusiveMm: 15.455, ringSize: 12 },
-  { minMm: 15.455, maxExclusiveMm: 15.785, ringSize: 13 },
-  { minMm: 15.785, maxExclusiveMm: 16.115, ringSize: 14 },
-  { minMm: 16.115, maxExclusiveMm: 16.44, ringSize: 15 },
-  { minMm: 16.44, maxExclusiveMm: 16.765, ringSize: 16 },
-  { minMm: 16.765, maxExclusiveMm: 17.11, ringSize: 17 },
-
-  { minMm: 17.11, maxExclusiveMm: 17.47, ringSize: 18 },
-  { minMm: 17.47, maxExclusiveMm: 17.83, ringSize: 19 },
-  { minMm: 17.83, maxExclusiveMm: 18.19, ringSize: 20 },
-  { minMm: 18.19, maxExclusiveMm: 18.51, ringSize: 21 },
-
-  { minMm: 18.51, maxExclusiveMm: 18.96, ringSize: 22 },
-  { minMm: 18.96, maxExclusiveMm: 19.58, ringSize: 23 },
-  { minMm: 19.58, maxExclusiveMm: 20.115, ringSize: 24 },
-
-  { minMm: 20.115, maxExclusiveMm: 20.44, ringSize: 25 },
-  { minMm: 20.44, maxExclusiveMm: 20.645, ringSize: 26 },
-  { minMm: 20.645, maxExclusiveMm: 20.85, ringSize: 27 },
-  { minMm: 20.85, maxExclusiveMm: 20.95, ringSize: 28 },
-  { minMm: 20.95, maxExclusiveMm: 21.225, ringSize: 29 },
-
-  { minMm: 21.225, maxExclusiveMm: 21.410, ringSize: 30 },
-  { minMm: 21.410, maxExclusiveMm: 21.605, ringSize: 31 },
-  { minMm: 21.605, maxExclusiveMm: 21.805, ringSize: 32 },
-  { minMm: 21.805, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
+  // Fronteiras = ponto medio entre os centros da regua fisica ancorada no aro 29.
+  { minMm: 14.82, maxExclusiveMm: 15.20, ringSize: 11 },
+  { minMm: 15.20, maxExclusiveMm: 15.575, ringSize: 12 },
+  { minMm: 15.575, maxExclusiveMm: 15.90, ringSize: 13 },
+  { minMm: 15.90, maxExclusiveMm: 16.20, ringSize: 14 },
+  { minMm: 16.20, maxExclusiveMm: 16.55, ringSize: 15 },
+  { minMm: 16.55, maxExclusiveMm: 16.90, ringSize: 16 },
+  { minMm: 16.90, maxExclusiveMm: 17.20, ringSize: 17 },
+  { minMm: 17.20, maxExclusiveMm: 17.575, ringSize: 18 },
+  { minMm: 17.575, maxExclusiveMm: 17.925, ringSize: 19 },
+  { minMm: 17.925, maxExclusiveMm: 18.225, ringSize: 20 },
+  { minMm: 18.225, maxExclusiveMm: 18.65, ringSize: 21 },
+  { minMm: 18.65, maxExclusiveMm: 19.025, ringSize: 22 },
+  { minMm: 19.025, maxExclusiveMm: 19.275, ringSize: 23 },
+  { minMm: 19.275, maxExclusiveMm: 19.60, ringSize: 24 },
+  { minMm: 19.60, maxExclusiveMm: 20.025, ringSize: 25 },
+  { minMm: 20.025, maxExclusiveMm: 20.35, ringSize: 26 },
+  { minMm: 20.35, maxExclusiveMm: 20.65, ringSize: 27 },
+  { minMm: 20.65, maxExclusiveMm: 21.00, ringSize: 28 },
+  { minMm: 21.00, maxExclusiveMm: 21.375, ringSize: 29 },
+  { minMm: 21.375, maxExclusiveMm: 21.725, ringSize: 30 },
+  { minMm: 21.725, maxExclusiveMm: 22.00, ringSize: 31 },
+  { minMm: 22.00, maxExclusiveMm: 22.35, ringSize: 32 },
+  { minMm: 22.35, maxExclusiveMm: Number.POSITIVE_INFINITY, ringSize: 33 },
 ] as const;
 
 export const ringSizeFromFingerMeasurement = (measuredMm: number) => {
