@@ -17,9 +17,10 @@ const TEST_FINGER_CARD_NORMALIZATION = 0.908;
 
 export default function App() {
   const camera = useCameraStream();
-  // Diagnostico privado: nao aparece para o cliente. Para testar, abra a URL
-  // com ?debug=1. O modo comercial continua limpo por padrao.
-  const debugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+  // Diagnostico privado: fica dentro da mesma pagina para nao interferir
+  // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
+  const [debugMode, setDebugMode] = useState(false);
+  const debugTapRef = useRef({ count: 0, lastTap: 0 });
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
@@ -1557,8 +1558,27 @@ export default function App() {
   return (
     <main className="app">
       <header className="brand">
-        <span className="mark">◇</span>
-        <div><strong>Medidor de Anel</strong><small>Paquímetro digital</small></div>
+        <button
+          type="button"
+          className="mark"
+          aria-label="Marca"
+          onClick={() => {
+            const now=Date.now();
+            const current=debugTapRef.current;
+            if(now-current.lastTap>1800) current.count=0;
+            current.lastTap=now;
+            current.count+=1;
+            if(current.count>=5){
+              current.count=0;
+              setDebugMode((value)=>!value);
+            }
+          }}
+          style={{background:"none",border:0,padding:0,color:"inherit",font:"inherit"}}
+        >◇</button>
+        <div>
+          <strong>Medidor de Anel</strong>
+          <small>{debugMode ? "Modo de teste privado ativo" : "Paquímetro digital"}</small>
+        </div>
       </header>
 
       {stage === "intro" && (
