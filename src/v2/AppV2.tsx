@@ -4,15 +4,18 @@ import { clamp, computeDiameterOnlyTestResult, computeRingResult, type Calibrati
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useCameraStream } from "../useCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "../types";
-import { wearableRingImage } from "./types";
+import { wearableRingImage } from "../types";
 import IntroScreen from "../components/IntroScreen";
-import CameraScreen from "./components/CameraScreen";
-import HandCameraScreen from "./components/HandCameraScreen";
-import HandReviewScreen from "./components/HandReviewScreen";
-import TryOnPanel from "./components/TryOnPanel";
+import CameraScreen from "../components/CameraScreen";
+import HandCameraScreen from "../components/HandCameraScreen";
+import HandReviewScreen from "../components/HandReviewScreen";
+import TryOnPanel from "../components/TryOnPanel";
+import { classifyFingerWidthMm } from "./ringClassifier";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
+// V2: mantido apenas para compatibilidade dos diagnosticos herdados. Sem correcao historica.
+const TEST_FINGER_CARD_NORMALIZATION = 1;
 
 export default function AppV2() {
   const camera = useCameraStream();
