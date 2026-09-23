@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./vision";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "./ringCalculation";
-import { lineIntersection, type Line, type Point } from "./perspective";
+import { assessCardQuadGeometry, distance, homographyFromQuad, lineIntersection, localMmPerPixel, quadFromLines, type Line, type Point } from "./perspective";
 import { useCameraStream } from "./useCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "./types";
 import { wearableRingImage } from "./types";
@@ -86,12 +86,14 @@ export default function App() {
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
-  const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
-  const [referenceCardGuideLines, setReferenceCardGuideLines] = useState<Pick<Record<CardEdge, Line>,"left"|"right"|"bottom">>({
-    left:{a:{x:15,y:20},b:{x:15,y:80}},
-    right:{a:{x:85,y:20},b:{x:85,y:80}},
-    bottom:{a:{x:15,y:50},b:{x:85,y:50}},
+  const [referenceCardGuideLines, setReferenceCardGuideLines] = useState<Record<CardEdge, Line>>({
+    top:{a:{x:15,y:28},b:{x:85,y:28}},
+    right:{a:{x:85,y:28},b:{x:85,y:72}},
+    bottom:{a:{x:15,y:72},b:{x:85,y:72}},
+    left:{a:{x:15,y:28},b:{x:15,y:72}},
   });
+  const [referenceCardQuadPx, setReferenceCardQuadPx] = useState<[Point,Point,Point,Point] | null>(null);
+  const [measurementCardQuadPx, setMeasurementCardQuadPx] = useState<[Point,Point,Point,Point] | null>(null);
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
   const [measurementCardLengthPx, setMeasurementCardLengthPx] = useState<number | null>(null);
   const [perspectiveMismatchPercent, setPerspectiveMismatchPercent] = useState<number | null>(null);
@@ -203,6 +205,7 @@ export default function App() {
     }
     autoCaptureLockedRef.current = false;
     setPixelsPerMm(null);
+    setMeasurementCardQuadPx(null);
     setCalibrationConfidence(0);
     setPhase("card");
     setZoom(1);
@@ -252,10 +255,9 @@ export default function App() {
     setPhoto(capturedPhoto);
 
     // Modo dedo em duas fotos:
-    // 1) cartão reto para definir a reta física de 85,60 mm;
-    // 2) cartão sobre o dedo, reutilizando a mesma reta como gabarito e
-    //    reajustando suas pontas na nova foto. A escala vem SOMENTE da
-    //    reta ajustada na segunda foto.
+    // 1) as quatro bordas do cartao na mesa definem o quadrilatero de referencia;
+    // 2) as quatro bordas do cartao sobre o dedo definem um novo quadrilatero.
+    // A homografia da foto 2 retifica a perspectiva para 85,60 x 53,98 mm.
     if (measurementMode === "finger" && !diameterPhotoTestMode && fingerCardCalibrationStep !== "done") {
       setPixelsPerMm(null);
       setCalibrationConfidence(0);
@@ -269,43 +271,46 @@ export default function App() {
       setStage("review");
       setAnalyzingCard(false);
       setCardLineLocked({top:false,right:false,bottom:false,left:false});
-      // A nova foto precisa adquirir seus proprios snaps laterais.
+      // Cada foto precisa adquirir seus proprios quatro snaps.
       setCardSnapLines({});
-      setSelectedCardLine("bottom");
+      setMeasurementCardQuadPx(null);
+      setSelectedCardLine(null);
 
       if (fingerCardCalibrationStep === "reference") {
         try {
           const calibration = await calibratePhoto(capturedPhoto);
           const left = clamp(calibration.cardBox.x * 100, 4, 90);
           const right = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 10, 96);
-          const y = clamp((calibration.cardBox.y + calibration.cardBox.height * 0.5) * 100, 8, 92);
-          const l=Math.min(left,right-5);
-          const r=Math.max(right,left+5);
-          const verticalHalf=20;
-          setCardLines((current)=>({
-            ...current,
-            left:{a:{x:l,y:clamp(y-verticalHalf,2,98)},b:{x:l,y:clamp(y+verticalHalf,2,98)}},
-            right:{a:{x:r,y:clamp(y-verticalHalf,2,98)},b:{x:r,y:clamp(y+verticalHalf,2,98)}},
-            bottom:{a:{x:l,y},b:{x:r,y}},
-          }));
-          camera.setError("Foto 1: ajuste a reta exatamente de uma ponta à outra da largura de 85,60 mm do cartão.");
+          const top = clamp(calibration.cardBox.y * 100, 4, 86);
+          const bottom = clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 14, 96);
+          const l=Math.min(left,right-8);
+          const r=Math.max(right,left+8);
+          const t=Math.min(top,bottom-6);
+          const b=Math.max(bottom,top+6);
+          setCardLines({
+            top:{a:{x:l,y:t},b:{x:r,y:t}},
+            right:{a:{x:r,y:t},b:{x:r,y:b}},
+            bottom:{a:{x:l,y:b},b:{x:r,y:b}},
+            left:{a:{x:l,y:t},b:{x:l,y:b}},
+          });
+          camera.setError("Foto 1: encaixe os 4 snaps nas quatro bordas do cartão.");
         } catch {
-          setCardLines((current)=>({
-            ...current,
-            left:{a:{x:15,y:25},b:{x:15,y:75}},
-            right:{a:{x:85,y:25},b:{x:85,y:75}},
-            bottom:{a:{x:15,y:50},b:{x:85,y:50}},
-          }));
-          camera.setError("Foto 1: ajuste manualmente a reta de ponta a ponta do cartão. Essa reta vale 85,60 mm.");
+          setCardLines({
+            top:{a:{x:15,y:28},b:{x:85,y:28}},
+            right:{a:{x:85,y:28},b:{x:85,y:72}},
+            bottom:{a:{x:15,y:72},b:{x:85,y:72}},
+            left:{a:{x:15,y:28},b:{x:15,y:72}},
+          });
+          camera.setError("Foto 1: ajuste manualmente os 4 lados do cartão e solte cada linha para o snap encaixar.");
         }
       } else {
-        setCardLines((current)=>({
-          ...current,
-          left:{a:{...referenceCardGuideLines.left.a},b:{...referenceCardGuideLines.left.b}},
+        setCardLines({
+          top:{a:{...referenceCardGuideLines.top.a},b:{...referenceCardGuideLines.top.b}},
           right:{a:{...referenceCardGuideLines.right.a},b:{...referenceCardGuideLines.right.b}},
           bottom:{a:{...referenceCardGuideLines.bottom.a},b:{...referenceCardGuideLines.bottom.b}},
-        }));
-        camera.setError("Foto 2: encaixe somente as duas laterais nas bordas do cartão. A reta de 85,60 mm será criada automaticamente entre os dois snaps.");
+          left:{a:{...referenceCardGuideLines.left.a},b:{...referenceCardGuideLines.left.b}},
+        });
+        camera.setError("Foto 2: encaixe os 4 snaps nas bordas do cartão sobre o dedo. A perspectiva será corrigida automaticamente.");
       }
       return;
     }
@@ -462,135 +467,62 @@ export default function App() {
     setRightManualRefined(false);
   };
 
-  const automaticCardReferenceLine = (left: Line, right: Line): Line => {
-    // A reta de 85,60 mm deve representar a largura REAL entre as duas
-    // laterais do cartao. Ligar simplesmente o meio das laterais pode encurtar
-    // ou alongar a referencia quando as duas guias possuem inclinacoes ou
-    // comprimentos diferentes. Em vez disso, construimos uma reta perpendicular
-    // a direcao media das duas laterais e usamos as intersecoes exatas.
-    const midpoint = (line: Line): Point => ({
-      x: (line.a.x + line.b.x) / 2,
-      y: (line.a.y + line.b.y) / 2,
-    });
-    const normalizedDirection = (line: Line) => {
-      const dx=line.b.x-line.a.x;
-      const dy=line.b.y-line.a.y;
-      const len=Math.hypot(dx,dy);
-      if(len<1e-6) return null;
-      return {x:dx/len,y:dy/len};
-    };
-
-    const leftMid=midpoint(left);
-    const rightMid=midpoint(right);
-    const dl=normalizedDirection(left);
-    const dr0=normalizedDirection(right);
-    if(!dl || !dr0) return {a:leftMid,b:rightMid};
-
-    // Mantem as duas direcoes apontando para o mesmo sentido antes da media.
-    const dot=dl.x*dr0.x+dl.y*dr0.y;
-    const dr=dot<0 ? {x:-dr0.x,y:-dr0.y} : dr0;
-    const avgX=dl.x+dr.x;
-    const avgY=dl.y+dr.y;
-    const avgLen=Math.hypot(avgX,avgY);
-    if(avgLen<1e-6) return {a:leftMid,b:rightMid};
-
-    const ux=avgX/avgLen;
-    const uy=avgY/avgLen;
-    const nx=-uy;
-    const ny=ux;
-    const center={x:(leftMid.x+rightMid.x)/2,y:(leftMid.y+rightMid.y)/2};
-
-    // Segmento longo apenas para calcular as intersecoes com as laterais.
-    const crossLine:Line={
-      a:{x:center.x-nx*120,y:center.y-ny*120},
-      b:{x:center.x+nx*120,y:center.y+ny*120},
-    };
-    try{
-      const a=lineIntersection(left,crossLine);
-      const b=lineIntersection(right,crossLine);
-      if(
-        Number.isFinite(a.x) && Number.isFinite(a.y) &&
-        Number.isFinite(b.x) && Number.isFinite(b.y) &&
-        Math.hypot(b.x-a.x,b.y-a.y)>5
-      ){
-        return {a,b};
-      }
-    }catch{
-      // fallback abaixo
-    }
-    return {a:leftMid,b:rightMid};
-  };
-
-  const cardReferenceSegment = () => {
+  const snappedCardQuadPx = () => {
     const source=photoPixelsRef.current;
     if(!source) throw new Error("foto");
+
+    const edges:[CardEdge,CardEdge,CardEdge,CardEdge]=["top","right","bottom","left"];
+    for(const edge of edges){
+      if(!cardSnapLines[edge] || !cardLineLocked[edge]) throw new Error("snap-4-bordas");
+    }
+
     const toPx=(line:Line):Line=>({
       a:{x:line.a.x/100*source.width,y:line.a.y/100*source.height},
       b:{x:line.b.x/100*source.width,y:line.b.y/100*source.height},
     });
-    // No fluxo de duas fotos, a escala usa exclusivamente as laterais que
-    // realmente encaixaram no snap. Arrastar a guia visual para alem da
-    // borda nao pode alterar a medida.
-    const requiresLockedSideSnaps =
-      measurementMode==="finger" &&
-      !diameterPhotoTestMode &&
-      fingerCardCalibrationStep!=="done";
-    const leftMeasureLine = requiresLockedSideSnaps ? cardSnapLines.left : cardLines.left;
-    const rightMeasureLine = requiresLockedSideSnaps ? cardSnapLines.right : cardLines.right;
-    if(!leftMeasureLine || !rightMeasureLine) throw new Error("snap-lateral");
 
-    // No fluxo de duas fotos a reta central e totalmente automatica:
-    // liga os centros geometricos das duas laterais que realmente deram snap.
-    // O comprimento manual de cardLines.bottom deixa de participar da escala.
-    const referenceLine = requiresLockedSideSnaps
-      ? automaticCardReferenceLine(leftMeasureLine, rightMeasureLine)
-      : cardLines.bottom;
-    const leftPx = requiresLockedSideSnaps
-      ? toPx(referenceLine).a
-      : lineIntersection(toPx(leftMeasureLine), toPx(referenceLine));
-    const rightPx = requiresLockedSideSnaps
-      ? toPx(referenceLine).b
-      : lineIntersection(toPx(rightMeasureLine), toPx(referenceLine));
-    const lengthPx=Math.hypot(rightPx.x-leftPx.x,rightPx.y-leftPx.y);
-    if(!Number.isFinite(lengthPx)||lengthPx<source.width*0.08) throw new Error("reta");
-    return {leftPx,rightPx,lengthPx};
+    const lines={
+      top:toPx(cardSnapLines.top as Line),
+      right:toPx(cardSnapLines.right as Line),
+      bottom:toPx(cardSnapLines.bottom as Line),
+      left:toPx(cardSnapLines.left as Line),
+    };
+    const quad=quadFromLines(lines);
+    const assessment=assessCardQuadGeometry(quad);
+    if(!assessment.valid) throw new Error(assessment.reason || "quadrilatero-invalido");
+    return {quad,assessment};
   };
 
-  const cardReferencePreview = (() => {
-    const source=photoPixelsRef.current;
-    if(!source || phase!=="card" || measurementMode!=="finger" || diameterPhotoTestMode) return null;
-    try{
-      const segment=cardReferenceSegment();
-      return {
-        left:{x:segment.leftPx.x/source.width*100,y:segment.leftPx.y/source.height*100},
-        right:{x:segment.rightPx.x/source.width*100,y:segment.rightPx.y/source.height*100},
-        lengthPx:segment.lengthPx,
-        mmPerPx:85.6/segment.lengthPx,
-      };
-    }catch{
-      return null;
-    }
-  })();
+  const averageCardWidthPx = (quad:[Point,Point,Point,Point]) => {
+    const [tl,tr,br,bl]=quad;
+    return (distance(tl,tr)+distance(bl,br))/2;
+  };
+
+  const cardQuadCenter = (quad:[Point,Point,Point,Point]):Point => ({
+    x:quad.reduce((sum,p)=>sum+p.x,0)/4,
+    y:quad.reduce((sum,p)=>sum+p.y,0)/4,
+  });
 
   const confirmReferenceCardLine = () => {
     try{
-      const segment=cardReferenceSegment();
-      setReferenceCardLengthPx(segment.lengthPx);
-      const lockedLeft = cardSnapLines.left;
-      const lockedRight = cardSnapLines.right;
-      if (!lockedLeft || !lockedRight) throw new Error("snap-lateral");
-      const autoReferenceLine = automaticCardReferenceLine(lockedLeft, lockedRight);
-      setReferenceCardLine(autoReferenceLine);
+      const {quad,assessment}=snappedCardQuadPx();
+      const widthPx=averageCardWidthPx(quad);
+      setReferenceCardLengthPx(widthPx);
+      setReferenceCardQuadPx(quad);
       setReferenceCardGuideLines({
-        left:{a:{...lockedLeft.a},b:{...lockedLeft.b}},
-        right:{a:{...lockedRight.a},b:{...lockedRight.b}},
-        bottom:{a:{...autoReferenceLine.a},b:{...autoReferenceLine.b}},
+        top:{a:{...(cardSnapLines.top as Line).a},b:{...(cardSnapLines.top as Line).b}},
+        right:{a:{...(cardSnapLines.right as Line).a},b:{...(cardSnapLines.right as Line).b}},
+        bottom:{a:{...(cardSnapLines.bottom as Line).a},b:{...(cardSnapLines.bottom as Line).b}},
+        left:{a:{...(cardSnapLines.left as Line).a},b:{...(cardSnapLines.left as Line).b}},
       });
+      setCalibrationConfidence(assessment.confidence);
       setFingerCardCalibrationStep("measurement");
-      camera.setError("Referência salva: as duas interseções representam 85,60 mm. Agora tire a segunda foto com o cartão sobre o dedo.");
+      camera.setError("Perspectiva da foto 1 salva pelas 4 bordas. Agora tire a foto 2 com o cartão sobre o dedo.");
       void openCamera();
-    }catch{
-      camera.setError("Encaixe as duas laterais no snap da borda do cartão. A linha central de 85,60 mm será criada automaticamente.");
+    }catch(error){
+      camera.setError(error instanceof Error && error.message && !error.message.startsWith("snap")
+        ? error.message
+        : "Encaixe os 4 snaps nas quatro bordas do cartão antes de avançar.");
     }
   };
 
@@ -601,27 +533,44 @@ export default function App() {
       return;
     }
     try{
-      const segment=cardReferenceSegment();
-      setMeasurementCardLengthPx(segment.lengthPx);
+      const {quad,assessment}=snappedCardQuadPx();
+      const widthPx=averageCardWidthPx(quad);
+      setMeasurementCardLengthPx(widthPx);
+      setMeasurementCardQuadPx(quad);
 
-      if (referenceCardLengthPx !== null && referenceCardLengthPx > 0) {
-        const mismatch = Math.abs((segment.lengthPx / referenceCardLengthPx - 1) * 100);
-        // Apenas diagnóstico: a segunda foto se calibra pela própria largura
-        // de 85,60 mm do cartão e não é mais bloqueada pela diferença entre fotos.
-        setPerspectiveMismatchPercent(mismatch);
-      } else {
+      if(referenceCardLengthPx!==null && referenceCardLengthPx>0){
+        setPerspectiveMismatchPercent(Math.abs((widthPx/referenceCardLengthPx-1)*100));
+      }else{
         setPerspectiveMismatchPercent(null);
       }
 
-      const pxPerMm=segment.lengthPx/85.6;
-      const leftPercent=segment.leftPx.x/source.width*100;
-      const rightPercent=segment.rightPx.x/source.width*100;
-      const lineMidY=(segment.leftPx.y+segment.rightPx.y)/2/source.height*100;
+      // A homografia transforma o quadrilatero fotografado diretamente no
+      // retangulo fisico 85,60 x 53,98 mm. O escalar abaixo fica apenas como
+      // aproximacao local para UI; a largura do dedo usa a homografia completa.
+      const center=cardQuadCenter(quad);
+      const mmPerPxAtCenter=localMmPerPixel(quad,center);
+      if(!Number.isFinite(mmPerPxAtCenter) || mmPerPxAtCenter<=0) throw new Error("Não foi possível calcular a escala local do cartão.");
+      const pxPerMm=1/mmPerPxAtCenter;
+
+      const quadPercent=quad.map((p)=>({
+        x:p.x/source.width*100,
+        y:p.y/source.height*100,
+      })) as [Point,Point,Point,Point];
+      setCardQuad(quadPercent);
+
+      const leftCenter={x:(quad[0].x+quad[3].x)/2,y:(quad[0].y+quad[3].y)/2};
+      const rightCenter={x:(quad[1].x+quad[2].x)/2,y:(quad[1].y+quad[2].y)/2};
+      const leftPercent=leftCenter.x/source.width*100;
+      const rightPercent=rightCenter.x/source.width*100;
+      const centerY=(leftCenter.y+rightCenter.y)/2/source.height*100;
+
       setFingerCardCalibrationStep("done");
-      setCalibrationConfidence(100);
-      activateFingerMeasurement(leftPercent,rightPercent,lineMidY,100,cardQuad,pxPerMm);
-    }catch{
-      camera.setError("As duas laterais precisam estar encaixadas no snap do cartão. A linha central é automática e não altera mais a calibração.");
+      setCalibrationConfidence(assessment.confidence);
+      activateFingerMeasurement(leftPercent,rightPercent,centerY,assessment.confidence,quadPercent,pxPerMm);
+    }catch(error){
+      camera.setError(error instanceof Error && error.message && !error.message.startsWith("snap")
+        ? error.message
+        : "Encaixe os 4 snaps nas quatro bordas do cartão. As quatro linhas precisam formar um cartão válido.");
     }
   };
 
@@ -1150,24 +1099,7 @@ export default function App() {
     setCardLines((current)=>({...current,[edge]:snapped}));
     // Guarda a borda magnetica separada da guia visual. O calculo do cartao
     // usa esta linha travada ate que um novo snap valido seja encontrado.
-    setCardSnapLines((current)=>{
-      const next={...current,[edge]:snapped};
-      if (
-        measurementMode==="finger" &&
-        !diameterPhotoTestMode &&
-        fingerCardCalibrationStep!=="done" &&
-        next.left &&
-        next.right
-      ) {
-        const autoLine=automaticCardReferenceLine(next.left,next.right);
-        // Assim que as duas laterais encaixam, a linha de 85,60 mm e
-        // reconstruida automaticamente e fica visualmente presa aos snaps.
-        setCardLines((lines)=>({...lines,bottom:autoLine}));
-        setCardLineLocked((locked)=>({...locked,bottom:true}));
-        setSelectedCardLine(null);
-      }
-      return next;
-    });
+    setCardSnapLines((current)=>({...current,[edge]:snapped}));
     setCardLineLocked((current)=>({...current,[edge]:true}));
   };
 
@@ -1191,24 +1123,9 @@ export default function App() {
       if(match){
         const edge=match[1] as CardEdge;
         if(measurementMode==="finger" && !diameterPhotoTestMode && fingerCardCalibrationStep!=="done"){
-          if(edge==="left" || edge==="right"){
-            // Laterais magnéticas: ao soltar, encaixam na borda real do cartão.
-            snapCardLine(edge);
-          }else if(edge==="bottom"){
-            // No fluxo de duas fotos a linha central nao e mais calibracao
-            // manual. Se as duas laterais ja deram snap, ela volta
-            // automaticamente para a geometria correta.
-            const leftSnap=cardSnapLines.left;
-            const rightSnap=cardSnapLines.right;
-            if(leftSnap && rightSnap){
-              const autoLine=automaticCardReferenceLine(leftSnap,rightSnap);
-              setCardLines((current)=>({...current,bottom:autoLine}));
-              setCardLineLocked((current)=>({...current,bottom:true}));
-              setSelectedCardLine(null);
-            }else{
-              setCardLineLocked((current)=>({...current,bottom:false}));
-            }
-          }
+          // Nas duas fotos cada uma das quatro bordas encaixa de forma
+          // independente. O quadrilatero final e que define a perspectiva.
+          snapCardLine(edge);
         }else{
           snapCardLine(edge);
         }
@@ -1520,23 +1437,36 @@ export default function App() {
       (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
     );
     const fallbackWidth=Math.abs(toImageX(rightLine)-toImageX(leftLine));
-    const widthsPx=samples?.length ? samples.map(s=>s.width) : [fallbackWidth];
-
-    // TESTE CONTROLADO:
-    // usa a escala REAL obtida pelo cartão na segunda foto e, no modo dedo,
-    // aplica uma normalização provisória de 0,908 sobre a medida física bruta.
-    const cardScaleMmPerPx = 1/pixelsPerMm;
     const normalization =
       measurementMode === "finger" && !diameterPhotoTestMode
         ? TEST_FINGER_CARD_NORMALIZATION
         : 1;
 
-    const widthsMm=widthsPx
-      .map(w=>w*cardScaleMmPerPx*normalization)
-      .filter(v=>Number.isFinite(v)&&v>0&&v<45);
+    let widthsMm:number[]=[];
+    if(
+      measurementMode==="finger" &&
+      !diameterPhotoTestMode &&
+      measurementCardQuadPx &&
+      samples?.length
+    ){
+      const map=homographyFromQuad(measurementCardQuadPx);
+      widthsMm=samples
+        .map((sample)=>{
+          const leftMm=map({x:sample.left,y:sample.y});
+          const rightMm=map({x:sample.right,y:sample.rightY});
+          return distance(leftMm,rightMm)*normalization;
+        })
+        .filter(v=>Number.isFinite(v)&&v>0&&v<45);
+    }else{
+      const cardScaleMmPerPx=1/pixelsPerMm;
+      const widthsPx=samples?.length ? samples.map(s=>s.width) : [fallbackWidth];
+      widthsMm=widthsPx
+        .map(w=>w*cardScaleMmPerPx*normalization)
+        .filter(v=>Number.isFinite(v)&&v>0&&v<45);
+    }
 
     return selectWidestStableRun(widthsMm).used;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines,measurementMode,diameterPhotoTestMode]);
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines,measurementMode,diameterPhotoTestMode,measurementCardQuadPx]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1571,6 +1501,7 @@ export default function App() {
     setTryOn(false);
     setAnalyzingCard(false);
     setPixelsPerMm(null);
+    setMeasurementCardQuadPx(null);
     setPhase("card");
     setZoom(1);
     setPanX(0);
@@ -1623,39 +1554,43 @@ export default function App() {
     const rawWidthsPx=fingerMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite);
     if(!rawWidthsPx.length) return null;
 
-    const widestRun=selectWidestStableRun(rawWidthsPx);
-    if(widestRun.used===null) return null;
-    const usedWidthPx=widestRun.used;
+    const projectiveRawMm =
+      measurementMode==="finger" && !diameterPhotoTestMode && measurementCardQuadPx
+        ? (() => {
+            const map=homographyFromQuad(measurementCardQuadPx);
+            return fingerMagnetSamples.map((sample)=>{
+              const a=map({x:sample.left,y:sample.y});
+              const b=map({x:sample.right,y:sample.rightY});
+              return distance(a,b);
+            });
+          })()
+        : (() => {
+            const scale=pixelsPerMm&&pixelsPerMm>0 ? 1/pixelsPerMm : null;
+            return scale===null ? [] : rawWidthsPx.map(v=>v*scale);
+          })();
 
-    const cardScaleMmPerPx =
-      pixelsPerMm && pixelsPerMm>0
-        ? 1/pixelsPerMm
-        : null;
+    if(!projectiveRawMm.length) return null;
+    const widestRaw=selectWidestStableRun(projectiveRawMm);
+    if(widestRaw.used===null) return null;
+    const selectedCount=widestRaw.selected.length;
+    const selectedPx=rawWidthsPx.slice(widestRaw.startIndex,widestRaw.startIndex+selectedCount);
+    const usedWidthPx=selectedPx.length
+      ? selectedPx.reduce((sum,v)=>sum+v,0)/selectedPx.length
+      : rawWidthsPx.reduce((sum,v)=>sum+v,0)/rawWidthsPx.length;
 
-    const rawCardMm =
-      cardScaleMmPerPx!==null
-        ? usedWidthPx*cardScaleMmPerPx
-        : null;
-
-    const normalizedMm =
-      rawCardMm!==null
-        ? rawCardMm*TEST_FINGER_CARD_NORMALIZATION
-        : null;
-
+    const rawCardMm=widestRaw.used;
+    const normalizedMm=rawCardMm*TEST_FINGER_CARD_NORMALIZATION;
     const correctionPercent=(1-TEST_FINGER_CARD_NORMALIZATION)*100;
-
-    const spreadPx =
-      rawWidthsPx.length
-        ? Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx)
-        : 0;
-
-    const spreadPercent =
-      usedWidthPx>0
-        ? spreadPx/usedWidthPx*100
-        : 0;
+    const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
+    const spreadPercent=usedWidthPx>0 ? spreadPx/usedWidthPx*100 : 0;
+    const center=measurementCardQuadPx ? cardQuadCenter(measurementCardQuadPx) : null;
+    const cardScaleMmPerPx=center && measurementCardQuadPx
+      ? localMmPerPixel(measurementCardQuadPx,center)
+      : (pixelsPerMm&&pixelsPerMm>0 ? 1/pixelsPerMm : null);
 
     return {
       rawWidthsPx,
+      projectiveRawMm,
       usedWidthPx,
       cardScaleMmPerPx,
       rawCardMm,
@@ -1663,19 +1598,31 @@ export default function App() {
       correctionPercent,
       spreadPx,
       spreadPercent,
-      selectedUpperWidthsPx: widestRun.selected,
-      selectedRunStart: widestRun.startIndex + 1,
-      fingerAxisAngleDeg: fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
+      selectedUpperWidthsPx:selectedPx,
+      selectedRunStart:widestRaw.startIndex+1,
+      selectedRawMm:widestRaw.selected,
+      fingerAxisAngleDeg:fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
 
   const fourMagnetWidthsMm = (() => {
-    if(!fingerMagnetSamples?.length||!pixelsPerMm) return [] as number[];
-    const cardScaleMmPerPx=1/pixelsPerMm;
+    if(!fingerMagnetSamples?.length) return [] as number[];
     const normalization =
       measurementMode === "finger" && !diameterPhotoTestMode
         ? TEST_FINGER_CARD_NORMALIZATION
         : 1;
+
+    if(measurementMode==="finger" && !diameterPhotoTestMode && measurementCardQuadPx){
+      const map=homographyFromQuad(measurementCardQuadPx);
+      return fingerMagnetSamples.map((sample)=>{
+        const a=map({x:sample.left,y:sample.y});
+        const b=map({x:sample.right,y:sample.rightY});
+        return Number((distance(a,b)*normalization).toFixed(2));
+      });
+    }
+
+    if(!pixelsPerMm) return [] as number[];
+    const cardScaleMmPerPx=1/pixelsPerMm;
     return fingerMagnetSamples.map(s=>Number((s.width*cardScaleMmPerPx*normalization).toFixed(2)));
   })();
 
@@ -1818,9 +1765,9 @@ export default function App() {
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
-                aria-label="Duas laterais e linha central de referência do cartão"
+                aria-label="Quatro bordas de referência do cartão"
               >
-                {(["left","right","bottom"] as CardEdge[]).map((edge)=>{
+                {(["top","right","bottom","left"] as CardEdge[]).map((edge)=>{
                   const line=cardLines[edge];
                   const locked=cardLineLocked[edge];
                   return <g key={edge} className={`card-edge${locked?" locked":""}`}>
@@ -1834,29 +1781,7 @@ export default function App() {
                     </g>)}
                   </g>;
                 })}
-                {cardReferencePreview && (
-                  <g className="card-reference-snaps" aria-label="Interseções válidas de 85,60 milímetros">
-                    <line
-                      className="card-reference-segment"
-                      x1={cardReferencePreview.left.x}
-                      y1={cardReferencePreview.left.y}
-                      x2={cardReferencePreview.right.x}
-                      y2={cardReferencePreview.right.y}
-                    />
-                    <circle
-                      className="card-reference-snap"
-                      cx={cardReferencePreview.left.x}
-                      cy={cardReferencePreview.left.y}
-                      r="1.65"
-                    />
-                    <circle
-                      className="card-reference-snap"
-                      cx={cardReferencePreview.right.x}
-                      cy={cardReferencePreview.right.y}
-                      r="1.65"
-                    />
-                  </g>
-                )}
+
               </svg>
             ) : phase === "card" ? (
               <svg
@@ -1992,16 +1917,16 @@ export default function App() {
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
-                {fingerCardCalibrationStep === "reference" ? "Salvar calibração e ir para a foto 2" : "Confirmar cartão e ajustar o dedo"}
+                {fingerCardCalibrationStep === "reference" ? "Salvar perspectiva e ir para a foto 2" : "Corrigir perspectiva e medir o dedo"}
               </button>
               <div className="card-base-status">
                 <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — calibração do cartão" : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>{fingerCardCalibrationStep === "reference"
-                  ? "Ajuste somente as duas laterais nas bordas do cartão até encaixarem. A linha central já serve como referência do meio."
-                  : "Confira as laterais do cartão sobre o dedo. A região mais grossa do dedo deve estar alinhada com a guia antes de confirmar."}</span>
+                  ? "Encaixe as quatro linhas nas quatro bordas do cartão. Elas formam o plano de referência da perspectiva."
+                  : "Encaixe novamente as quatro bordas do cartão sobre o dedo. O sistema corrigirá a perspectiva antes de medir."}</span>
                 <small>{fingerCardCalibrationStep === "reference"
-                  ? "Base plana, câmera de cima e cartão sem inclinação. O trecho entre as duas interseções vale 85,60 mm."
-                  : "Meça na parte mais grossa do dedo — junta ou falange — porque é por ali que o anel precisa passar."}</small>
+                  ? "Base plana, câmera de cima e cartão inteiro visível. As quatro bordas definem 85,60 × 53,98 mm."
+                  : "A homografia da foto 2 corrige a deformação visual do cartão; depois os 20 pontos procuram a região mais grossa do dedo."}</small>
                 <small>Quando as laterais estiverem alinhadas, avance para a próxima etapa.</small>
               </div>
             </>
@@ -2052,8 +1977,9 @@ export default function App() {
               {measurementAudit && (
                 <>
                   <span>20 larguras: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>20 medidas corrigidas pela perspectiva: {measurementAudit.projectiveRawMm.map((value)=>value.toFixed(2)).join(" / ")} mm</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
-                  <span>5 medidas usadas: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>5 medidas usadas: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px · {measurementAudit.selectedRawMm.map((value)=>value.toFixed(2)).join(" / ")} mm</span>
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
