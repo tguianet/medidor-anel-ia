@@ -1613,9 +1613,10 @@ export default function AppV2() {
     ) return 1;
 
     // Corrige somente a mudanca geometrica observada entre as duas fotos.
-    // Se o cartao aparece menor na foto 2, a escala da foto 2 infla a medida
-    // do dedo. Multiplicar por foto2/foto1 traz a medida para a referencia da foto 1.
-    return measurementCardLengthPx/referenceCardLengthPx;
+    // A foto 1 e a referencia geometrica. Se o cartao aparece maior na foto 2,
+    // a escala dessa foto deve reduzir a medida do dedo; se aparece menor, deve
+    // aumentar. Por isso usamos foto1/foto2.
+    return referenceCardLengthPx/measurementCardLengthPx;
   },[
     measurementMode,
     diameterPhotoTestMode,
