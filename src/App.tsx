@@ -17,6 +17,9 @@ const TEST_FINGER_CARD_NORMALIZATION = 0.908;
 
 export default function App() {
   const camera = useCameraStream();
+  // Diagnostico privado: nao aparece para o cliente. Para testar, abra a URL
+  // com ?debug=1. O modo comercial continua limpo por padrao.
+  const debugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
@@ -1872,6 +1875,22 @@ export default function App() {
               <strong>Número exato: {result.ringSize}</strong>
               <span><strong>Número de conforto: {clamp(result.ringSize + 1, 1, 40)}</strong></span>
               <small>Exato = encaixe mais justo · Conforto = uma folga para passar pela junta.</small>
+            </div>
+          )}
+          {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
+            <div className="analysis-result">
+              <strong>DIAGNÓSTICO PRIVADO</strong>
+              <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
+              {measurementAudit && (
+                <>
+                  <span>Larguras: {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
+                  <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
+                  <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
+                  {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
+                  {measurementAudit.rawCardMm !== null && <span>Medida bruta: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
+                </>
+              )}
             </div>
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
