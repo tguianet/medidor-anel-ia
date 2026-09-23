@@ -930,11 +930,26 @@ export default function App() {
       const strongEnough=Math.max(7,strongest*0.62);
       const valid=candidates.filter(item=>item.contrast>=strongEnough);
 
-      // REGRA NOVA: entre bordas fortes, escolhe a MAIS EXTERNA.
-      // Esquerda: menor X. Direita: maior X.
-      // Isso impede rugas/sombras internas de roubarem o snap da pele.
-      const ordered=[...valid].sort((a,b)=>side==="left" ? a.x-b.x : b.x-a.x);
-      return ordered[0] ?? candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
+      // As comparacoes +/-4 px criam uma pequena "faixa" de candidatos
+      // fortes ao redor da mesma borda. Escolher o pixel mais externo dessa
+      // faixa exagerava a largura em alguns dedos. Agora agrupamos candidatos
+      // contiguos, escolhemos o GRUPO externo e usamos o centro ponderado do
+      // gradiente dentro desse grupo.
+      const sorted=[...valid].sort((a,b)=>a.x-b.x);
+      const groups:{x:number;contrast:number;score:number}[][]=[];
+      for(const item of sorted){
+        const last=groups[groups.length-1];
+        if(!last || item.x-last[last.length-1].x>1) groups.push([item]);
+        else last.push(item);
+      }
+      const chosenGroup = side==="left" ? groups[0] : groups[groups.length-1];
+      if(chosenGroup?.length){
+        const weight=chosenGroup.reduce((sum,item)=>sum+Math.max(1,item.contrast),0);
+        const x=chosenGroup.reduce((sum,item)=>sum+item.x*Math.max(1,item.contrast),0)/weight;
+        const score=chosenGroup.reduce((sum,item)=>sum+item.score,0)/chosenGroup.length;
+        return {x,score};
+      }
+      return candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
     // Varias amostras verticais curtas para privilegiar um contorno continuo.
@@ -1267,10 +1282,25 @@ export default function App() {
         if(continuous.length) valid=continuous;
       }
 
-      // Busca de fora para dentro:
-      // esquerda => menor X valido; direita => maior X valido.
-      valid.sort((a,b)=>side==="left" ? a.x-b.x : b.x-a.x);
-      return valid[0] ?? candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
+      // Agrupa pixels vizinhos que pertencem a mesma transicao. O contraste
+      // calculado em +/-4 px produz um plateau; usar o ponto mais externo desse
+      // plateau alargava artificialmente o dedo. Escolhemos a transicao externa,
+      // mas o ponto final e o centro ponderado da propria transicao.
+      const sorted=[...valid].sort((a,b)=>a.x-b.x);
+      const groups:{x:number;strength:number;score:number}[][]=[];
+      for(const item of sorted){
+        const last=groups[groups.length-1];
+        if(!last || item.x-last[last.length-1].x>1) groups.push([item]);
+        else last.push(item);
+      }
+      const chosenGroup = side==="left" ? groups[0] : groups[groups.length-1];
+      if(chosenGroup?.length){
+        const weight=chosenGroup.reduce((sum,item)=>sum+Math.max(1,item.strength),0);
+        const x=chosenGroup.reduce((sum,item)=>sum+item.x*Math.max(1,item.strength),0)/weight;
+        const score=chosenGroup.reduce((sum,item)=>sum+item.score,0)/chosenGroup.length;
+        return {x,score};
+      }
+      return candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
     // Cada um dos 4 níveis procura localmente a borda mais próxima,
