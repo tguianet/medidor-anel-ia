@@ -1452,10 +1452,13 @@ export default function AppV2() {
     const leftPoints=pairs.map(pair=>pair.left);
     const rightPoints=pairs.map(pair=>pair.right);
 
-    // Precisamos de uma parte relevante do contorno para aceitar a medicao.
-    if(leftPoints.length<28||rightPoints.length<28||leftPoints.length!==rightPoints.length) return null;
+    // V2: leitura comercial so e aceita quando praticamente toda a faixa foi
+    // rastreada. Um resultado com poucos cortes validos nao pode virar aro.
+    if(leftPoints.length<45||rightPoints.length<45||leftPoints.length!==rightPoints.length) return null;
 
-    const maxJump=Math.max(5,Math.round(9/Math.max(1,zoom)));
+    // Evita que o rastreador salte de uma borda anatomica para outra textura.
+    // Mantemos tolerancia pequena para a curvatura real do dedo.
+    const maxJump=Math.max(3.5,Math.round(6/Math.max(1,zoom)));
     for(let i=1;i<leftPoints.length;i++){
       if(Math.abs(leftPoints[i].x-leftPoints[i-1].x)>maxJump) return null;
       if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
@@ -1612,13 +1615,12 @@ export default function AppV2() {
     const stage=measureRef.current;
     if(!source||!stage) return null;
 
-    const rect=stage.getBoundingClientRect();
     const samples=fingerBandSamplesPx();
-    const toImageX=(percent:number)=>(
-      (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
-    );
-    const fallbackWidth=Math.abs(toImageX(rightLine)-toImageX(leftLine));
-    const widthsPx=samples?.length ? samples.map(s=>s.width) : [fallbackWidth];
+
+    // Sem contorno confiavel nao existe resultado. A V2 nao cai mais para a
+    // distancia manual entre as guias, pois isso escondia falhas de tracking.
+    if(!samples || samples.length<45) return null;
+    const widthsPx=samples.map(s=>s.width);
 
     // V2 LIMPA:
     // a largura do dedo usa somente a escala do cartao da propria foto 2.
@@ -2195,7 +2197,13 @@ export default function AppV2() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Varredura automática do dedo</strong>
-              <span>{fingerMagnetSamples ? `${fingerMagnetSamples.length} cortes rastreados · guia manual usada só para iniciar o contorno` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
+              <span>{
+                fingerMagnetSamples
+                  ? `${fingerMagnetSamples.length}/50 cortes válidos · leitura confiável`
+                  : leftLocked && rightLocked
+                    ? "Leitura rejeitada: contorno incompleto ou salto de borda. Reposicione as laterais e tente novamente."
+                    : "Aproxime as laterais do dedo e solte para o ímã encaixar"
+              }</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
@@ -2224,7 +2232,13 @@ export default function AppV2() {
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
             {phase === "finger" && (
-              <button className="primary" type="button" disabled>{leftLocked && rightLocked ? "Aro calculado" : "Ajuste as linhas no dedo"}</button>
+              <button className="primary" type="button" disabled>{
+                result
+                  ? "Aro calculado"
+                  : leftLocked && rightLocked
+                    ? "Leitura insuficiente — reajuste"
+                    : "Ajuste as linhas no dedo"
+              }</button>
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
