@@ -13,3 +13,8 @@
   to = "/.netlify/functions/calibration?summary=1"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
