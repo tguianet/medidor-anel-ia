@@ -95,7 +95,6 @@ export default function App() {
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
   const [measurementCardLengthPx, setMeasurementCardLengthPx] = useState<number | null>(null);
   const [perspectiveMismatchPercent, setPerspectiveMismatchPercent] = useState<number | null>(null);
-  const MAX_PERSPECTIVE_MISMATCH_PERCENT = 2;
 
   useEffect(() => {
     let cancelled = false;
@@ -607,11 +606,9 @@ export default function App() {
 
       if (referenceCardLengthPx !== null && referenceCardLengthPx > 0) {
         const mismatch = Math.abs((segment.lengthPx / referenceCardLengthPx - 1) * 100);
+        // Apenas diagnóstico: a segunda foto se calibra pela própria largura
+        // de 85,60 mm do cartão e não é mais bloqueada pela diferença entre fotos.
         setPerspectiveMismatchPercent(mismatch);
-        if (mismatch > MAX_PERSPECTIVE_MISMATCH_PERCENT) {
-          camera.setError(`A perspectiva mudou ${mismatch.toFixed(1)}% entre as fotos. Refaça a segunda foto mantendo o cartão na mesma distância e o celular mais paralelo.`);
-          return;
-        }
       } else {
         setPerspectiveMismatchPercent(null);
       }
@@ -2014,7 +2011,7 @@ export default function App() {
                     <span>Diferença cartão 1→2: {(((measurementCardLengthPx/referenceCardLengthPx)-1)*100).toFixed(2)}%</span>
                   )}
                   {perspectiveMismatchPercent !== null && (
-                    <span>Validação de perspectiva: {perspectiveMismatchPercent <= MAX_PERSPECTIVE_MISMATCH_PERCENT ? "OK" : "REFazer foto 2"} · limite {MAX_PERSPECTIVE_MISMATCH_PERCENT.toFixed(1)}%</span>
+                    <span>Diferença entre fotos: {perspectiveMismatchPercent.toFixed(2)}% · apenas diagnóstico</span>
                   )}
                 </>
               )}
