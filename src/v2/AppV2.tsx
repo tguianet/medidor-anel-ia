@@ -1454,7 +1454,7 @@ export default function AppV2() {
 
     // V2: leitura comercial so e aceita quando praticamente toda a faixa foi
     // rastreada. Um resultado com poucos cortes validos nao pode virar aro.
-    if(leftPoints.length<45||rightPoints.length<45||leftPoints.length!==rightPoints.length) return null;
+    if(leftPoints.length<35||rightPoints.length<35||leftPoints.length!==rightPoints.length) return null;
 
     // Evita que o rastreador salte de uma borda anatomica para outra textura.
     // Mantemos tolerancia pequena para a curvatura real do dedo.
@@ -1619,7 +1619,7 @@ export default function AppV2() {
 
     // Sem contorno confiavel nao existe resultado. A V2 nao cai mais para a
     // distancia manual entre as guias, pois isso escondia falhas de tracking.
-    if(!samples || samples.length<45) return null;
+    if(!samples || samples.length<35) return null;
     const widthsPx=samples.map(s=>s.width);
 
     // V2 LIMPA:
@@ -2201,7 +2201,7 @@ export default function AppV2() {
                 fingerMagnetSamples
                   ? `${fingerMagnetSamples.length}/50 cortes válidos · usando a região mais larga estável`
                   : leftLocked && rightLocked
-                    ? "Leitura rejeitada: contorno incompleto ou salto de borda. Reposicione as laterais e tente novamente."
+                    ? "Leitura rejeitada: menos de 35 cortes válidos ou salto de borda. Reposicione as laterais e tente novamente."
                     : "Aproxime as laterais do dedo e solte para o ímã encaixar"
               }</span>
             </div>
