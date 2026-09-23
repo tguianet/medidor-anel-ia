@@ -1667,7 +1667,6 @@ export default function AppV2() {
 
   const result = useMemo(() => {
     if (liveWidthMm === null) return null;
-    if (measurementMode === "finger" && !v2ScanQualityOk) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
 
@@ -1692,7 +1691,7 @@ export default function AppV2() {
     }
 
     return computeRingResult(liveWidthMm, calibrationRules, true, calibrationConfidence);
-  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, v2ScanQualityOk]);
+  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
@@ -1799,11 +1798,6 @@ export default function AppV2() {
       fingerAxisAngleDeg: fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
-
-  const v2ScanQualityOk =
-    measurementAudit !== null &&
-    measurementAudit.rawWidthsPx.length >= 45 &&
-    measurementAudit.spreadPercent <= 3.2;
 
   const fourMagnetWidthsMm = (() => {
     if(!fingerMagnetSamples?.length||!pixelsPerMm) return [] as number[];
