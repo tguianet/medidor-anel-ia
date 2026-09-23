@@ -1602,6 +1602,27 @@ export default function AppV2() {
     return width>1?width:null;
   };
 
+  const v2PhotoScaleCorrection = useMemo(() => {
+    if(
+      measurementMode!=="finger" ||
+      diameterPhotoTestMode ||
+      referenceCardLengthPx===null ||
+      measurementCardLengthPx===null ||
+      referenceCardLengthPx<=0 ||
+      measurementCardLengthPx<=0
+    ) return 1;
+
+    // Corrige somente a mudanca geometrica observada entre as duas fotos.
+    // Se o cartao aparece menor na foto 2, a escala da foto 2 infla a medida
+    // do dedo. Multiplicar por foto2/foto1 traz a medida para a referencia da foto 1.
+    return measurementCardLengthPx/referenceCardLengthPx;
+  },[
+    measurementMode,
+    diameterPhotoTestMode,
+    referenceCardLengthPx,
+    measurementCardLengthPx,
+  ]);
+
   const liveWidthMm = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
     const source=photoPixelsRef.current;
@@ -1623,14 +1644,14 @@ export default function AppV2() {
     // V2 LIMPA: mantemos exatamente o mesmo metodo visual/tracking do sistema
     // original, mas nao aplicamos normalizacao historica na largura do dedo.
     // A escala vem somente do cartao de 85,60 mm.
-    const normalization = 1;
+    const normalization = v2PhotoScaleCorrection;
 
     const widthsMm=widthsPx
       .map(w=>w*cardScaleMmPerPx*normalization)
       .filter(v=>Number.isFinite(v)&&v>0&&v<45);
 
     return selectWidestStableRun(widthsMm).used;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines,measurementMode,diameterPhotoTestMode]);
+  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,fingerLines,measurementMode,diameterPhotoTestMode,v2PhotoScaleCorrection]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1754,10 +1775,10 @@ export default function AppV2() {
 
     const normalizedMm =
       rawCardMm!==null
-        ? rawCardMm*TEST_FINGER_CARD_NORMALIZATION
+        ? rawCardMm*v2PhotoScaleCorrection
         : null;
 
-    const correctionPercent=(1-TEST_FINGER_CARD_NORMALIZATION)*100;
+    const correctionPercent=(v2PhotoScaleCorrection-1)*100;
 
     const spreadPx =
       rawWidthsPx.length
@@ -1789,7 +1810,7 @@ export default function AppV2() {
     const cardScaleMmPerPx=1/pixelsPerMm;
     const normalization =
       measurementMode === "finger" && !diameterPhotoTestMode
-        ? TEST_FINGER_CARD_NORMALIZATION
+        ? v2PhotoScaleCorrection
         : 1;
     return fingerMagnetSamples.map(s=>Number((s.width*cardScaleMmPerPx*normalization).toFixed(2)));
   })();
@@ -2173,14 +2194,16 @@ export default function AppV2() {
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
-                  {measurementAudit.rawCardMm !== null && <span>Medida bruta: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
+                  {measurementAudit.rawCardMm !== null && <span>Medida bruta foto 2: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
+                  <span>Correção geométrica V2: ×{v2PhotoScaleCorrection.toFixed(4)} ({((v2PhotoScaleCorrection-1)*100).toFixed(2)}%)</span>
+                  {measurementAudit.normalizedMm !== null && <span>Medida corrigida pela foto 1: {measurementAudit.normalizedMm.toFixed(2)} mm</span>}
                   {referenceCardLengthPx !== null && <span>Cartão foto 1: {referenceCardLengthPx.toFixed(1)} px</span>}
                   {measurementCardLengthPx !== null && <span>Cartão foto 2: {measurementCardLengthPx.toFixed(1)} px</span>}
                   {referenceCardLengthPx !== null && measurementCardLengthPx !== null && (
                     <span>Diferença cartão 1→2: {(((measurementCardLengthPx/referenceCardLengthPx)-1)*100).toFixed(2)}%</span>
                   )}
                   {perspectiveMismatchPercent !== null && (
-                    <span>Diferença entre fotos: {perspectiveMismatchPercent.toFixed(2)}% · apenas diagnóstico</span>
+                    <span>Diferença entre fotos: {perspectiveMismatchPercent.toFixed(2)}% · usada na correção geométrica V2</span>
                   )}
                 </>
               )}
