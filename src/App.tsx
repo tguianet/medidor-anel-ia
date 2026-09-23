@@ -877,7 +877,11 @@ export default function App() {
       const o=(iy*source.width+ix)*4;
       return source.data[o]*.299+source.data[o+1]*.587+source.data[o+2]*.114;
     };
-    const radius=Math.max(7,Math.round(Math.min(source.width,source.height)*0.018/Math.max(zoom,1)));
+    // Snap lateral propositalmente curto: o usuario aproxima a guia da borda
+    // correta e o ima apenas faz o refinamento final. Isso impede que a linha
+    // pule para sombra, textura ou outra aresta do cartao.
+    const baseRadius = edge==="left" || edge==="right" ? 6 : 9;
+    const radius=Math.max(3,Math.round(baseRadius/Math.max(1,zoom)));
     const points:Point[]=[];
     let totalScore=0;
     for(let i=1;i<=18;i++){
@@ -887,12 +891,16 @@ export default function App() {
       for(let off=-radius;off<=radius;off+=1){
         const qx=px+nx*off, qy=py+ny*off;
         const contrast=Math.abs(gray(qx+nx*2,qy+ny*2)-gray(qx-nx*2,qy-ny*2));
-        const score=contrast-Math.abs(off)*0.35;
+
+        // Penalidade forte de distancia: a borda correta precisa estar
+        // praticamente embaixo da guia. Assim nao "pesca" outra linha.
+        const distancePenalty=Math.abs(off)*(edge==="left" || edge==="right" ? 1.6 : 0.55);
+        const score=contrast-distancePenalty;
         if(score>best){best=score;bestOffset=off;}
       }
-      if(best>7){ points.push({x:px+nx*bestOffset,y:py+ny*bestOffset}); totalScore+=best; }
+      if(best>8){ points.push({x:px+nx*bestOffset,y:py+ny*bestOffset}); totalScore+=best; }
     }
-    if(points.length<8 || totalScore/points.length<9){
+    if(points.length<10 || totalScore/points.length<10){
       setCardLineLocked((current)=>({...current,[edge]:false}));
       return;
     }
@@ -909,6 +917,27 @@ export default function App() {
       a:{x:clamp((cx+fx*ta)/source.width*100,1,99),y:clamp((cy+fy*ta)/source.height*100,1,99)},
       b:{x:clamp((cx+fx*tb)/source.width*100,1,99),y:clamp((cy+fy*tb)/source.height*100,1,99)},
     };
+    // Validacao extra das laterais: elas precisam continuar em lados
+    // diferentes e manter uma largura plausivel antes de substituir o snap.
+    if(edge==="left" || edge==="right"){
+      const otherEdge = edge==="left" ? "right" : "left";
+      const other = cardSnapLines[otherEdge];
+      if(other){
+        const midpoint=(lineToUse:Line)=>({
+          x:(lineToUse.a.x+lineToUse.b.x)/2,
+          y:(lineToUse.a.y+lineToUse.b.y)/2,
+        });
+        const here=midpoint(snapped);
+        const there=midpoint(other);
+        const leftX=edge==="left" ? here.x : there.x;
+        const rightX=edge==="right" ? here.x : there.x;
+        if(rightX-leftX<12){
+          setCardLineLocked((current)=>({...current,[edge]:false}));
+          return;
+        }
+      }
+    }
+
     setCardLines((current)=>({...current,[edge]:snapped}));
     // Guarda a borda magnetica separada da guia visual. O calculo do cartao
     // usa esta linha travada ate que um novo snap valido seja encontrado.
