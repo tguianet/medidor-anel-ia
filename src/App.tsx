@@ -22,6 +22,8 @@ export default function App() {
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
   const cardLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
+  const autoCaptureTimerRef = useRef<number | null>(null);
+  const autoCaptureLockedRef = useRef(false);
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
@@ -138,7 +140,63 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [stage, camera.cameraOpening]);
 
+  useEffect(() => {
+    const shouldAutoCapture =
+      stage === "camera" &&
+      !camera.cameraOpening &&
+      !camera.error &&
+      cardReady &&
+      measurementMode === "finger" &&
+      !diameterPhotoTestMode &&
+      fingerCardCalibrationStep !== "done";
+
+    if (!shouldAutoCapture) {
+      if (autoCaptureTimerRef.current !== null) {
+        window.clearTimeout(autoCaptureTimerRef.current);
+        autoCaptureTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (autoCaptureLockedRef.current || autoCaptureTimerRef.current !== null) return;
+
+    // Exige verde estavel por 800 ms para evitar capturas em um unico frame.
+    autoCaptureTimerRef.current = window.setTimeout(() => {
+      autoCaptureTimerRef.current = null;
+      if (
+        autoCaptureLockedRef.current ||
+        stage !== "camera" ||
+        !cardReady ||
+        camera.cameraOpening ||
+        camera.error
+      ) return;
+
+      autoCaptureLockedRef.current = true;
+      void capture();
+    }, 800);
+
+    return () => {
+      if (autoCaptureTimerRef.current !== null) {
+        window.clearTimeout(autoCaptureTimerRef.current);
+        autoCaptureTimerRef.current = null;
+      }
+    };
+  }, [
+    stage,
+    cardReady,
+    camera.cameraOpening,
+    camera.error,
+    measurementMode,
+    diameterPhotoTestMode,
+    fingerCardCalibrationStep,
+  ]);
+
   const openCamera = async () => {
+    if (autoCaptureTimerRef.current !== null) {
+      window.clearTimeout(autoCaptureTimerRef.current);
+      autoCaptureTimerRef.current = null;
+    }
+    autoCaptureLockedRef.current = false;
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
     setPhase("card");
@@ -165,8 +223,12 @@ export default function App() {
   };
 
   const capture = async () => {
+    if (autoCaptureLockedRef.current && stage !== "camera") return;
     const video = camera.videoRef.current;
-    if (!video?.videoWidth) return;
+    if (!video?.videoWidth) {
+      autoCaptureLockedRef.current = false;
+      return;
+    }
     const canvas = document.createElement("canvas");
     canvas.width = 900;
     canvas.height = 1200;
