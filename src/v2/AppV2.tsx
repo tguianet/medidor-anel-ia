@@ -1464,6 +1464,18 @@ export default function AppV2() {
       if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
     }
 
+    // Consistencia global da largura rastreada: o dedo pode engrossar, mas o
+    // contorno inteiro nao pode abrir/fechar varios pixels de forma incoerente.
+    // Isso pega casos em que 45+ cortes sao validos, porem o tracker seguiu
+    // outra borda em parte da faixa.
+    const tracedWidths=leftPoints.map((leftPoint,index)=>rightPoints[index].x-leftPoint.x);
+    const orderedWidths=[...tracedWidths].sort((a,b)=>a-b);
+    const widthMedian=orderedWidths[Math.floor(orderedWidths.length/2)] ?? 0;
+    const widthP10=orderedWidths[Math.max(0,Math.floor((orderedWidths.length-1)*0.10))] ?? widthMedian;
+    const widthP90=orderedWidths[Math.max(0,Math.floor((orderedWidths.length-1)*0.90))] ?? widthMedian;
+    const widthBandPercent=widthMedian>0 ? ((widthP90-widthP10)/widthMedian)*100 : 999;
+    if(widthBandPercent>3.2) return null;
+
     const medianValue=(values:number[])=>{
       const ordered=[...values].sort((a,b)=>a-b);
       const mid=Math.floor(ordered.length/2);
@@ -1655,6 +1667,7 @@ export default function AppV2() {
 
   const result = useMemo(() => {
     if (liveWidthMm === null) return null;
+    if (measurementMode === "finger" && !v2ScanQualityOk) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
 
@@ -1679,7 +1692,7 @@ export default function AppV2() {
     }
 
     return computeRingResult(liveWidthMm, calibrationRules, true, calibrationConfidence);
-  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
+  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, v2ScanQualityOk]);
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
@@ -1786,6 +1799,11 @@ export default function AppV2() {
       fingerAxisAngleDeg: fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
+
+  const v2ScanQualityOk =
+    measurementAudit !== null &&
+    measurementAudit.rawWidthsPx.length >= 45 &&
+    measurementAudit.spreadPercent <= 3.2;
 
   const fourMagnetWidthsMm = (() => {
     if(!fingerMagnetSamples?.length||!pixelsPerMm) return [] as number[];
@@ -2199,7 +2217,7 @@ export default function AppV2() {
               <strong>Varredura automática do dedo</strong>
               <span>{
                 fingerMagnetSamples
-                  ? `${fingerMagnetSamples.length}/50 cortes válidos · leitura confiável`
+                  ? `${fingerMagnetSamples.length}/50 cortes válidos · contorno contínuo e estável`
                   : leftLocked && rightLocked
                     ? "Leitura rejeitada: contorno incompleto ou salto de borda. Reposicione as laterais e tente novamente."
                     : "Aproxime as laterais do dedo e solte para o ímã encaixar"
