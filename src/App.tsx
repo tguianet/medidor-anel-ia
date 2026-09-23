@@ -13,7 +13,7 @@ import TryOnPanel from "./components/TryOnPanel";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
-const TEST_FINGER_CARD_NORMALIZATION = 0.908;
+const TEST_FINGER_CARD_NORMALIZATION = 0.94;
 
 export default function App() {
   const camera = useCameraStream();
@@ -665,7 +665,19 @@ export default function App() {
         setPerspectiveReady(false);
         setCardLineLocked((current)=>({...current,[edge]:false}));
         if(endpoint){
-          setCardLines((current)=>({...current,[edge]:{...current[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}}}));
+          const start=cardLineDragStartRef.current;
+          if(start){
+            const dx=imageX-start.pointer.x;
+            const dy=imageY-start.pointer.y;
+            const startPoint=start.line[endpoint];
+            setCardLines((current)=>({...current,[edge]:{
+              ...current[edge],
+              [endpoint]:{
+                x:clamp(startPoint.x+dx,1,99),
+                y:clamp(startPoint.y+dy,1,99),
+              },
+            }}));
+          }
         } else {
           const start=cardLineDragStartRef.current;
           if(start){
@@ -783,6 +795,21 @@ export default function App() {
     dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
     event.currentTarget.setPointerCapture(event.pointerId);
     if (target !== "height") updateDrag(event.clientX, event.clientY);
+  };
+
+  // Mostra cada borda alem dos cantos para separar os puxadores.
+  // Os cruzamentos reais continuam vindo das intersecoes matematicas e do snap.
+  const extendedCardLineForDisplay = (line:Line, extension=5):Line => {
+    const dx=line.b.x-line.a.x;
+    const dy=line.b.y-line.a.y;
+    const len=Math.hypot(dx,dy);
+    if(len<1e-6) return line;
+    const ux=dx/len;
+    const uy=dy/len;
+    return {
+      a:{x:clamp(line.a.x-ux*extension,0.5,99.5),y:clamp(line.a.y-uy*extension,0.5,99.5)},
+      b:{x:clamp(line.b.x+ux*extension,0.5,99.5),y:clamp(line.b.y+uy*extension,0.5,99.5)},
+    };
   };
 
   const startCardLineDrag = (edge:CardEdge, endpoint:"a"|"b"|null, event:React.PointerEvent) => {
@@ -1643,9 +1670,9 @@ export default function App() {
 
   const guideText =
     guidedStep === 1
-      ? "Ajuste as duas linhas laterais nas bordas do cartão. Quando elas estiverem verdes, confira a linha central e salve a referência de 85,60 mm."
+      ? "Ajuste as 4 bordas do cartão. As linhas passam dos cantos para os puxadores não se sobreporem; o snap define exatamente onde cada cruzamento fica."
       : guidedStep === 2
-        ? "Coloque o cartão sobre o dedo que será medido. Posicione a região mais grossa — junta ou falange — na linha guia. Ajuste as laterais do cartão e confirme."
+        ? "Coloque o cartão sobre o dedo e ajuste novamente as 4 bordas. O sistema usa os 4 cruzamentos para corrigir a perspectiva antes de medir."
         : guidedStep === 3
           ? "Aproxime as laterais do dedo e solte. Os 20 pontos varrem uma faixa maior e o sistema escolhe automaticamente 5 cortes consecutivos da região mais larga estável."
           : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
@@ -1769,15 +1796,16 @@ export default function App() {
               >
                 {(["top","right","bottom","left"] as CardEdge[]).map((edge)=>{
                   const line=cardLines[edge];
+                  const displayLine=extendedCardLineForDisplay(line,5);
                   const locked=cardLineLocked[edge];
                   return <g key={edge} className={`card-edge${locked?" locked":""}`}>
-                    <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                    <line className="card-line-hit" x1={displayLine.a.x} y1={displayLine.a.y} x2={displayLine.b.x} y2={displayLine.b.y}
                       onPointerDown={(e)=>startCardLineDrag(edge,null,e)} />
-                    <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    <line className="card-line-visible" x1={displayLine.a.x} y1={displayLine.a.y} x2={displayLine.b.x} y2={displayLine.b.y} />
                     {(["a","b"] as const).map((point)=><g key={point}>
-                      <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="5.0"
+                      <circle className="card-line-handle-hit" cx={displayLine[point].x} cy={displayLine[point].y} r="5.0"
                         onPointerDown={(e)=>startCardLineDrag(edge,point,e)} />
-                      <circle className="card-line-handle" cx={line[point].x} cy={line[point].y} r="1.45" />
+                      <circle className="card-line-handle" cx={displayLine[point].x} cy={displayLine[point].y} r="1.45" />
                     </g>)}
                   </g>;
                 })}
