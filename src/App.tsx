@@ -396,17 +396,62 @@ export default function App() {
   };
 
   const automaticCardReferenceLine = (left: Line, right: Line): Line => {
-    // A reta de 85,60 mm nasce exclusivamente das duas laterais encaixadas.
-    // Assim o usuario nunca precisa esticar a linha central e nao consegue
-    // alterar a escala por acidente.
+    // A reta de 85,60 mm deve representar a largura REAL entre as duas
+    // laterais do cartao. Ligar simplesmente o meio das laterais pode encurtar
+    // ou alongar a referencia quando as duas guias possuem inclinacoes ou
+    // comprimentos diferentes. Em vez disso, construimos uma reta perpendicular
+    // a direcao media das duas laterais e usamos as intersecoes exatas.
     const midpoint = (line: Line): Point => ({
       x: (line.a.x + line.b.x) / 2,
       y: (line.a.y + line.b.y) / 2,
     });
-    return {
-      a: midpoint(left),
-      b: midpoint(right),
+    const normalizedDirection = (line: Line) => {
+      const dx=line.b.x-line.a.x;
+      const dy=line.b.y-line.a.y;
+      const len=Math.hypot(dx,dy);
+      if(len<1e-6) return null;
+      return {x:dx/len,y:dy/len};
     };
+
+    const leftMid=midpoint(left);
+    const rightMid=midpoint(right);
+    const dl=normalizedDirection(left);
+    const dr0=normalizedDirection(right);
+    if(!dl || !dr0) return {a:leftMid,b:rightMid};
+
+    // Mantem as duas direcoes apontando para o mesmo sentido antes da media.
+    const dot=dl.x*dr0.x+dl.y*dr0.y;
+    const dr=dot<0 ? {x:-dr0.x,y:-dr0.y} : dr0;
+    const avgX=dl.x+dr.x;
+    const avgY=dl.y+dr.y;
+    const avgLen=Math.hypot(avgX,avgY);
+    if(avgLen<1e-6) return {a:leftMid,b:rightMid};
+
+    const ux=avgX/avgLen;
+    const uy=avgY/avgLen;
+    const nx=-uy;
+    const ny=ux;
+    const center={x:(leftMid.x+rightMid.x)/2,y:(leftMid.y+rightMid.y)/2};
+
+    // Segmento longo apenas para calcular as intersecoes com as laterais.
+    const crossLine:Line={
+      a:{x:center.x-nx*120,y:center.y-ny*120},
+      b:{x:center.x+nx*120,y:center.y+ny*120},
+    };
+    try{
+      const a=lineIntersection(left,crossLine);
+      const b=lineIntersection(right,crossLine);
+      if(
+        Number.isFinite(a.x) && Number.isFinite(a.y) &&
+        Number.isFinite(b.x) && Number.isFinite(b.y) &&
+        Math.hypot(b.x-a.x,b.y-a.y)>5
+      ){
+        return {a,b};
+      }
+    }catch{
+      // fallback abaixo
+    }
+    return {a:leftMid,b:rightMid};
   };
 
   const cardReferenceSegment = () => {
