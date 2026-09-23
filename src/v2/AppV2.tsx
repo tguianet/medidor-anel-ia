@@ -21,6 +21,7 @@ export default function AppV2() {
   const [cardBottomPct,setCardBottomPct]=useState(70);
   const [fingerLeftPct,setFingerLeftPct]=useState(42);
   const [fingerRightPct,setFingerRightPct]=useState(58);
+  const [fingerMeasureYPct,setFingerMeasureYPct]=useState(62);
   const [mmPerPx,setMmPerPx]=useState<number|null>(null);
   const [cardConfidence,setCardConfidence]=useState<number|null>(null);
   const [status,setStatus]=useState("Abra a camera e tire uma foto com o cartao junto do dedo.");
@@ -74,6 +75,7 @@ export default function AppV2() {
       const visualFingerWidth=Math.min(18,Math.max(8,(right-left)*0.22));
       setFingerLeftPct(Math.max(1,center-visualFingerWidth/2));
       setFingerRightPct(Math.min(99,center+visualFingerWidth/2));
+      setFingerMeasureYPct(Math.max(38,Math.min(88,bottom+18)));
       setStatus("Cartao localizado. Ajuste somente se precisar e calibre.");
     }catch{
       setCardConfidence(null);
@@ -101,23 +103,107 @@ export default function AppV2() {
     }
   };
 
-  const measureFinger=()=>{
+  const measureFinger=async()=>{
     if(!photo || !mmPerPx){
       setStatus("Calibre o cartao primeiro.");
       return;
     }
-    const widthPx=Math.abs(fingerRightPct-fingerLeftPct)/100*photo.width;
-    const measuredMm=widthPx*mmPerPx;
-    if(!Number.isFinite(measuredMm) || measuredMm<=0){
-      setStatus("A largura do dedo nao ficou valida.");
-      return;
+
+    setStatus("Detectando automaticamente as duas bordas do dedo...");
+
+    try{
+      const image=new Image();
+      image.src=photo.src;
+      await image.decode();
+
+      const canvas=document.createElement("canvas");
+      canvas.width=photo.width;
+      canvas.height=photo.height;
+      const context=canvas.getContext("2d",{willReadFrequently:true});
+      if(!context) throw new Error("pixels");
+      context.drawImage(image,0,0,photo.width,photo.height);
+      const pixels=context.getImageData(0,0,photo.width,photo.height).data;
+
+      const gray=(x:number,y:number)=>{
+        const ix=Math.max(0,Math.min(photo.width-1,Math.round(x)));
+        const iy=Math.max(0,Math.min(photo.height-1,Math.round(y)));
+        const o=(iy*photo.width+ix)*4;
+        return pixels[o]*0.299+pixels[o+1]*0.587+pixels[o+2]*0.114;
+      };
+
+      const seedLeft=fingerLeftPct/100*photo.width;
+      const seedRight=fingerRightPct/100*photo.width;
+      const centerY=fingerMeasureYPct/100*photo.height;
+      const searchRadius=Math.max(18,Math.round(photo.width*0.075));
+      const rowStep=Math.max(2,Math.round(photo.height*0.006));
+      const rowOffsets=[-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6].map(v=>v*rowStep);
+
+      const findEdge=(seedX:number,y:number)=>{
+        let bestX=seedX;
+        let bestScore=-Infinity;
+        for(let x=Math.round(seedX-searchRadius);x<=Math.round(seedX+searchRadius);x++){
+          if(x<5||x>=photo.width-5) continue;
+          const contrast=Math.abs(gray(x-3,y)-gray(x+3,y));
+          const distancePenalty=Math.abs(x-seedX)*0.18;
+          const score=contrast-distancePenalty;
+          if(score>bestScore){
+            bestScore=score;
+            bestX=x;
+          }
+        }
+        return {x:bestX,score:bestScore};
+      };
+
+      const samples:{left:number;right:number;width:number;score:number}[]=[];
+      for(const off of rowOffsets){
+        const y=Math.round(centerY+off);
+        if(y<6||y>=photo.height-6) continue;
+        const left=findEdge(seedLeft,y);
+        const right=findEdge(seedRight,y);
+        if(left.score<6||right.score<6||right.x<=left.x) continue;
+        samples.push({
+          left:left.x,
+          right:right.x,
+          width:right.x-left.x,
+          score:(left.score+right.score)/2,
+        });
+      }
+
+      if(samples.length<7){
+        throw new Error("not-enough-edges");
+      }
+
+      const median=(values:number[])=>{
+        const ordered=[...values].sort((a,b)=>a-b);
+        const mid=Math.floor(ordered.length/2);
+        return ordered.length%2?ordered[mid]:(ordered[mid-1]+ordered[mid])/2;
+      };
+
+      const medianWidth=median(samples.map(s=>s.width));
+      const stable=samples.filter(s=>Math.abs(s.width-medianWidth)<=Math.max(3,medianWidth*0.035));
+      if(stable.length<5) throw new Error("unstable-edge");
+
+      const measuredWidthPx=median(stable.map(s=>s.width));
+      const detectedLeft=median(stable.map(s=>s.left));
+      const detectedRight=median(stable.map(s=>s.right));
+      const measuredMm=measuredWidthPx*mmPerPx;
+
+      if(!Number.isFinite(measuredMm) || measuredMm<=0){
+        throw new Error("invalid-mm");
+      }
+
+      setFingerLeftPct(detectedLeft/photo.width*100);
+      setFingerRightPct(detectedRight/photo.width*100);
+      setFingerMm(measuredMm.toFixed(3));
+
+      const classification=classifyFingerWidthMm(measuredMm);
+      setStatus(`Medicao automatica: ${measuredWidthPx.toFixed(1)} px = ${measuredMm.toFixed(3)} mm -> aro ${classification.exactRingSize} (conforto ${classification.comfortRingSize}).`);
+      window.setTimeout(()=>{
+        resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"});
+      },80);
+    }catch{
+      setStatus("Nao consegui travar as duas bordas automaticamente. Ajuste as linhas verdes mais perto das laterais do dedo e tente novamente.");
     }
-    setFingerMm(measuredMm.toFixed(3));
-    const classification=classifyFingerWidthMm(measuredMm);
-    setStatus(`Medicao concluida: ${measuredMm.toFixed(3)} mm -> aro ${classification.exactRingSize} (conforto ${classification.comfortRingSize}).`);
-    window.setTimeout(()=>{
-      resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"});
-    },80);
   };
 
   return (
@@ -181,6 +267,7 @@ export default function AppV2() {
               <Guide pct={cardRightPct} color="#1976d2" label="cartao D" />
               <Guide pct={fingerLeftPct} color="#00a86b" label="dedo E" />
               <Guide pct={fingerRightPct} color="#00a86b" label="dedo D" />
+              <HorizontalGuide pct={fingerMeasureYPct} />
             </div>
 
             <div className="v2-ranges">
@@ -188,11 +275,12 @@ export default function AppV2() {
               <Range label="Cartao direita" value={cardRightPct} onChange={setCardRightPct} />
               <Range label="Dedo esquerda" value={fingerLeftPct} onChange={setFingerLeftPct} />
               <Range label="Dedo direita" value={fingerRightPct} onChange={setFingerRightPct} />
+              <Range label="Altura da medicao" value={fingerMeasureYPct} onChange={setFingerMeasureYPct} />
             </div>
 
             <div className="v2-actions">
               <button onClick={calibrateCard} style={buttonStyle}>Calibrar cartao</button>
-              <button onClick={measureFinger} style={buttonStyle}>Medir dedo</button>
+              <button onClick={()=>void measureFinger()} style={buttonStyle}>Medir dedo automaticamente</button>
               <button onClick={()=>{setPhoto(null);setMmPerPx(null);setStatus("Abra a camera e tire uma nova foto.");}} style={buttonStyle}>Nova foto</button>
             </div>
 
@@ -301,6 +389,14 @@ function Guide({pct,color,label}:{pct:number;color:string;label:string}){
   return (
     <div style={{position:"absolute",left:pct+"%",top:0,bottom:0,width:0,borderLeft:"2px solid "+color,pointerEvents:"none"}}>
       <span style={{position:"absolute",top:8,left:4,background:"rgba(0,0,0,.65)",color:"#fff",fontSize:10,padding:"2px 4px",borderRadius:4,whiteSpace:"nowrap"}}>{label}</span>
+    </div>
+  );
+}
+
+function HorizontalGuide({pct}:{pct:number}){
+  return (
+    <div style={{position:"absolute",left:0,right:0,top:pct+"%",height:0,borderTop:"2px dashed #f2c35f",pointerEvents:"none"}}>
+      <span style={{position:"absolute",left:6,top:4,background:"rgba(0,0,0,.7)",color:"#f2c35f",fontSize:10,padding:"2px 4px",borderRadius:4}}>altura de medicao</span>
     </div>
   );
 }
