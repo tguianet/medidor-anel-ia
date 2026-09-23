@@ -93,6 +93,7 @@ export default function App() {
     bottom:{a:{x:15,y:50},b:{x:85,y:50}},
   });
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
+  const [measurementCardLengthPx, setMeasurementCardLengthPx] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -600,6 +601,7 @@ export default function App() {
     }
     try{
       const segment=cardReferenceSegment();
+      setMeasurementCardLengthPx(segment.lengthPx);
       const pxPerMm=segment.lengthPx/85.6;
       const leftPercent=segment.leftPx.x/source.width*100;
       const rightPercent=segment.rightPx.x/source.width*100;
@@ -1909,6 +1911,11 @@ export default function App() {
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
                   {measurementAudit.rawCardMm !== null && <span>Medida bruta: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
+                  {referenceCardLengthPx !== null && <span>Cartão foto 1: {referenceCardLengthPx.toFixed(1)} px</span>}
+                  {measurementCardLengthPx !== null && <span>Cartão foto 2: {measurementCardLengthPx.toFixed(1)} px</span>}
+                  {referenceCardLengthPx !== null && measurementCardLengthPx !== null && (
+                    <span>Diferença cartão 1→2: {(((measurementCardLengthPx/referenceCardLengthPx)-1)*100).toFixed(2)}%</span>
+                  )}
                 </>
               )}
             </div>
