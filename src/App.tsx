@@ -1255,13 +1255,14 @@ export default function App() {
     const seedRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
     const trackRadius=Math.max(4,Math.round(7/Math.max(1,zoom)));
 
-    // 50 cortes percorrem uma faixa grande do dedo. As linhas manuais servem
-    // SOMENTE para encontrar o primeiro ponto real de cada borda. Depois disso,
-    // o contorno e rastreado para cima e para baixo usando o ponto anterior.
-    // Assim mover a guia alguns pixels nao deve trocar o caminho do contorno.
+    // Mantemos 50 cortes para ganhar resolucao, mas removemos o alcance
+    // longitudinal extra. A varredura volta para uma faixa de +/-12% ao redor
+    // da altura escolhida, evitando pegar regioes distantes que inflaram a medida.
+    // As linhas manuais servem apenas para encontrar a semente; depois o contorno
+    // e rastreado para cima e para baixo dentro desta faixa controlada.
     const rawYPercents=Array.from({length:50},(_,index)=>{
-      const off=-26+(index*(52/49));
-      return clamp(measureY+off,4,96);
+      const off=-12+(index*(24/49));
+      return clamp(measureY+off,6,94);
     });
     const yPercents=rawYPercents.filter((value,index,array)=>
       index===0 || Math.abs(value-array[index-1])>0.02
