@@ -1252,32 +1252,47 @@ export default function App() {
       return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
     };
 
-    const searchRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
-    // Varredura longitudinal automatica: 50 cortes percorrem uma faixa bem
-    // maior do dedo. O usuario nao precisa acertar uma altura exata; o sistema
-    // procura sozinho a regiao mais larga por onde o anel precisa passar.
-    const yPercents=Array.from({length:50},(_,index)=>{
+    const seedRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
+    const trackRadius=Math.max(4,Math.round(7/Math.max(1,zoom)));
+
+    // 50 cortes percorrem uma faixa grande do dedo. As linhas manuais servem
+    // SOMENTE para encontrar o primeiro ponto real de cada borda. Depois disso,
+    // o contorno e rastreado para cima e para baixo usando o ponto anterior.
+    // Assim mover a guia alguns pixels nao deve trocar o caminho do contorno.
+    const rawYPercents=Array.from({length:50},(_,index)=>{
       const off=-26+(index*(52/49));
       return clamp(measureY+off,4,96);
     });
+    const yPercents=rawYPercents.filter((value,index,array)=>
+      index===0 || Math.abs(value-array[index-1])>0.02
+    );
 
-    const findEdge=(side:"left"|"right",guideX:number,y:number,previousX:number|null)=>{
+    const findEdge=(
+      side:"left"|"right",
+      centerX:number,
+      y:number,
+      previousX:number|null,
+      radius:number,
+    )=>{
       const outside=(x:number)=>side==="left"?grayscale(x-4,y):grayscale(x+4,y);
       const inside=(x:number)=>side==="left"?grayscale(x+4,y):grayscale(x-4,y);
 
-      const expectedPolarityRaw=outside(guideX)-inside(guideX);
+      const expectedPolarityRaw=outside(centerX)-inside(centerX);
       const expectedPolarity=Math.abs(expectedPolarityRaw)>=3?Math.sign(expectedPolarityRaw):0;
       const candidates:{x:number;strength:number;score:number}[]=[];
 
-      for(let x=Math.round(guideX)-searchRadius;x<=Math.round(guideX)+searchRadius;x++){
+      for(let x=Math.round(centerX)-radius;x<=Math.round(centerX)+radius;x++){
         if(x<6||x>=source.width-6) continue;
 
         const signed=outside(x)-inside(x);
         const edgeStrength=expectedPolarity===0?Math.abs(signed):Math.max(0,signed*expectedPolarity);
         if(edgeStrength<5) continue;
 
-        const guidePenalty=Math.abs(x-guideX)*0.28;
-        const continuityPenalty=previousX===null?0:Math.abs(x-previousX)*0.55;
+        // Depois da semente, centerX ja e a ultima borda encontrada.
+        // A penalidade de distancia mantem o rastreamento grudado no mesmo
+        // contorno em vez de voltar a procurar perto da guia manual.
+        const guidePenalty=Math.abs(x-centerX)*(previousX===null?0.28:1.05);
+        const continuityPenalty=previousX===null?0:Math.abs(x-previousX)*1.15;
         candidates.push({
           x,
           strength:edgeStrength,
@@ -1285,24 +1300,19 @@ export default function App() {
         });
       }
 
-      if(!candidates.length) return {x:Math.round(guideX),score:-Infinity};
+      if(!candidates.length) return {x:Math.round(centerX),score:-Infinity};
 
       const strongest=Math.max(...candidates.map(item=>item.strength));
       const strongEnough=Math.max(7,strongest*0.60);
       let valid=candidates.filter(item=>item.strength>=strongEnough);
 
-      // Mantem continuidade vertical, mas nunca prefere uma ruga interna a uma
-      // borda externa forte. A tolerancia aumenta um pouco com o zoom.
       if(previousX!==null){
-        const continuityLimit=Math.max(5,Math.round(8/Math.max(1,zoom)));
+        const continuityLimit=Math.max(4,Math.round(6/Math.max(1,zoom)));
         const continuous=valid.filter(item=>Math.abs(item.x-previousX)<=continuityLimit);
-        if(continuous.length) valid=continuous;
+        if(!continuous.length) return {x:Math.round(previousX),score:-Infinity};
+        valid=continuous;
       }
 
-      // Agrupa pixels vizinhos que pertencem a mesma transicao. O contraste
-      // calculado em +/-4 px produz um plateau; usar o ponto mais externo desse
-      // plateau alargava artificialmente o dedo. Escolhemos a transicao externa,
-      // mas o ponto final e o centro ponderado da propria transicao.
       const sorted=[...valid].sort((a,b)=>a.x-b.x);
       const groups:{x:number;strength:number;score:number}[][]=[];
       for(const item of sorted){
@@ -1310,54 +1320,144 @@ export default function App() {
         if(!last || item.x-last[last.length-1].x>1) groups.push([item]);
         else last.push(item);
       }
-      const chosenGroup = side==="left" ? groups[0] : groups[groups.length-1];
+
+      // Na semente ainda preferimos a transicao externa. Durante o tracking,
+      // como a busca ja esta centrada na borda anterior, escolhemos o grupo
+      // mais proximo dessa borda para impedir saltos para outra textura.
+      let chosenGroup:{x:number;strength:number;score:number}[]|undefined;
+      if(previousX===null){
+        chosenGroup=side==="left" ? groups[0] : groups[groups.length-1];
+      }else{
+        chosenGroup=groups.reduce((best,group)=>{
+          const center=group.reduce((sum,item)=>sum+item.x,0)/group.length;
+          const bestCenter=best.reduce((sum,item)=>sum+item.x,0)/best.length;
+          return Math.abs(center-previousX)<Math.abs(bestCenter-previousX)?group:best;
+        },groups[0]);
+      }
+
       if(chosenGroup?.length){
         const weight=chosenGroup.reduce((sum,item)=>sum+Math.max(1,item.strength),0);
         const x=chosenGroup.reduce((sum,item)=>sum+item.x*Math.max(1,item.strength),0)/weight;
         const score=chosenGroup.reduce((sum,item)=>sum+item.score,0)/chosenGroup.length;
         return {x,score};
       }
-      return candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
+
+      return {x:Math.round(centerX),score:-Infinity};
     };
 
-    // Cada um dos 50 niveis procura localmente a borda mais proxima,
-    // mantendo continuidade para formar UM contorno por lado.
-    const leftPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
-    const rightPoints:{x:number;y:number;yPercent:number;score:number}[]=[];
-    let previousLeft:number|null=null;
-    let previousRight:number|null=null;
+    type EdgePoint={x:number;y:number;yPercent:number;score:number};
+    type EdgePair={left:EdgePoint;right:EdgePoint};
 
-    for(const yPercent of yPercents){
+    const sampleAt=(
+      yPercent:number,
+      leftCenter:number,
+      rightCenter:number,
+      previousLeft:number|null,
+      previousRight:number|null,
+      radius:number,
+    ):EdgePair|null=>{
       const y=toImageY(yPercent);
-      if(y<6||y>=source.height-6) continue;
+      if(y<6||y>=source.height-6) return null;
 
-      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
-      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
+      const le=findEdge("left",leftCenter,y,previousLeft,radius);
+      const re=findEdge("right",rightCenter,y,previousRight,radius);
+      if(le.score<6||re.score<6||re.x<=le.x) return null;
 
-      const le=findEdge("left",leftGuide,y,previousLeft);
-      const re=findEdge("right",rightGuide,y,previousRight);
+      return {
+        left:{x:le.x,y,yPercent,score:le.score},
+        right:{x:re.x,y,yPercent,score:re.score},
+      };
+    };
 
-      if(le.score<6||re.score<6||re.x<=le.x) continue;
+    // Encontra uma semente perto da altura escolhida pelo usuario. A partir
+    // daqui as linhas manuais deixam de participar do rastreamento.
+    const centerIndex=yPercents.reduce((bestIndex,value,index)=>
+      Math.abs(value-measureY)<Math.abs(yPercents[bestIndex]-measureY)?index:bestIndex
+    ,0);
 
-      leftPoints.push({x:le.x,y,yPercent,score:le.score});
-      rightPoints.push({x:re.x,y,yPercent,score:re.score});
-      previousLeft=le.x;
-      previousRight=re.x;
+    let seedIndex=-1;
+    let seed:EdgePair|null=null;
+    const seedOrder:number[]=[centerIndex];
+    for(let distanceIndex=1;distanceIndex<7;distanceIndex++){
+      if(centerIndex-distanceIndex>=0) seedOrder.push(centerIndex-distanceIndex);
+      if(centerIndex+distanceIndex<yPercents.length) seedOrder.push(centerIndex+distanceIndex);
     }
 
-    // Com a varredura maior aceitamos a medicao quando ha pelo menos 32
-    // cortes coerentes. Reflexos isolados nao devem invalidar o dedo inteiro.
-    if(leftPoints.length<32||rightPoints.length<32||leftPoints.length!==rightPoints.length) return null;
+    for(const index of seedOrder){
+      const yPercent=yPercents[index];
+      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
+      const candidate=sampleAt(yPercent,leftGuide,rightGuide,null,null,seedRadius);
+      if(candidate){
+        seedIndex=index;
+        seed=candidate;
+        break;
+      }
+    }
+    if(seedIndex<0||!seed) return null;
 
-    // Rejeita saltos grandes entre pontos vizinhos: se uma ruga/sombra tentar
-    // puxar um ponto para dentro, mantemos o contorno continuo.
-    const maxJump=Math.max(5,Math.round(10/Math.max(1,zoom)));
+    const pairs:EdgePair[]=[seed];
+
+    const traceDirection=(step:-1|1)=>{
+      let previousLeft=seed!.left.x;
+      let previousRight=seed!.right.x;
+      let misses=0;
+
+      for(let index=seedIndex+step;index>=0&&index<yPercents.length;index+=step){
+        const yPercent=yPercents[index];
+
+        // Busca curta centrada SOMENTE no ultimo contorno encontrado.
+        let pair=sampleAt(
+          yPercent,
+          previousLeft,
+          previousRight,
+          previousLeft,
+          previousRight,
+          trackRadius,
+        );
+
+        // Uma falha curta pode ser reflexo/ruga. Tentamos uma unica vez com
+        // raio um pouco maior, ainda centrado na borda anterior.
+        if(!pair){
+          pair=sampleAt(
+            yPercent,
+            previousLeft,
+            previousRight,
+            previousLeft,
+            previousRight,
+            Math.max(trackRadius+2,Math.round(trackRadius*1.6)),
+          );
+        }
+
+        if(!pair){
+          misses++;
+          if(misses>=3) break;
+          continue;
+        }
+
+        misses=0;
+        pairs.push(pair);
+        previousLeft=pair.left.x;
+        previousRight=pair.right.x;
+      }
+    };
+
+    traceDirection(-1);
+    traceDirection(1);
+
+    pairs.sort((a,b)=>a.left.yPercent-b.left.yPercent);
+    const leftPoints=pairs.map(pair=>pair.left);
+    const rightPoints=pairs.map(pair=>pair.right);
+
+    // Precisamos de uma parte relevante do contorno para aceitar a medicao.
+    if(leftPoints.length<28||rightPoints.length<28||leftPoints.length!==rightPoints.length) return null;
+
+    const maxJump=Math.max(5,Math.round(9/Math.max(1,zoom)));
     for(let i=1;i<leftPoints.length;i++){
       if(Math.abs(leftPoints[i].x-leftPoints[i-1].x)>maxJump) return null;
       if(Math.abs(rightPoints[i].x-rightPoints[i-1].x)>maxJump) return null;
     }
 
-    // Consenso lateral robusto para 8-10 amostras.
     const medianValue=(values:number[])=>{
       const ordered=[...values].sort((a,b)=>a-b);
       const mid=Math.floor(ordered.length/2);
@@ -1370,17 +1470,12 @@ export default function App() {
     const inwardTolerance=Math.max(2.5,Math.round(4/Math.max(1,zoom)));
 
     for(const point of leftPoints){
-      // No lado esquerdo, X maior significa que o ponto entrou no dedo.
       if(point.x-leftMedian>inwardTolerance) point.x=leftMedian;
     }
     for(const point of rightPoints){
-      // No lado direito, X menor significa que o ponto entrou no dedo.
       if(rightMedian-point.x>inwardTolerance) point.x=rightMedian;
     }
 
-    // Ajusta uma reta para cada lateral do dedo no plano da imagem.
-    // A largura correta deve ser medida PERPENDICULARMENTE ao eixo do dedo,
-    // e nao horizontalmente em relacao a tela.
     const fitXByY=(points:{x:number;y:number}[])=>{
       const meanY=points.reduce((s,p)=>s+p.y,0)/points.length;
       const meanX=points.reduce((s,p)=>s+p.x,0)/points.length;
@@ -1405,9 +1500,6 @@ export default function App() {
 
     return leftPoints.map((leftPoint,index)=>{
       const rightPoint=rightPoints[index];
-
-      // Intersecao da normal do eixo do dedo com a lateral direita ajustada.
-      // Como (nx,ny) e unitario, |t| ja e a largura ortogonal em pixels.
       const denominator=nx-rightFit.slope*ny;
       let t=denominator!==0
         ? (rightFit.slope*leftPoint.y+rightFit.intercept-leftPoint.x)/denominator
@@ -2073,13 +2165,13 @@ export default function App() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Ajuste apenas as laterais do dedo. A varredura percorre uma faixa maior e procura automaticamente o ponto mais grosso estável.</span>
+              <span>Aproxime as laterais uma vez. Depois do primeiro encaixe, o sistema trava no contorno real e rastreia o dedo para cima e para baixo sem depender da posição da guia.</span>
             </div>
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Varredura automática do dedo</strong>
-              <span>{fingerMagnetSamples ? `${fingerMagnetSamples.length}/50 cortes válidos · o sistema escolhe o maior platô estável` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
+              <span>{fingerMagnetSamples ? `${fingerMagnetSamples.length} cortes rastreados · guia manual usada só para iniciar o contorno` : "Aproxime as laterais do dedo e solte para o ímã encaixar"}</span>
             </div>
           )}
           {phase === "finger" && !tryOn && <div className="edge-status">
