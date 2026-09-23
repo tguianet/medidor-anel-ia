@@ -1,9 +1,29 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { calibratePhoto } from "../vision";
+import { useCameraStream } from "../useCameraStream";
+import { scaleFromLockedCardSides } from "./cardCalibration";
 import { classifyFingerWidthMm, FINGER_REFERENCE_CURVE, INITIAL_REFERENCE_FINGER_WIDTH_MM } from "./ringClassifier";
 import { PHYSICAL_RING_TABLE } from "./physicalRingTable";
 
+type CapturedPhoto = {
+  src: string;
+  width: number;
+  height: number;
+};
+
 export default function AppV2() {
+  const camera=useCameraStream();
   const [fingerMm,setFingerMm]=useState(INITIAL_REFERENCE_FINGER_WIDTH_MM.toFixed(2));
+  const [photo,setPhoto]=useState<CapturedPhoto|null>(null);
+  const [cardLeftPct,setCardLeftPct]=useState(15);
+  const [cardRightPct,setCardRightPct]=useState(85);
+  const [cardTopPct,setCardTopPct]=useState(25);
+  const [cardBottomPct,setCardBottomPct]=useState(70);
+  const [fingerLeftPct,setFingerLeftPct]=useState(42);
+  const [fingerRightPct,setFingerRightPct]=useState(58);
+  const [mmPerPx,setMmPerPx]=useState<number|null>(null);
+  const [cardConfidence,setCardConfidence]=useState<number|null>(null);
+  const [status,setStatus]=useState("Abra a camera e tire uma foto com o cartao junto do dedo.");
 
   const numericMm=Number(fingerMm.replace(",","."));
   const result=useMemo(()=>{
@@ -14,20 +34,151 @@ export default function AppV2() {
     }
   },[numericMm]);
 
+  const capturePhoto=async()=>{
+    const video=camera.videoRef.current;
+    if(!video?.videoWidth || !video.videoHeight){
+      setStatus("A camera ainda nao esta pronta.");
+      return;
+    }
+
+    const canvas=document.createElement("canvas");
+    canvas.width=video.videoWidth;
+    canvas.height=video.videoHeight;
+    const context=canvas.getContext("2d");
+    if(!context){
+      setStatus("Nao foi possivel ler a imagem.");
+      return;
+    }
+    context.drawImage(video,0,0,canvas.width,canvas.height);
+    const src=canvas.toDataURL("image/jpeg",0.95);
+    setPhoto({src,width:canvas.width,height:canvas.height});
+    setMmPerPx(null);
+    camera.stopCamera();
+    setStatus("Localizando o cartao...");
+
+    try{
+      const calibration=await calibratePhoto(src);
+      const left=Math.max(1,Math.min(97,calibration.cardBox.x*100));
+      const right=Math.max(left+2,Math.min(99,(calibration.cardBox.x+calibration.cardBox.width)*100));
+      const top=Math.max(1,Math.min(95,calibration.cardBox.y*100));
+      const bottom=Math.max(top+2,Math.min(99,(calibration.cardBox.y+calibration.cardBox.height)*100));
+
+      setCardLeftPct(left);
+      setCardRightPct(right);
+      setCardTopPct(top);
+      setCardBottomPct(bottom);
+      setCardConfidence(calibration.confidence);
+
+      const center=(left+right)/2;
+      const visualFingerWidth=Math.min(18,Math.max(8,(right-left)*0.22));
+      setFingerLeftPct(Math.max(1,center-visualFingerWidth/2));
+      setFingerRightPct(Math.min(99,center+visualFingerWidth/2));
+      setStatus("Cartao localizado. Ajuste somente se precisar e calibre.");
+    }catch{
+      setCardConfidence(null);
+      setStatus("Nao localizei o cartao automaticamente. Ajuste as duas linhas azuis nas laterais do cartao.");
+    }
+  };
+
+  const calibrateCard=()=>{
+    if(!photo) return;
+    const top=cardTopPct/100*photo.height;
+    const bottom=cardBottomPct/100*photo.height;
+    const leftX=cardLeftPct/100*photo.width;
+    const rightX=cardRightPct/100*photo.width;
+
+    try{
+      const scale=scaleFromLockedCardSides(
+        {a:{x:leftX,y:top},b:{x:leftX,y:bottom}},
+        {a:{x:rightX,y:top},b:{x:rightX,y:bottom}},
+      );
+      setMmPerPx(scale.mmPerPx);
+      setStatus("Cartao calibrado. Agora posicione as duas linhas verdes nas bordas reais do dedo.");
+    }catch{
+      setMmPerPx(null);
+      setStatus("As laterais do cartao nao formaram uma referencia valida.");
+    }
+  };
+
+  const measureFinger=()=>{
+    if(!photo || !mmPerPx){
+      setStatus("Calibre o cartao primeiro.");
+      return;
+    }
+    const widthPx=Math.abs(fingerRightPct-fingerLeftPct)/100*photo.width;
+    const measuredMm=widthPx*mmPerPx;
+    if(!Number.isFinite(measuredMm) || measuredMm<=0){
+      setStatus("A largura do dedo nao ficou valida.");
+      return;
+    }
+    setFingerMm(measuredMm.toFixed(3));
+    setStatus("Medicao V2 concluida: pixels -> mm -> tabela fisica.");
+  };
+
   return (
     <main style={{fontFamily:"Inter,system-ui,sans-serif",maxWidth:980,margin:"0 auto",padding:"24px"}}>
       <header style={{marginBottom:24}}>
         <div style={{fontSize:12,fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",opacity:.6}}>Medidor de Anel 2.0</div>
-        <h1 style={{margin:"6px 0 8px",fontSize:32}}>Teste limpo mm → aro</h1>
+        <h1 style={{margin:"6px 0 8px",fontSize:32}}>Laboratorio limpo V2</h1>
         <p style={{margin:0,opacity:.72,lineHeight:1.5}}>
-          Esta tela nao usa a curva antiga, MAB, offsets historicos ou regras aprendidas.
-          Ela recebe apenas a largura do dedo em milimetros e consulta a regua fisica da V2.
+          Camera e cartao medem apenas milimetros. Depois, uma funcao separada converte mm em aro pela tabela fisica.
         </p>
       </header>
 
+      <section style={{border:"1px solid #ddd",borderRadius:16,padding:20,marginBottom:20}}>
+        <h2 style={{marginTop:0,fontSize:22}}>1. Camera + calibracao do cartao</h2>
+
+        {!photo && (
+          <>
+            <div style={{position:"relative",aspectRatio:"3 / 4",maxHeight:620,background:"#111",borderRadius:14,overflow:"hidden"}}>
+              <video ref={camera.videoRef} playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}} />
+              {camera.cameraOpening && <OverlayText>Abrindo camera...</OverlayText>}
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:12}}>
+              <button onClick={()=>void camera.startCameraStream()} style={buttonStyle}>Abrir camera</button>
+              <button onClick={()=>void capturePhoto()} style={buttonStyle}>Tirar foto</button>
+              {camera.torchSupported && <button onClick={()=>void camera.toggleTorch()} style={buttonStyle}>{camera.torchOn?"Desligar flash":"Ligar flash"}</button>}
+            </div>
+          </>
+        )}
+
+        {photo && (
+          <>
+            <div style={{position:"relative",width:"100%",overflow:"hidden",borderRadius:14,background:"#111"}}>
+              <img src={photo.src} alt="Captura V2" style={{display:"block",width:"100%",height:"auto"}} />
+              <Guide pct={cardLeftPct} color="#1976d2" label="cartao E" />
+              <Guide pct={cardRightPct} color="#1976d2" label="cartao D" />
+              <Guide pct={fingerLeftPct} color="#00a86b" label="dedo E" />
+              <Guide pct={fingerRightPct} color="#00a86b" label="dedo D" />
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginTop:14}}>
+              <Range label="Cartao esquerda" value={cardLeftPct} onChange={setCardLeftPct} />
+              <Range label="Cartao direita" value={cardRightPct} onChange={setCardRightPct} />
+              <Range label="Dedo esquerda" value={fingerLeftPct} onChange={setFingerLeftPct} />
+              <Range label="Dedo direita" value={fingerRightPct} onChange={setFingerRightPct} />
+            </div>
+
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:14}}>
+              <button onClick={calibrateCard} style={buttonStyle}>Calibrar cartao</button>
+              <button onClick={measureFinger} style={buttonStyle}>Medir dedo</button>
+              <button onClick={()=>{setPhoto(null);setMmPerPx(null);setStatus("Abra a camera e tire uma nova foto.");}} style={buttonStyle}>Nova foto</button>
+            </div>
+
+            <div style={{marginTop:14,padding:12,borderRadius:12,background:"#f7f7f7",fontSize:14,lineHeight:1.5}}>
+              <strong>Status:</strong> {status}<br/>
+              {cardConfidence!==null && <>Confianca da localizacao inicial: {cardConfidence.toFixed(0)}%<br/></>}
+              {mmPerPx!==null && <>Escala: {mmPerPx.toFixed(5)} mm/px</>}
+            </div>
+          </>
+        )}
+
+        {camera.error && <div style={{marginTop:12,padding:12,borderRadius:10,background:"#fff3f3"}}>{camera.error}</div>}
+      </section>
+
       <section style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(280px,.7fr)",gap:18,alignItems:"start"}}>
         <div style={{border:"1px solid #ddd",borderRadius:16,padding:20}}>
-          <label style={{display:"block",fontWeight:700,marginBottom:8}}>Largura medida do dedo (mm)</label>
+          <label style={{display:"block",fontWeight:700,marginBottom:8}}>2. Largura final do dedo (mm)</label>
           <input
             value={fingerMm}
             onChange={(event)=>setFingerMm(event.target.value)}
@@ -89,8 +240,38 @@ export default function AppV2() {
   );
 }
 
+const buttonStyle={
+  border:"1px solid #bbb",
+  background:"#fff",
+  borderRadius:10,
+  padding:"10px 14px",
+  fontWeight:700,
+  cursor:"pointer",
+} as const;
+
+function Range({label,value,onChange}:{label:string;value:number;onChange:(value:number)=>void}){
+  return (
+    <label style={{display:"block",fontSize:13,fontWeight:700}}>
+      {label}: {value.toFixed(1)}%
+      <input type="range" min={1} max={99} step={0.1} value={value} onChange={(event)=>onChange(Number(event.target.value))} style={{width:"100%"}} />
+    </label>
+  );
+}
+
+function Guide({pct,color,label}:{pct:number;color:string;label:string}){
+  return (
+    <div style={{position:"absolute",left:pct+"%",top:0,bottom:0,width:0,borderLeft:"2px solid "+color,pointerEvents:"none"}}>
+      <span style={{position:"absolute",top:8,left:4,background:"rgba(0,0,0,.65)",color:"#fff",fontSize:10,padding:"2px 4px",borderRadius:4,whiteSpace:"nowrap"}}>{label}</span>
+    </div>
+  );
+}
+
+function OverlayText({children}:{children:ReactNode}){
+  return <div style={{position:"absolute",inset:0,display:"grid",placeItems:"center",color:"#fff",background:"rgba(0,0,0,.25)",fontWeight:700}}>{children}</div>;
+}
+
 function Metric({label,value}:{label:string;value:string}){
   return <div style={{padding:14,borderRadius:12,background:"#f7f7f7"}}><div style={{fontSize:12,opacity:.6,marginBottom:4}}>{label}</div><div style={{fontSize:22,fontWeight:800}}>{value}</div></div>;
 }
-function Th({children}:{children:React.ReactNode}){ return <th style={{padding:"12px 14px",fontSize:13}}>{children}</th>; }
-function Td({children}:{children:React.ReactNode}){ return <td style={{padding:"11px 14px",fontSize:14}}>{children}</td>; }
+function Th({children}:{children:ReactNode}){ return <th style={{padding:"12px 14px",fontSize:13}}>{children}</th>; }
+function Td({children}:{children:ReactNode}){ return <td style={{padding:"11px 14px",fontSize:14}}>{children}</td>; }
