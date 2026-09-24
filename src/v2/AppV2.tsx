@@ -1897,7 +1897,7 @@ export default function AppV2() {
         ? "Coloque o cartão sobre o dedo e ajuste novamente as duas laterais e a base. A foto 2 define a escala final da medição."
         : guidedStep === 3
           ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia aproximada. O sistema faz 50 refinamentos automáticos perto dessas linhas e calcula pela região mais larga estável."
-          : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
+          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.";
 
   return (
     <main className="app">
@@ -2260,6 +2260,7 @@ export default function AppV2() {
             )}
             {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
+                <span>JUSTO: {clamp(result.ringSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
                 <strong>{result.ringSize}</strong>
                 <small>Conforto: {clamp(result.ringSize + 1, 1, 40)} · recomendado com folga</small>
@@ -2342,9 +2343,10 @@ export default function AppV2() {
 
           {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
+              <span><strong>Número justo: {clamp(result.ringSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {result.ringSize}</strong>
               <span><strong>Número de conforto: {clamp(result.ringSize + 1, 1, 40)}</strong></span>
-              <small>Exato = encaixe mais justo · Conforto = uma folga para passar pela junta.</small>
+              <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
             </div>
           )}
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
