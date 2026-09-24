@@ -117,6 +117,7 @@ export default function AppV2() {
   const [rightMagnetConfidence, setRightMagnetConfidence] = useState(0);
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
+  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number}|null>(null);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const [fingerLines, setFingerLines] = useState<Record<FingerSide, Line>>({
@@ -884,7 +885,9 @@ export default function AppV2() {
         setLeftFingerTilt(0);
         setLeftManualRefined(false);
       }
-      setLeftLine(Math.min(x, rightLine - 3));
+      const nextLeft=Math.min(x, rightLine - 3);
+      setLeftLine(nextLeft);
+      setFingerLoupe({side:"left",imageX:clamp(imageX,0,100),imageY:clamp(imageY,0,100)});
     }
     if (target === "right") {
       if (fingerRefineDragRef.current !== "right") {
@@ -893,7 +896,9 @@ export default function AppV2() {
         setRightFingerTilt(0);
         setRightManualRefined(false);
       }
-      setRightLine(Math.max(x, leftLine + 3));
+      const nextRight=Math.max(x, leftLine + 3);
+      setRightLine(nextRight);
+      setFingerLoupe({side:"right",imageX:clamp(imageX,0,100),imageY:clamp(imageY,0,100)});
     }
     if (target === "height") {
       setLeftLocked(false);
@@ -1332,6 +1337,7 @@ export default function AppV2() {
     fingerLineDragStartRef.current=null;
     cardLineDragStartRef.current=null;
     cardCornerDragRef.current=null;
+    setFingerLoupe(null);
   };
 
   const fingerBandSamplesPx = () => {
@@ -2005,7 +2011,7 @@ export default function AppV2() {
             onPointerDown={startPan}
             onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
             onPointerUp={finishDrag}
-            onPointerCancel={() => { draggingRef.current = null; }}
+            onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
             {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode ? (
@@ -2080,6 +2086,61 @@ export default function AppV2() {
             ) : null}
             {phase === "finger" && pixelsPerMm && (
               <>
+                {fingerLoupe && photo && (
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position:"absolute",
+                      left:fingerLoupe.side==="left" ? "72%" : "28%",
+                      top:"18%",
+                      width:"132px",
+                      height:"132px",
+                      transform:"translate(-50%,-50%)",
+                      borderRadius:"50%",
+                      overflow:"hidden",
+                      border:"3px solid #52e0a3",
+                      boxShadow:"0 8px 28px rgba(0,0,0,.55)",
+                      backgroundImage:`url("${photo}")`,
+                      backgroundRepeat:"no-repeat",
+                      backgroundSize:"600% 600%",
+                      backgroundPosition:`${fingerLoupe.imageX}% ${fingerLoupe.imageY}%`,
+                      zIndex:12,
+                      pointerEvents:"none",
+                    }}
+                  >
+                    <span style={{
+                      position:"absolute",
+                      left:"50%",
+                      top:0,
+                      bottom:0,
+                      width:"1px",
+                      background:"#ffd86b",
+                      transform:"translateX(-50%)",
+                    }} />
+                    <span style={{
+                      position:"absolute",
+                      top:"50%",
+                      left:0,
+                      right:0,
+                      height:"1px",
+                      background:"#ffd86b",
+                      transform:"translateY(-50%)",
+                    }} />
+                    <span style={{
+                      position:"absolute",
+                      left:"50%",
+                      bottom:"8px",
+                      transform:"translateX(-50%)",
+                      padding:"3px 7px",
+                      borderRadius:"999px",
+                      background:"rgba(0,0,0,.72)",
+                      color:"#fff",
+                      fontSize:"10px",
+                      fontWeight:700,
+                      whiteSpace:"nowrap",
+                    }}>LUPA 6×</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   className={`finger-full-line left${leftLocked ? " locked" : ""}`}
@@ -2255,7 +2316,7 @@ export default function AppV2() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Arraste manualmente as duas linhas verdes até encostarem por fora nas duas bordas do dedo. As linhas atravessam a imagem inteira para você conferir também o alinhamento sobre o cartão.</span>
+              <span>Arraste manualmente as duas linhas verdes até encostarem por fora nas duas bordas do dedo. Durante o arraste, a lupa 6× mostra exatamente o ponto de contato para facilitar o ajuste fino.</span>
             </div>
           )}
 
