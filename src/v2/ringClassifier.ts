@@ -17,33 +17,33 @@ export type RingClassification = {
   upperBoundaryMm: number;
 };
 
-// Curva manual validada no laboratorio interno em 23/09/2026.
-// Estes valores representam a largura medida do dedo pela V2, nao o
-// diametro interno fisico do anel.
-//
-// Pontos reais preservados:
-// 17=19.09, 21=20.18, 25=22.22, 29=22.92, 33=25.28.
-//
-// Os pontos intermediarios foram ajustados manualmente para formar a curva
-// de classificacao que sera testada agora no sistema.
+// Curva-base desenhada no laboratorio interno em 23/09/2026.
+// Em 24/09/2026 o metodo de medicao passou a usar calibracao de 4 pontos.
+// Para manter o desenho relativo da curva antiga, toda a curva foi
+// transladada -0,440 mm e ancorada no novo aro 29 = 22,480 mm.
+// Nenhuma distancia relativa entre os aros foi alterada.
 export const MANUAL_FINGER_CURVE: Record<number, number> = {
-  17: 19.090,
-  18: 19.376,
-  19: 19.634,
-  20: 19.879,
-  21: 20.180,
-  22: 20.690,
-  23: 21.159,
-  24: 21.677,
-  25: 22.220,
-  26: 22.453,
-  27: 22.611,
-  28: 22.769,
-  29: 22.920,
-  30: 23.445,
-  31: 24.035,
-  32: 24.596,
-  33: 25.280,
+  // Curva nova = mesma geometria relativa da curva antiga,
+  // deslocada -0,440 mm para ancorar o novo metodo em aro 29 = 22,480 mm.
+  // Assim preservamos exatamente o desenho/diferencas entre aros que ja
+  // estavam funcionando, sem inventar uma nova progressao.
+  17: 18.650,
+  18: 18.936,
+  19: 19.194,
+  20: 19.439,
+  21: 19.740,
+  22: 20.250,
+  23: 20.719,
+  24: 21.237,
+  25: 21.780,
+  26: 22.013,
+  27: 22.171,
+  28: 22.329,
+  29: 22.480,
+  30: 23.005,
+  31: 23.595,
+  32: 24.156,
+  33: 24.840,
 };
 
 // Mantemos compatibilidade abaixo do aro 17 extrapolando para tras apenas
