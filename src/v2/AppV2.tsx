@@ -1384,17 +1384,17 @@ export default function AppV2() {
       return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
     };
 
-    const seedRadius=Math.max(7,Math.round(16/Math.max(1,zoom)));
-    const trackRadius=Math.max(4,Math.round(7/Math.max(1,zoom)));
+    // Hibrido: busca curta em torno das linhas manuais. O algoritmo nao pode
+    // sair procurando outra textura longe da borda indicada pelo usuario.
+    const seedRadius=Math.max(6,Math.round(14/Math.max(1,zoom)));
+    const trackRadius=Math.max(5,Math.round(10/Math.max(1,zoom)));
 
-    // Mantemos 50 cortes para ganhar resolucao, mas removemos o alcance
-    // longitudinal extra. A varredura volta para uma faixa de +/-12% ao redor
-    // da altura escolhida, evitando pegar regioes distantes que inflaram a medida.
-    // As linhas manuais servem apenas para encontrar a semente; depois o contorno
-    // e rastreado para cima e para baixo dentro desta faixa controlada.
+    // 50 cortes centrados exatamente na linha amarela que simula a altura do anel.
+    // As linhas verdes sao o gabarito; cada corte apenas refina alguns pixels
+    // para encontrar a borda real do dedo.
     const rawYPercents=Array.from({length:50},(_,index)=>{
-      const off=-12+(index*(24/49));
-      return clamp(measureY+off,6,94);
+      const off=-10+(index*(20/49));
+      return clamp(ringGuideY+off,6,94);
     });
     const yPercents=rawYPercents.filter((value,index,array)=>
       index===0 || Math.abs(value-array[index-1])>0.02
@@ -1502,10 +1502,10 @@ export default function AppV2() {
       };
     };
 
-    // Encontra uma semente perto da altura escolhida pelo usuario. A partir
-    // daqui as linhas manuais deixam de participar do rastreamento.
+    // Encontra a semente perto da linha amarela. As linhas manuais continuam
+    // limitando a busca durante toda a varredura.
     const centerIndex=yPercents.reduce((bestIndex,value,index)=>
-      Math.abs(value-measureY)<Math.abs(yPercents[bestIndex]-measureY)?index:bestIndex
+      Math.abs(value-ringGuideY)<Math.abs(yPercents[bestIndex]-ringGuideY)?index:bestIndex
     ,0);
 
     let seedIndex=-1;
@@ -1518,8 +1518,8 @@ export default function AppV2() {
 
     for(const index of seedOrder){
       const yPercent=yPercents[index];
-      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
-      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
+      const leftGuide=toImageX(leftLine);
+      const rightGuide=toImageX(rightLine);
       const candidate=sampleAt(yPercent,leftGuide,rightGuide,null,null,seedRadius);
       if(candidate){
         seedIndex=index;
@@ -1539,26 +1539,29 @@ export default function AppV2() {
       for(let index=seedIndex+step;index>=0&&index<yPercents.length;index+=step){
         const yPercent=yPercents[index];
 
-        // Busca curta centrada SOMENTE no ultimo contorno encontrado.
+        // Cada corte volta a usar as linhas manuais como centro de busca.
+        // A borda anterior entra apenas como continuidade, impedindo saltos.
+        const manualLeft=toImageX(leftLine);
+        const manualRight=toImageX(rightLine);
         let pair=sampleAt(
           yPercent,
-          previousLeft,
-          previousRight,
+          manualLeft,
+          manualRight,
           previousLeft,
           previousRight,
           trackRadius,
         );
 
-        // Uma falha curta pode ser reflexo/ruga. Tentamos uma unica vez com
-        // raio um pouco maior, ainda centrado na borda anterior.
+        // Uma unica segunda tentativa um pouco mais larga, ainda presa ao
+        // gabarito manual. Nunca procura livremente pelo dedo inteiro.
         if(!pair){
           pair=sampleAt(
             yPercent,
+            manualLeft,
+            manualRight,
             previousLeft,
             previousRight,
-            previousLeft,
-            previousRight,
-            Math.max(trackRadius+2,Math.round(trackRadius*1.6)),
+            Math.max(trackRadius+2,Math.round(trackRadius*1.5)),
           );
         }
 
@@ -1741,37 +1744,28 @@ export default function AppV2() {
 
   const liveWidthMm = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
-    const source=photoPixelsRef.current;
-    const stage=measureRef.current;
-    if(!source||!stage) return null;
 
-    const rect=stage.getBoundingClientRect();
-    const toImageX=(percent:number)=>(
-      (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
-    );
-    const toImageY=(percent:number)=>(
-      (((percent/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height
-    );
+    const samples=fingerBandSamplesPx();
+    if(!samples || samples.length<35) return null;
 
-    const imageY=toImageY(ringGuideY);
-    const leftPoint={x:toImageX(leftLine),y:imageY};
-    const rightPoint={x:toImageX(rightLine),y:imageY};
+    const widthsMm=samples
+      .map((sample)=>{
+        if(measurementCardHomography){
+          try{
+            const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
+            const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
+            return Math.hypot(right.x-left.x,right.y-left.y);
+          }catch{
+            return NaN;
+          }
+        }
+        return sample.width/pixelsPerMm;
+      })
+      .filter(v=>Number.isFinite(v)&&v>0&&v<45);
 
-    if(measurementCardHomography){
-      try{
-        const left=projectPoint(measurementCardHomography,leftPoint);
-        const right=projectPoint(measurementCardHomography,rightPoint);
-        const widthMm=Math.hypot(right.x-left.x,right.y-left.y);
-        return Number.isFinite(widthMm)&&widthMm>0&&widthMm<45 ? widthMm : null;
-      }catch{
-        return null;
-      }
-    }
-
-    const widthPx=Math.abs(rightPoint.x-leftPoint.x);
-    const widthMm=widthPx/pixelsPerMm;
-    return Number.isFinite(widthMm)&&widthMm>0&&widthMm<45 ? widthMm : null;
-  },[pixelsPerMm,leftLine,rightLine,measureY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
+    const stable=selectWidestStableRun(widthsMm);
+    return stable.used;
+  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1864,34 +1858,60 @@ export default function AppV2() {
     return 1/pixelsPerMm;
   })();
 
-  const fingerMagnetSamples = null;
+  const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
 
   const measurementAudit = (() => {
-    if(liveWidthMm===null) return null;
-    const source=photoPixelsRef.current;
-    const stage=measureRef.current;
-    if(!source||!stage) return null;
-    const rect=stage.getBoundingClientRect();
-    const toImageX=(percent:number)=>(
-      (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
-    );
-    const usedWidthPx=Math.abs(toImageX(rightLine)-toImageX(leftLine));
+    if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
+
+    const rawWidthsPx=fingerMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite);
+    if(!rawWidthsPx.length) return null;
+
+    const widestRun=selectWidestStableRun(rawWidthsPx);
+    if(widestRun.used===null) return null;
+
+    const physicalWidthsMm=fingerMagnetSamples.map((sample)=>{
+      if(measurementCardHomography){
+        try{
+          const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
+          const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
+          return Math.hypot(right.x-left.x,right.y-left.y);
+        }catch{
+          return NaN;
+        }
+      }
+      return pixelsPerMm>0 ? sample.width/pixelsPerMm : NaN;
+    }).filter(Number.isFinite);
+
+    const widestPhysical=selectWidestStableRun(physicalWidthsMm);
+    const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
+
     return {
-      rawWidthsPx:[usedWidthPx],
-      usedWidthPx,
-      cardScaleMmPerPx:pixelsPerMm&&pixelsPerMm>0?1/pixelsPerMm:null,
-      rawCardMm:liveWidthMm,
+      rawWidthsPx,
+      usedWidthPx:widestRun.used,
+      cardScaleMmPerPx:pixelsPerMm>0?1/pixelsPerMm:null,
+      rawCardMm:widestPhysical.used,
       normalizedMm:liveWidthMm,
       correctionPercent:0,
-      spreadPx:0,
-      spreadPercent:0,
-      selectedUpperWidthsPx:[usedWidthPx],
-      selectedRunStart:1,
-      fingerAxisAngleDeg:0,
+      spreadPx,
+      spreadPercent:widestRun.used>0?spreadPx/widestRun.used*100:0,
+      selectedUpperWidthsPx:widestRun.selected,
+      selectedRunStart:widestRun.startIndex+1,
+      fingerAxisAngleDeg:fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
 
-  const fourMagnetWidthsMm:number[] = [];
+  const fourMagnetWidthsMm = fingerMagnetSamples?.map((sample)=>{
+    if(measurementCardHomography){
+      try{
+        const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
+        const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
+        return Number(Math.hypot(right.x-left.x,right.y-left.y).toFixed(2));
+      }catch{
+        return NaN;
+      }
+    }
+    return pixelsPerMm>0 ? Number((sample.width/pixelsPerMm).toFixed(2)) : NaN;
+  }).filter(Number.isFinite) ?? [];
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
 
@@ -1914,7 +1934,7 @@ export default function AppV2() {
       : guidedStep === 2
         ? "Coloque o cartão sobre o dedo e ajuste novamente os quatro cantos. O sistema normaliza escala, rotação e perspectiva antes de medir."
         : guidedStep === 3
-          ? "Posicione primeiro a linha amarela na altura em que o anel ficará. Depois ajuste as duas linhas verdes nas bordas externas do dedo exatamente nessa altura."
+          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia aproximada. O sistema faz 50 refinamentos automáticos perto dessas linhas e calcula pela região mais larga estável."
           : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
 
   return (
@@ -2153,6 +2173,42 @@ export default function AppV2() {
                     }}>BORDA DA LINHA · 6×</span>
                   </div>
                 )}
+                {fingerMagnetSamples && (
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:5}}
+                  >
+                    {fingerMagnetSamples.map((sample,index)=>(
+                      <line
+                        key={`hybrid-cut-${index}`}
+                        x1={sample.leftPercent}
+                        y1={sample.yPercent}
+                        x2={sample.rightPercent}
+                        y2={sample.rightYPercent}
+                        stroke="#52e0a3"
+                        strokeWidth="0.34"
+                        opacity="0.5"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
+                    <polyline
+                      points={fingerMagnetSamples.map((sample)=>`${sample.leftPercent},${sample.yPercent}`).join(" ")}
+                      fill="none"
+                      stroke="#52e0a3"
+                      strokeWidth="0.48"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <polyline
+                      points={fingerMagnetSamples.map((sample)=>`${sample.rightPercent},${sample.rightYPercent}`).join(" ")}
+                      fill="none"
+                      stroke="#52e0a3"
+                      strokeWidth="0.48"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                )}
                 <button
                   type="button"
                   className="ring-height-guide"
@@ -2351,8 +2407,12 @@ export default function AppV2() {
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
-                  <span>Modo: 2 linhas manuais de ponta a ponta · sem ímãs</span>
-                  <span>Distância manual: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
+                  <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
+                  <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
+                  <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
+                  <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
+                  <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
                   {measurementAudit.rawCardMm !== null && <span>Medida bruta foto 2: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
                   <span>Correção extra entre fotos: desativada</span>
@@ -2372,7 +2432,7 @@ export default function AppV2() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Primeiro posicione a linha amarela horizontal onde o anel vai ficar. Depois arraste as duas linhas verdes até as bordas externas do dedo nessa mesma altura. A lupa mostra exatamente o cruzamento da linha verde com a altura do anel.</span>
+              <span>Posicione a linha amarela onde o anel vai ficar e aproxime as duas linhas verdes das bordas. Depois, 50 cortes automáticos refinam os pixels exatos do contorno sem sair da região indicada por você.</span>
             </div>
           )}
 
