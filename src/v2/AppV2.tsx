@@ -106,6 +106,7 @@ export default function AppV2() {
   const [leftLine, setLeftLine] = useState(25);
   const [rightLine, setRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(60);
+  const [ringGuideY, setRingGuideY] = useState(60);
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -492,6 +493,7 @@ export default function AppV2() {
     setRightLine(62);
     const nextMeasureY=clamp(baseBottom+17,42,76);
     setMeasureY(nextMeasureY);
+    setRingGuideY(nextMeasureY);
     setFingerLines({
       left:{a:{x:38,y:clamp(nextMeasureY-16,4,96)},b:{x:38,y:clamp(nextMeasureY+16,4,96)}},
       right:{a:{x:62,y:clamp(nextMeasureY-16,4,96)},b:{x:62,y:clamp(nextMeasureY+16,4,96)}},
@@ -887,7 +889,11 @@ export default function AppV2() {
       }
       const nextLeft=Math.min(x, rightLine - 3);
       setLeftLine(nextLeft);
-      setFingerLoupe({side:"left",imageX:clamp(imageX,0,100),imageY:clamp(imageY,0,100)});
+      const lineScreenX=nextLeft/100*rect.width;
+      const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+      const guideScreenY=ringGuideY/100*rect.height;
+      const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
     }
     if (target === "right") {
       if (fingerRefineDragRef.current !== "right") {
@@ -898,7 +904,11 @@ export default function AppV2() {
       }
       const nextRight=Math.max(x, leftLine + 3);
       setRightLine(nextRight);
-      setFingerLoupe({side:"right",imageX:clamp(imageX,0,100),imageY:clamp(imageY,0,100)});
+      const lineScreenX=nextRight/100*rect.width;
+      const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+      const guideScreenY=ringGuideY/100*rect.height;
+      const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
     }
     if (target === "height") {
       setLeftLocked(false);
@@ -906,7 +916,9 @@ export default function AppV2() {
       setLeftManualRefined(false);
       setRightManualRefined(false);
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
-      setMeasureY(clamp(dragStartRef.current.right + dy, 35, 82));
+      const nextY=clamp(dragStartRef.current.right + dy, 30, 88);
+      setMeasureY(nextY);
+      setRingGuideY(nextY);
     }
     if (target === "pan") {
       setLeftLocked(false);
@@ -928,7 +940,7 @@ export default function AppV2() {
       target === "right" ? "right" :
       null;
     draggingRef.current = target;
-    dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? measureY : cardRight, bottom: cardBottom };
+    dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? ringGuideY : cardRight, bottom: cardBottom };
     event.currentTarget.setPointerCapture(event.pointerId);
     if (target !== "height") updateDrag(event.clientX, event.clientY);
   };
@@ -1741,7 +1753,7 @@ export default function AppV2() {
       (((percent/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height
     );
 
-    const imageY=toImageY(measureY);
+    const imageY=toImageY(ringGuideY);
     const leftPoint={x:toImageX(leftLine),y:imageY};
     const rightPoint={x:toImageX(rightLine),y:imageY};
 
@@ -1902,7 +1914,7 @@ export default function AppV2() {
       : guidedStep === 2
         ? "Coloque o cartão sobre o dedo e ajuste novamente os quatro cantos. O sistema normaliza escala, rotação e perspectiva antes de medir."
         : guidedStep === 3
-          ? "Arraste as duas linhas verticais até encostarem manualmente nas bordas externas da parte mais grossa do dedo. Não há ímã nem correção automática."
+          ? "Posicione primeiro a linha amarela na altura em que o anel ficará. Depois ajuste as duas linhas verdes nas bordas externas do dedo exatamente nessa altura."
           : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
 
   return (
@@ -2138,9 +2150,53 @@ export default function AppV2() {
                       fontSize:"10px",
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                    }}>LUPA 6×</span>
+                    }}>BORDA DA LINHA · 6×</span>
                   </div>
                 )}
+                <button
+                  type="button"
+                  className="ring-height-guide"
+                  style={{
+                    position:"absolute",
+                    left:0,
+                    top:`${ringGuideY}%`,
+                    width:"100%",
+                    height:"24px",
+                    transform:"translateY(-50%)",
+                    border:0,
+                    padding:0,
+                    background:"transparent",
+                    cursor:"ns-resize",
+                    zIndex:6,
+                    touchAction:"none",
+                  }}
+                  onPointerDown={(event)=>startDrag("height",event)}
+                  aria-label="Linha horizontal simulando a altura do anel"
+                >
+                  <span style={{
+                    position:"absolute",
+                    left:0,
+                    right:0,
+                    top:"50%",
+                    height:"3px",
+                    transform:"translateY(-50%)",
+                    background:"#ffd86b",
+                    boxShadow:"0 0 0 1px rgba(0,0,0,.35)",
+                  }} />
+                  <span style={{
+                    position:"absolute",
+                    right:"10px",
+                    top:"50%",
+                    transform:"translateY(-50%)",
+                    padding:"3px 7px",
+                    borderRadius:"999px",
+                    background:"rgba(0,0,0,.72)",
+                    color:"#ffd86b",
+                    fontSize:"10px",
+                    fontWeight:700,
+                    whiteSpace:"nowrap",
+                  }}>ALTURA DO ANEL</span>
+                </button>
                 <button
                   type="button"
                   className={`finger-full-line left${leftLocked ? " locked" : ""}`}
@@ -2316,7 +2372,7 @@ export default function AppV2() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Arraste manualmente as duas linhas verdes até encostarem por fora nas duas bordas do dedo. Durante o arraste, a lupa 6× mostra exatamente o ponto de contato para facilitar o ajuste fino.</span>
+              <span>Primeiro posicione a linha amarela horizontal onde o anel vai ficar. Depois arraste as duas linhas verdes até as bordas externas do dedo nessa mesma altura. A lupa mostra exatamente o cruzamento da linha verde com a altura do anel.</span>
             </div>
           )}
 
