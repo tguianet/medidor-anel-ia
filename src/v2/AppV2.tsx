@@ -1899,6 +1899,42 @@ export default function AppV2() {
           ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia aproximada. O sistema faz 50 refinamentos automáticos perto dessas linhas e calcula pela região mais larga estável."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.";
 
+  const historicalFingerTests = [
+    { ring:17, mm:19.09 },
+    { ring:21, mm:20.18 },
+    { ring:25, mm:22.22 },
+    { ring:29, mm:22.923 },
+    { ring:33, mm:25.28 },
+  ];
+
+  const todayFingerTests = [
+    { ring:24, mm:20.98 },
+    { ring:25, mm:21.74 },
+    { ring:29, mm:22.435 },
+  ];
+
+  const comparisonShared = todayFingerTests
+    .map((today)=>{
+      const old=historicalFingerTests.find((item)=>item.ring===today.ring);
+      return old ? {ring:today.ring, oldMm:old.mm, todayMm:today.mm, diff:today.mm-old.mm} : null;
+    })
+    .filter((item): item is {ring:number;oldMm:number;todayMm:number;diff:number}=>item!==null);
+
+  const comparisonAverageShift = comparisonShared.length
+    ? comparisonShared.reduce((sum,item)=>sum+item.diff,0)/comparisonShared.length
+    : 0;
+
+  const comparisonChart = (() => {
+    const width=340, height=220;
+    const left=38, right=12, top=14, bottom=30;
+    const minRing=17, maxRing=33;
+    const minMm=18.5, maxMm=25.7;
+    const x=(ring:number)=>left+(ring-minRing)/(maxRing-minRing)*(width-left-right);
+    const y=(mm:number)=>top+(maxMm-mm)/(maxMm-minMm)*(height-top-bottom);
+    const path=(items:{ring:number;mm:number}[])=>items.map((item)=>`${x(item.ring).toFixed(1)},${y(item.mm).toFixed(1)}`).join(" ");
+    return {width,height,left,right,top,bottom,minRing,maxRing,minMm,maxMm,x,y,path};
+  })();
+
   return (
     <main className="app">
       <header className="brand">
@@ -2375,6 +2411,100 @@ export default function AppV2() {
                   )}
                 </>
               )}
+            </div>
+          )}
+          {debugMode && phase === "finger" && (
+            <div className="analysis-result">
+              <strong>COMPARAÇÃO HISTÓRICA × HOJE</strong>
+              <span>Histórico antigo: 17=19,09 · 21=20,18 · 25=22,22 · 29=22,92 · 33=25,28 mm</span>
+              <span>Hoje (método congelado): 24=20,98 · 25=21,74 · 29=22,44 mm</span>
+              {comparisonShared.map((item)=>(
+                <span key={`cmp-${item.ring}`}>
+                  Aro {item.ring}: antigo {item.oldMm.toFixed(2)} mm · hoje {item.todayMm.toFixed(2)} mm · diferença {item.diff>=0?"+":""}{item.diff.toFixed(2)} mm
+                </span>
+              ))}
+              <span>Deslocamento médio nos aros comparáveis: {comparisonAverageShift>=0?"+":""}{comparisonAverageShift.toFixed(2)} mm</span>
+
+              <svg
+                viewBox={`0 0 ${comparisonChart.width} ${comparisonChart.height}`}
+                role="img"
+                aria-label="Gráfico comparando testes antigos e testes de hoje por aro"
+                style={{width:"100%",height:"auto",marginTop:"10px",overflow:"visible"}}
+              >
+                {[19,21,23,25].map((mm)=>(
+                  <g key={`grid-y-${mm}`}>
+                    <line
+                      x1={comparisonChart.left}
+                      y1={comparisonChart.y(mm)}
+                      x2={comparisonChart.width-comparisonChart.right}
+                      y2={comparisonChart.y(mm)}
+                      stroke="rgba(255,255,255,.14)"
+                      strokeWidth="1"
+                    />
+                    <text x="4" y={comparisonChart.y(mm)+4} fill="currentColor" fontSize="9">{mm} mm</text>
+                  </g>
+                ))}
+                {[17,21,25,29,33].map((ring)=>(
+                  <g key={`grid-x-${ring}`}>
+                    <line
+                      x1={comparisonChart.x(ring)}
+                      y1={comparisonChart.top}
+                      x2={comparisonChart.x(ring)}
+                      y2={comparisonChart.height-comparisonChart.bottom}
+                      stroke="rgba(255,255,255,.08)"
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={comparisonChart.x(ring)}
+                      y={comparisonChart.height-9}
+                      textAnchor="middle"
+                      fill="currentColor"
+                      fontSize="9"
+                    >{ring}</text>
+                  </g>
+                ))}
+
+                <polyline
+                  points={comparisonChart.path(historicalFingerTests)}
+                  fill="none"
+                  stroke="#d7b35f"
+                  strokeWidth="2.2"
+                />
+                {historicalFingerTests.map((item)=>(
+                  <circle key={`old-${item.ring}`} cx={comparisonChart.x(item.ring)} cy={comparisonChart.y(item.mm)} r="3.2" fill="#d7b35f" />
+                ))}
+
+                <polyline
+                  points={comparisonChart.path(todayFingerTests)}
+                  fill="none"
+                  stroke="#52e0a3"
+                  strokeWidth="2.2"
+                />
+                {todayFingerTests.map((item)=>(
+                  <circle key={`today-${item.ring}`} cx={comparisonChart.x(item.ring)} cy={comparisonChart.y(item.mm)} r="3.4" fill="#52e0a3" />
+                ))}
+
+                {result && Number.isFinite(result.ringSize) && Number.isFinite(result.widthMm) && (
+                  <g>
+                    <circle
+                      cx={comparisonChart.x(clamp(result.ringSize,17,33))}
+                      cy={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))}
+                      r="5.2"
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth="1.8"
+                    />
+                    <text
+                      x={comparisonChart.x(clamp(result.ringSize,17,33))}
+                      y={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))-8}
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="9"
+                    >agora</text>
+                  </g>
+                )}
+              </svg>
+              <span style={{fontSize:"0.85em",opacity:.85}}>Dourado = testes antigos · Verde = testes confirmados hoje · círculo branco = leitura atual</span>
             </div>
           )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
