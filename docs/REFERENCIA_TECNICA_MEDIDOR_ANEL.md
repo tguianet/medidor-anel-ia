@@ -292,3 +292,47 @@ Para recuperar o projeto sem depender do histórico do chat:
 - fluxo/calibração/snaps: conferir `src/App.tsx`.
 
 Quando uma conversa nova começar, este arquivo deve ser lido antes de alterar matemática, tabela ou calibração.
+
+
+## 12. Teste validado — aro 33 (24/09/2026)
+
+Teste confirmado pelo usuário como dedo real de aro exato 33.
+
+Dados do diagnóstico privado:
+
+- resultado: justo 32 / exato 33 / conforto 34;
+- medida final: 25,26 mm;
+- modo: híbrido, linhas manuais + 50 refinamentos automáticos;
+- cortes válidos: 47;
+- região mais larga estável: pontos 6–12;
+- platô usado: 197,3 / 197,4 / 197,4 / 197,4 / 197,5 / 197,2 / 197,3 px;
+- largura usada: 197,35 px;
+- variação: 4,53 px = 2,29%;
+- escala: 0,1280 mm/px;
+- medida bruta Foto 2: 25,26 mm;
+- correção extra entre fotos: desativada;
+- medida usada pela V2: 25,26 mm;
+- cartão Foto 1: 693,2 px;
+- cartão Foto 2: 668,8 px;
+- diferença Foto 1 -> Foto 2: -3,52%;
+- a diferença entre fotos ficou apenas como diagnóstico.
+
+Interpretação:
+- o sistema acertou o aro 33 mesmo com diferença geométrica de 3,52% entre as duas fotos;
+- o conjunto de cortes formou um platô visualmente estável;
+- este teste é uma referência positiva de repetibilidade da geometria atual;
+- ele NÃO deve ser usado sozinho para reposicionar o centro do aro 33, porque a classificação atual considera todo valor a partir de 22,35 mm como aro 33. Ou seja, 25,26 mm confirma a classificação superior, mas não define com precisão a fronteira 32/33.
+
+### Situação da curva após este teste
+
+A curva operacional atual continua ancorada principalmente na régua física derivada do aro 29 e nas diferenças medidas no paquímetro.
+
+Fronteiras vigentes no trecho alto:
+- aro 28: 20,65–21,00 mm
+- aro 29: 21,00–21,375 mm
+- aro 30: 21,375–21,725 mm
+- aro 31: 21,725–22,00 mm
+- aro 32: 22,00–22,35 mm
+- aro 33: >= 22,35 mm
+
+O teste de 25,26 mm confirma que o sistema permanece coerente no extremo superior, mas a estabilidade fina da curva deve continuar sendo validada com medições próximas das fronteiras entre aros consecutivos, principalmente 31/32 e 32/33.
