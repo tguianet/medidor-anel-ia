@@ -2158,9 +2158,9 @@ export default function AppV2() {
                   className="ring-height-guide"
                   style={{
                     position:"absolute",
-                    left:0,
+                    left:`${Math.min(leftLine,rightLine)}%`,
                     top:`${ringGuideY}%`,
-                    width:"100%",
+                    width:`${Math.abs(rightLine-leftLine)}%`,
                     height:"24px",
                     transform:"translateY(-50%)",
                     border:0,
@@ -2185,9 +2185,9 @@ export default function AppV2() {
                   }} />
                   <span style={{
                     position:"absolute",
-                    right:"10px",
+                    left:"50%",
                     top:"50%",
-                    transform:"translateY(-50%)",
+                    transform:"translate(-50%,-50%)",
                     padding:"3px 7px",
                     borderRadius:"999px",
                     background:"rgba(0,0,0,.72)",
