@@ -23,22 +23,33 @@ export type RingClassification = {
 // transladada -0,440 mm e ancorada no novo aro 29 = 22,480 mm.
 // Nenhuma distancia relativa entre os aros foi alterada.
 export const MANUAL_FINGER_CURVE: Record<number, number> = {
-  // Curva nova = mesma geometria relativa da curva antiga,
-  // deslocada -0,440 mm para ancorar o novo metodo em aro 29 = 22,480 mm.
-  // Assim preservamos exatamente o desenho/diferencas entre aros que ja
-  // estavam funcionando, sem inventar uma nova progressao.
-  17: 18.650,
-  18: 18.936,
-  19: 19.194,
-  20: 19.439,
-  21: 19.740,
-  22: 20.250,
-  23: 20.719,
-  24: 21.237,
-  25: 21.780,
-  26: 22.013,
-  27: 22.171,
-  28: 22.329,
+  // Curva experimental 24/09/2026:
+  // corrige mais os aros baixos e reduz gradualmente a correcao ate zerar
+  // na faixa alta, preservando os pontos que ja vinham acertando.
+  //
+  // Novos pontos reais que motivaram o ajuste:
+  // 18,11 mm -> aro 17
+  // 19,98 mm -> aro 22
+  //
+  // A partir do aro 29 os centros permanecem congelados.
+  11: 16.060,
+  12: 16.460,
+  13: 16.810,
+  14: 17.110,
+  15: 17.410,
+  16: 17.810,
+  17: 18.110,
+  18: 18.490,
+  19: 18.850,
+  20: 19.190,
+  21: 19.590,
+  22: 20.200,
+  23: 20.680,
+  24: 21.200,
+  25: 21.750,
+  26: 21.990,
+  27: 22.160,
+  28: 22.320,
   29: 22.480,
   30: 23.005,
   31: 23.595,
@@ -70,9 +81,12 @@ export const buildFingerReferenceCurve = (): FingerRingReference[] => {
     targets.set(Number(sizeText), mm);
   }
 
-  // Extrapolacao somente para 11-16 para nao quebrar a compatibilidade
-  // existente da V2. A curva experimental em teste comeca no aro 17.
-  for (let size = 16; size >= sizes[0]; size--) {
+  // A curva experimental agora possui centros explicitos de 11 a 33.
+  // Mantemos este fallback apenas para eventual compatibilidade com tabelas
+  // fisicas que incluam aros abaixo do menor centro definido.
+  const explicitSizes=[...targets.keys()].sort((a,b)=>a-b);
+  const firstExplicit=explicitSizes[0];
+  for (let size = firstExplicit - 1; size >= sizes[0]; size--) {
     const next = targets.get(size + 1);
     if (next === undefined) throw new Error("missing-next-target");
     targets.set(size, next - physicalGrowthBetween(size, size + 1));
