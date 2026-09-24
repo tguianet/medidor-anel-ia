@@ -333,29 +333,39 @@ export default function AppV2() {
 
       try {
         const calibration = await calibratePhoto(capturedPhoto);
-        const left = clamp(calibration.cardBox.x * 100, 3, 92);
-        const right = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 8, 97);
-        const top = clamp(calibration.cardBox.y * 100, 3, 90);
-        const bottom = clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 8, 97);
-        setCardQuad([
-          {x:left,y:top},
-          {x:right,y:top},
-          {x:right,y:bottom},
-          {x:left,y:bottom},
-        ]);
+        const detectedLeft = clamp(calibration.cardBox.x * 100, 2, 94);
+        const detectedRight = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 6, 98);
+        const finalLeft = Math.min(detectedLeft, detectedRight - 5);
+        const finalRight = Math.max(detectedRight, detectedLeft + 5);
+        const finalBottom = clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 10, 88);
+        const top = clamp(calibration.cardBox.y * 100, 3, finalBottom - 5);
+        const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
+
+        setCardLeft(finalLeft);
+        setCardRight(finalRight);
+        setCardBottom(finalBottom);
+        setCardLines({
+          top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
+          right:{a:{x:finalRight,y:clamp(top-padY,1,99)},b:{x:finalRight,y:clamp(finalBottom+padY,1,99)}},
+          bottom:{a:{x:finalLeft,y:finalBottom},b:{x:finalRight,y:finalBottom}},
+          left:{a:{x:finalLeft,y:clamp(top-padY,1,99)},b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)}},
+        });
       } catch {
-        setCardQuad([
-          {x:15,y:28},
-          {x:85,y:28},
-          {x:85,y:72},
-          {x:15,y:72},
-        ]);
+        setCardLeft(15);
+        setCardRight(85);
+        setCardBottom(58);
+        setCardLines({
+          top:{a:{x:15,y:28},b:{x:85,y:28}},
+          right:{a:{x:85,y:22},b:{x:85,y:64}},
+          bottom:{a:{x:15,y:58},b:{x:85,y:58}},
+          left:{a:{x:15,y:22},b:{x:15,y:64}},
+        });
       }
 
       camera.setError(
         fingerCardCalibrationStep === "reference"
-          ? "Foto 1: ajuste os 4 pontos exatamente nos quatro cantos do cartão."
-          : "Foto 2: ajuste novamente os 4 pontos nos cantos do cartão sobre o dedo."
+          ? "Foto 1: ajuste as 2 laterais e a base do cartão."
+          : "Foto 2: ajuste novamente as 2 laterais e a base do cartão sobre o dedo."
       );
       return;
     }
@@ -579,29 +589,18 @@ export default function AppV2() {
       a:{x:line.a.x/100*source.width,y:line.a.y/100*source.height},
       b:{x:line.b.x/100*source.width,y:line.b.y/100*source.height},
     });
-    // No fluxo de duas fotos, a escala usa exclusivamente as laterais que
-    // realmente encaixaram no snap. Arrastar a guia visual para alem da
-    // borda nao pode alterar a medida.
-    const requiresLockedSideSnaps =
+
+    const useSnap =
       measurementMode==="finger" &&
       !diameterPhotoTestMode &&
       fingerCardCalibrationStep!=="done";
-    const leftMeasureLine = requiresLockedSideSnaps ? cardSnapLines.left : cardLines.left;
-    const rightMeasureLine = requiresLockedSideSnaps ? cardSnapLines.right : cardLines.right;
-    if(!leftMeasureLine || !rightMeasureLine) throw new Error("snap-lateral");
 
-    // No fluxo de duas fotos a reta central e totalmente automatica:
-    // liga os centros geometricos das duas laterais que realmente deram snap.
-    // O comprimento manual de cardLines.bottom deixa de participar da escala.
-    const referenceLine = requiresLockedSideSnaps
-      ? automaticCardReferenceLine(leftMeasureLine, rightMeasureLine)
-      : cardLines.bottom;
-    const leftPx = requiresLockedSideSnaps
-      ? toPx(referenceLine).a
-      : lineIntersection(toPx(leftMeasureLine), toPx(referenceLine));
-    const rightPx = requiresLockedSideSnaps
-      ? toPx(referenceLine).b
-      : lineIntersection(toPx(rightMeasureLine), toPx(referenceLine));
+    const leftMeasureLine = useSnap ? (cardSnapLines.left ?? cardLines.left) : cardLines.left;
+    const rightMeasureLine = useSnap ? (cardSnapLines.right ?? cardLines.right) : cardLines.right;
+    const bottomMeasureLine = useSnap ? (cardSnapLines.bottom ?? cardLines.bottom) : cardLines.bottom;
+
+    const leftPx=lineIntersection(toPx(leftMeasureLine),toPx(bottomMeasureLine));
+    const rightPx=lineIntersection(toPx(rightMeasureLine),toPx(bottomMeasureLine));
     const lengthPx=Math.hypot(rightPx.x-leftPx.x,rightPx.y-leftPx.y);
     if(!Number.isFinite(lengthPx)||lengthPx<source.width*0.08) throw new Error("reta");
     return {leftPx,rightPx,lengthPx};
@@ -651,15 +650,14 @@ export default function AppV2() {
 
   const confirmReferenceCardLine = () => {
     try{
-      validateCardQuad(cardQuad);
-      const widthPx=quadAverageWidthPx(cardQuad);
-      setReferenceCardLengthPx(widthPx);
-      setReferenceCardQuad(cardQuad.map((p)=>({...p})) as [Point,Point,Point,Point]);
+      const segment=cardReferenceSegment();
+      setReferenceCardLengthPx(segment.lengthPx);
+      setReferenceCardQuad(null);
       setFingerCardCalibrationStep("measurement");
-      camera.setError("Calibração de 4 pontos salva. Agora fotografe o cartão sobre o dedo.");
+      camera.setError("Calibração de 3 linhas salva. Agora fotografe o cartão sobre o dedo.");
       void openCamera();
     }catch{
-      camera.setError("Ajuste os quatro pontos exatamente nos quatro cantos do cartão.");
+      camera.setError("Ajuste as duas laterais e a linha da base exatamente nas bordas do cartão.");
     }
   };
 
@@ -670,8 +668,8 @@ export default function AppV2() {
       return;
     }
     try{
-      const measurementQuadPx=validateCardQuad(cardQuad);
-      const widthPx=quadAverageWidthPx(cardQuad);
+      const segment=cardReferenceSegment();
+      const widthPx=segment.lengthPx;
       setMeasurementCardLengthPx(widthPx);
 
       if(referenceCardLengthPx!==null && referenceCardLengthPx>0){
@@ -680,25 +678,27 @@ export default function AppV2() {
         setPerspectiveMismatchPercent(null);
       }
 
-      const physicalQuad:[Point,Point,Point,Point]=[
-        {x:0,y:0},
-        {x:CARD_WIDTH_MM,y:0},
-        {x:CARD_WIDTH_MM,y:CARD_HEIGHT_MM},
-        {x:0,y:CARD_HEIGHT_MM},
-      ];
-      const homography=buildHomography(measurementQuadPx,physicalQuad);
-      setMeasurementCardHomography(homography);
-
-      const bottomMid={
-        x:(cardQuad[2].x+cardQuad[3].x)/2,
-        y:(cardQuad[2].y+cardQuad[3].y)/2,
-      };
+      // Volta ao metodo de 3 linhas: a escala vem diretamente da largura
+      // de 85,60 mm medida na linha da base da foto 2. Sem homografia.
+      setMeasurementCardHomography(null);
       const pxPerMm=widthPx/CARD_WIDTH_MM;
+
+      const leftPercent={x:segment.leftPx.x/source.width*100,y:segment.leftPx.y/source.height*100};
+      const rightPercent={x:segment.rightPx.x/source.width*100,y:segment.rightPx.y/source.height*100};
+      const bottomY=(leftPercent.y+rightPercent.y)/2;
+      const syntheticTopY=clamp(bottomY-28,2,96);
+      const quad:[Point,Point,Point,Point]=[
+        {x:leftPercent.x,y:syntheticTopY},
+        {x:rightPercent.x,y:syntheticTopY},
+        rightPercent,
+        leftPercent,
+      ];
+
       setFingerCardCalibrationStep("done");
-      setCalibrationConfidence(100);
-      activateFingerMeasurement(cardQuad[3].x,cardQuad[2].x,bottomMid.y,100,cardQuad,pxPerMm);
+      setCalibrationConfidence(96);
+      activateFingerMeasurement(leftPercent.x,rightPercent.x,bottomY,96,quad,pxPerMm);
     }catch{
-      camera.setError("Os quatro pontos precisam estar exatamente nos quatro cantos do cartão.");
+      camera.setError("Ajuste as duas laterais e a linha da base exatamente nas bordas do cartão.");
     }
   };
 
@@ -1273,24 +1273,7 @@ export default function AppV2() {
     setCardLines((current)=>({...current,[edge]:snapped}));
     // Guarda a borda magnetica separada da guia visual. O calculo do cartao
     // usa esta linha travada ate que um novo snap valido seja encontrado.
-    setCardSnapLines((current)=>{
-      const next={...current,[edge]:snapped};
-      if (
-        measurementMode==="finger" &&
-        !diameterPhotoTestMode &&
-        fingerCardCalibrationStep!=="done" &&
-        next.left &&
-        next.right
-      ) {
-        const autoLine=automaticCardReferenceLine(next.left,next.right);
-        // Assim que as duas laterais encaixam, a linha de 85,60 mm e
-        // reconstruida automaticamente e fica visualmente presa aos snaps.
-        setCardLines((lines)=>({...lines,bottom:autoLine}));
-        setCardLineLocked((locked)=>({...locked,bottom:true}));
-        setSelectedCardLine(null);
-      }
-      return next;
-    });
+    setCardSnapLines((current)=>({...current,[edge]:snapped}));
     setCardLineLocked((current)=>({...current,[edge]:true}));
   };
 
@@ -1320,28 +1303,7 @@ export default function AppV2() {
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match){
         const edge=match[1] as CardEdge;
-        if(measurementMode==="finger" && !diameterPhotoTestMode && fingerCardCalibrationStep!=="done"){
-          if(edge==="left" || edge==="right"){
-            // Laterais magnéticas: ao soltar, encaixam na borda real do cartão.
-            snapCardLine(edge);
-          }else if(edge==="bottom"){
-            // No fluxo de duas fotos a linha central nao e mais calibracao
-            // manual. Se as duas laterais ja deram snap, ela volta
-            // automaticamente para a geometria correta.
-            const leftSnap=cardSnapLines.left;
-            const rightSnap=cardSnapLines.right;
-            if(leftSnap && rightSnap){
-              const autoLine=automaticCardReferenceLine(leftSnap,rightSnap);
-              setCardLines((current)=>({...current,bottom:autoLine}));
-              setCardLineLocked((current)=>({...current,bottom:true}));
-              setSelectedCardLine(null);
-            }else{
-              setCardLineLocked((current)=>({...current,bottom:false}));
-            }
-          }
-        }else{
-          snapCardLine(edge);
-        }
+        snapCardLine(edge);
       }
     }
     draggingRef.current=null;
@@ -1930,9 +1892,9 @@ export default function AppV2() {
 
   const guideText =
     guidedStep === 1
-      ? "Ajuste os quatro pontos nos cantos do cartão. Eles definem o plano físico de 85,60 × 53,98 mm."
+      ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
       : guidedStep === 2
-        ? "Coloque o cartão sobre o dedo e ajuste novamente os quatro cantos. O sistema normaliza escala, rotação e perspectiva antes de medir."
+        ? "Coloque o cartão sobre o dedo e ajuste novamente as duas laterais e a base. A foto 2 define a escala final da medição."
         : guidedStep === 3
           ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia aproximada. O sistema faz 50 refinamentos automáticos perto dessas linhas e calcula pela região mais larga estável."
           : "Número exato = encaixa no dedo. Número de conforto = uma folga para passar pela junta e ficar mais confortável.";
@@ -2052,44 +2014,23 @@ export default function AppV2() {
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
-                aria-label="Quatro pontos de calibração do cartão"
+                aria-label="Três linhas de calibração do cartão"
               >
-                <polygon
-                  points={cardQuad.map((p)=>`${p.x},${p.y}`).join(" ")}
-                  fill="rgba(82,224,163,0.08)"
-                  stroke="#52e0a3"
-                  strokeWidth="0.55"
-                  vectorEffect="non-scaling-stroke"
-                />
-                {cardQuad.map((point,index)=><g key={`card-corner-${index}`}>
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r="5.2"
-                    fill="transparent"
-                    onPointerDown={(e)=>startCardCornerDrag(index,e)}
-                    style={{cursor:"move",pointerEvents:"all"}}
-                  />
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r="1.7"
-                    fill="#52e0a3"
-                    stroke="#10251d"
-                    strokeWidth="0.35"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <text
-                    x={point.x}
-                    y={point.y-2.8}
-                    textAnchor="middle"
-                    fill="#52e0a3"
-                    fontSize="2.3"
-                    fontWeight="700"
-                  >
-                    {index+1}
-                  </text>
-                </g>)}
+                {(["left","right","bottom"] as CardEdge[]).map((edge)=>{
+                  const line=cardLines[edge];
+                  const locked=cardLineLocked[edge];
+                  const selected=selectedCardLine===edge;
+                  return <g key={edge} className={`card-edge${locked?" locked":""}${selected?" selected":""}`}>
+                    <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                      onPointerDown={(e)=>startCardLineDrag(edge,null,e)} />
+                    <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    {(["a","b"] as const).map((point)=><g key={point}>
+                      <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="4.6"
+                        onPointerDown={(e)=>startCardLineDrag(edge,point,e)} />
+                      <circle className="card-line-handle" cx={line[point].x} cy={line[point].y} r="1.45" />
+                    </g>)}
+                  </g>;
+                })}
               </svg>
             ) : phase === "card" ? (
               <svg
@@ -2348,17 +2289,22 @@ export default function AppV2() {
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
-                {fingerCardCalibrationStep === "reference" ? "Salvar 4 pontos e ir para a foto 2" : "Normalizar cartão e medir o dedo"}
+                {fingerCardCalibrationStep === "reference" ? "Salvar 3 linhas e ir para a foto 2" : "Calibrar cartão e medir o dedo"}
               </button>
+              <div className="card-line-status">
+                {(["left","right","bottom"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
+                  {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
+                </span>)}
+              </div>
               <div className="card-base-status">
                 <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — calibração do cartão" : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>{fingerCardCalibrationStep === "reference"
-                  ? "Arraste os 4 pontos para os quatro cantos reais do cartão."
-                  : "Arraste os 4 pontos para os quatro cantos do cartão sobre o dedo. A perspectiva será normalizada antes da medição."}</span>
+                  ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
+                  : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo."}</span>
                 <small>{fingerCardCalibrationStep === "reference"
-                  ? "O cartão físico vale 85,60 × 53,98 mm. Os quatro cantos definem escala, rotação e perspectiva."
-                  : "Depois de confirmar, o dedo é medido no plano normalizado do cartão, não pela largura bruta em pixels."}</small>
-                <small>Quando os quatro pontos estiverem exatamente nos cantos, avance para a próxima etapa.</small>
+                  ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
+                  : "A escala final vem somente da largura de 85,60 mm medida na foto 2. A foto 1 fica como comparação de estabilidade."}</small>
+                <small>As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar.</small>
               </div>
             </>
           )}
