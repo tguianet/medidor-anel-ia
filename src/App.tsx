@@ -658,6 +658,12 @@ export default function App() {
   const startFingerLineDrag = (side:FingerSide, endpoint:"a"|"b"|null, event:React.PointerEvent) => {
     event.preventDefault();
     event.stopPropagation();
+
+    // A linha inteira tambem respeita o travamento. Isso evita que um toque
+    // posterior desloque uma borda que ja foi aceita.
+    if (side === "left" && leftLocked) return;
+    if (side === "right" && rightLocked) return;
+
     const stage=measureRef.current;
     if(!stage) return;
     const rect=stage.getBoundingClientRect();
@@ -825,7 +831,12 @@ export default function App() {
 
   const startDrag = (target: DragTarget, event: React.PointerEvent) => {
     event.stopPropagation();
-    // Pontos do dedo são 100% manuais; nunca há snap magnético.
+
+    // Depois que uma lateral do dedo foi confirmada, ela fica realmente
+    // travada. Para reposicionar, o usuario usa o botao Redefinir.
+    if (target === "left" && leftLocked) return;
+    if (target === "right" && rightLocked) return;
+
     fingerRefineDragRef.current =
       target === "left" ? "left" :
       target === "right" ? "right" :
@@ -2126,7 +2137,24 @@ export default function App() {
               <button onClick={() => changeZoom(zoom - 0.5)} disabled={zoom <= 1} aria-label="Diminuir zoom">−</button>
               <strong>{zoom.toFixed(1)}×</strong>
               <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= (phase === "card" ? 8 : 4)} aria-label="Aumentar zoom">+</button>
-              <button className="zoom-reset" onClick={() => { setZoom(1); setPanX(0); setPanY(0); }}>Redefinir</button>
+              <button
+                className="zoom-reset"
+                onClick={() => {
+                  setZoom(1);
+                  setPanX(0);
+                  setPanY(0);
+                  if (phase === "finger") {
+                    setLeftLocked(false);
+                    setRightLocked(false);
+                    setLeftMagnetConfidence(0);
+                    setRightMagnetConfidence(0);
+                    setLeftManualRefined(false);
+                    setRightManualRefined(false);
+                  }
+                }}
+              >
+                Redefinir
+              </button>
             </div>
           )}
 
