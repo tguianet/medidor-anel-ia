@@ -336,3 +336,36 @@ Fronteiras vigentes no trecho alto:
 - aro 33: >= 22,35 mm
 
 O teste de 25,26 mm confirma que o sistema permanece coerente no extremo superior, mas a estabilidade fina da curva deve continuar sendo validada com medições próximas das fronteiras entre aros consecutivos, principalmente 31/32 e 32/33.
+
+
+## 13. Teste validado com calibrador da Foto 2 — aro 24 (25/09/2026)
+
+Primeiro teste forte após adicionar o calibrador fantasma da Foto 1 na captura da Foto 2.
+
+Resultado confirmado:
+- número justo: 23;
+- número exato: 24;
+- número de conforto: 25.
+
+Diagnóstico:
+- medida final: 21,47 mm;
+- largura usada: 181,41 px;
+- escala: 0,1183 mm/px;
+- variação dos cortes: 2,85 px = 1,57%;
+- região mais larga estável: pontos 2–8;
+- platô usado: 181,5 / 181,6 / 181,3 / 181,3 / 181,4 / 181,4 / 181,5 px;
+- cartão Foto 1: 714,7 px;
+- cartão Foto 2: 723,4 px;
+- diferença Foto 1 -> Foto 2: 1,22%;
+- correção extra entre fotos: desativada;
+- medida usada pela V2: 21,47 mm.
+
+Interpretação:
+- a diferença entre as duas fotos caiu para 1,22%, muito abaixo dos casos problemáticos anteriores de 4,38% e 9,39%;
+- os 50 refinamentos formaram um platô muito estável;
+- o calibrador fantasma está ajudando a repetir melhor a escala/posição entre as duas fotos;
+- este teste deve ser tratado como referência forte do aro 24 no fluxo novo com calibrador ativo.
+
+Regra prática para próximos testes:
+- diferenças entre Foto 1 e Foto 2 próximas de 0–2% podem ser tratadas como capturas geometricamente fortes;
+- diferenças maiores continuam sendo registradas para análise antes de qualquer ajuste na curva.
