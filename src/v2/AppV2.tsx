@@ -148,6 +148,8 @@ export default function AppV2() {
     bottom:{a:{x:15,y:50},b:{x:85,y:50}},
   });
   const [referenceCardLengthPx, setReferenceCardLengthPx] = useState<number | null>(null);
+  const [referenceCardWidthPercent, setReferenceCardWidthPercent] = useState<number | null>(null);
+  const [referenceCardAngleDeg, setReferenceCardAngleDeg] = useState<number | null>(null);
   const [measurementCardLengthPx, setMeasurementCardLengthPx] = useState<number | null>(null);
   const [perspectiveMismatchPercent, setPerspectiveMismatchPercent] = useState<number | null>(null);
   const [referenceCardQuad, setReferenceCardQuad] = useState<[Point,Point,Point,Point] | null>(null);
@@ -211,7 +213,9 @@ export default function AppV2() {
       cardReady &&
       measurementMode === "finger" &&
       !diameterPhotoTestMode &&
-      fingerCardCalibrationStep !== "done";
+      // Foto 1 pode ser automatica. Na Foto 2 o usuario precisa casar o
+      // cartao com o calibrador fantasma salvo da Foto 1 antes de capturar.
+      fingerCardCalibrationStep === "reference";
 
     if (!shouldAutoCapture) {
       if (autoCaptureTimerRef.current !== null) {
@@ -651,7 +655,17 @@ export default function AppV2() {
   const confirmReferenceCardLine = () => {
     try{
       const segment=cardReferenceSegment();
+      const source=photoPixelsRef.current;
       setReferenceCardLengthPx(segment.lengthPx);
+      if(source){
+        setReferenceCardWidthPercent(segment.lengthPx/source.width*100);
+      }
+      setReferenceCardAngleDeg(
+        Math.atan2(
+          segment.rightPx.y-segment.leftPx.y,
+          segment.rightPx.x-segment.leftPx.x,
+        )*180/Math.PI,
+      );
       setReferenceCardQuad(null);
       setFingerCardCalibrationStep("measurement");
       camera.setError("Calibração de 3 linhas salva. Agora fotografe o cartão sobre o dedo.");
@@ -1979,6 +1993,8 @@ export default function AppV2() {
           cameraAngleGuide={cameraAngleGuide}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
+          referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
+          referenceCardAngleDeg={fingerCardCalibrationStep === "measurement" ? referenceCardAngleDeg : null}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
           onRetry={() => void openCamera()}
@@ -2337,10 +2353,10 @@ export default function AppV2() {
                 <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — calibração do cartão" : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>{fingerCardCalibrationStep === "reference"
                   ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
-                  : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo."}</span>
+                  : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo. Na captura, use a guia fantasma da Foto 1 para aproximar escala e ângulo."}</span>
                 <small>{fingerCardCalibrationStep === "reference"
                   ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
-                  : "A escala final vem somente da largura de 85,60 mm medida na foto 2. A foto 1 fica como comparação de estabilidade."}</small>
+                  : "A Foto 2 continua calculando sua própria escala, mas agora a captura é guiada para ficar o mais próxima possível da Foto 1."}</small>
                 <small>As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar.</small>
               </div>
             </>
