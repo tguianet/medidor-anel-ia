@@ -299,6 +299,47 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 /* Fixed capture standard: the guide never moves. Detection only changes it
    to the magnetic/locked state when the real card reaches the reference. */
 .capture-standard-guide { position:absolute; inset:0; z-index:6; pointer-events:none; }
+
+.reference-card-ghost {
+  position:absolute;
+  z-index:7;
+  left:50%;
+  top:10%;
+  aspect-ratio:85.6 / 53.98;
+  box-sizing:border-box;
+  border:2px dashed #79d9ff;
+  border-radius:13px;
+  background:#79d9ff12;
+  box-shadow:0 0 0 1px #07151daa, 0 0 16px #79d9ff66;
+  pointer-events:none;
+  transform-origin:center center;
+}
+.reference-card-ghost::before,
+.reference-card-ghost::after {
+  content:"";
+  position:absolute;
+  top:-5px;
+  bottom:-5px;
+  width:2px;
+  background:#79d9ff;
+  box-shadow:0 0 8px #79d9ff;
+}
+.reference-card-ghost::before { left:0; }
+.reference-card-ghost::after { right:0; }
+.reference-card-ghost > span {
+  position:absolute;
+  left:50%;
+  bottom:8px;
+  transform:translateX(-50%);
+  padding:4px 8px;
+  border-radius:999px;
+  color:#06141b;
+  background:#79d9ff;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.04em;
+  white-space:nowrap;
+}
 .live-card-frame {
   position:absolute;
   left:11%;
