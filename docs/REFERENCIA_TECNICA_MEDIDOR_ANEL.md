@@ -369,3 +369,65 @@ Interpretação:
 Regra prática para próximos testes:
 - diferenças entre Foto 1 e Foto 2 próximas de 0–2% podem ser tratadas como capturas geometricamente fortes;
 - diferenças maiores continuam sendo registradas para análise antes de qualquer ajuste na curva.
+
+
+## 14. Quadro oficial de validação — modo 1 foto (25/09/2026)
+
+A partir desta fase, o modo de 1 foto passou a ser tratado como principal candidato de produção por eliminar a diferença geométrica entre Foto 1 e Foto 2.
+
+### Testes confirmados pelo usuário
+
+| Aro real | Medida final | Resultado do sistema | Status |
+|---:|---:|---:|---|
+| 17 | 18,26 mm | exato 17 / conforto 18 | ✅ correto |
+| 21 | 19,76 mm | exato 21 / conforto 22 | ✅ correto |
+| 24 | 21,47 mm | exato 24 / conforto 25 | ✅ correto |
+| 29 | 22,43 mm | exato 29 / conforto 30 | ✅ correto |
+| 29 | 22,71 mm | exato 29 / conforto 30 | ✅ correto |
+| 29 | 22,57 mm | exato 29 / conforto 30 | ✅ correto |
+| 33 | 25,26 mm | exato 33 / conforto 34 | ✅ correto |
+
+### Resumo de repetibilidade do aro 29
+
+Três medições consecutivas do mesmo dedo no modo 1 foto:
+- 22,43 mm -> aro 29;
+- 22,71 mm -> aro 29;
+- 22,57 mm -> aro 29.
+
+Estatística:
+- 3/3 acertos;
+- média: 22,57 mm;
+- amplitude total: 0,28 mm;
+- classificação permaneceu estável em aro 29.
+
+### Observações de qualidade
+
+- aro 17: variação interna dos cortes = 5,24%; resultado correto, porém leitura menos estável;
+- aro 21: variação = 3,07%; resultado correto;
+- aro 24: variação = 1,57%; leitura forte;
+- aro 29: variações de 1,48%, 1,94% e 2,18%; repetibilidade forte;
+- aro 33: teste anterior correto no extremo superior.
+
+### Interpretação atual
+
+O modo 1 foto mostrou, até aqui:
+- acerto em faixa baixa;
+- acerto em faixa média;
+- acerto em faixa alta;
+- boa repetibilidade no aro 29;
+- eliminação da variável de diferença entre duas fotos.
+
+Regra de trabalho:
+- usar o modo 1 foto como fluxo principal de validação;
+- manter o modo 2 fotos apenas como fallback/diagnóstico até nova decisão;
+- qualquer ajuste de curva deve preservar os pontos reais já validados acima.
+
+### Pontos de referência atuais da curva real observada
+
+- aro 17 -> 18,26 mm
+- aro 21 -> 19,76 mm
+- aro 24 -> 21,47 mm
+- aro 29 -> média 22,57 mm
+- aro 33 -> 25,26 mm
+
+Esses pontos devem ser tratados como âncoras experimentais fortes para próximos ajustes, sempre preservando a geometria e a calibração da captura antes de alterar a classificação.
