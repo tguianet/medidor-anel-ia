@@ -139,6 +139,7 @@ export default function AppV2() {
   const [showcaseAngle, setShowcaseAngle] = useState(0);
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
+  const [singlePhotoTestMode, setSinglePhotoTestMode] = useState(false);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
   const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
@@ -1892,20 +1893,30 @@ export default function AppV2() {
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
 
   const guidedStep =
-    phase === "card"
-      ? (fingerCardCalibrationStep === "reference" ? 1 : 2)
-      : phase === "finger"
-        ? (result && leftLocked && rightLocked ? 4 : 3)
-        : 1;
+    singlePhotoTestMode
+      ? (phase === "card" ? 1 : phase === "finger" ? (result && leftLocked && rightLocked ? 3 : 2) : 1)
+      : phase === "card"
+        ? (fingerCardCalibrationStep === "reference" ? 1 : 2)
+        : phase === "finger"
+          ? (result && leftLocked && rightLocked ? 4 : 3)
+          : 1;
 
-  const guideTitle =
-    guidedStep === 1 ? "1. Calibre o cartão em uma base plana" :
-    guidedStep === 2 ? "2. Fotografe o cartão sobre o dedo" :
-    guidedStep === 3 ? "3. Ajuste as duas linhas na parte mais grossa" :
-    "4. Confira os dois números";
+  const guideTitle = singlePhotoTestMode
+    ? (guidedStep === 1 ? "1. Calibre o cartão sobre o dedo" :
+       guidedStep === 2 ? "2. Ajuste as linhas na parte mais grossa" :
+       "3. Confira os três números")
+    : guidedStep === 1 ? "1. Calibre o cartão em uma base plana" :
+      guidedStep === 2 ? "2. Fotografe o cartão sobre o dedo" :
+      guidedStep === 3 ? "3. Ajuste as duas linhas na parte mais grossa" :
+      "4. Confira os dois números";
 
-  const guideText =
-    guidedStep === 1
+  const guideText = singlePhotoTestMode
+    ? (guidedStep === 1
+        ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
+        : guidedStep === 2
+          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia. Os 50 refinamentos trabalham na mesma foto calibrada."
+          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
+    : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
       : guidedStep === 2
         ? "Coloque o cartão sobre o dedo e ajuste novamente as duas laterais e a base. A foto 2 define a escala final da medição."
@@ -1976,10 +1987,45 @@ export default function AppV2() {
       </header>
 
       {stage === "intro" && (
-        <IntroScreen
-          error={camera.error}
-          onMeasureFinger={() => { setDiameterPhotoTestMode(false); setMeasurementMode("finger"); setFingerCardCalibrationStep("reference"); void openCamera(); }}
-        />
+        <>
+          <IntroScreen
+            error={camera.error}
+            onMeasureFinger={() => {
+              setSinglePhotoTestMode(false);
+              setDiameterPhotoTestMode(false);
+              setMeasurementMode("finger");
+              setFingerCardCalibrationStep("reference");
+              void openCamera();
+            }}
+          />
+          {debugMode && (
+            <section className="panel" style={{marginTop:12}}>
+              <span className="step">TESTE PRIVADO</span>
+              <h2 style={{margin:"4px 0 8px"}}>Modo 1 foto</h2>
+              <p className="lead" style={{marginBottom:12}}>
+                Cartão e dedo na mesma foto. A própria foto fornece a escala de 85,60 mm e os 50 cortes medem o dedo sem usar Foto 1.
+              </p>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => {
+                  setSinglePhotoTestMode(true);
+                  setDiameterPhotoTestMode(false);
+                  setMeasurementMode("finger");
+                  setFingerCardCalibrationStep("measurement");
+                  setReferenceCardLengthPx(null);
+                  setReferenceCardWidthPercent(null);
+                  setReferenceCardAngleDeg(null);
+                  setMeasurementCardLengthPx(null);
+                  setPerspectiveMismatchPercent(null);
+                  void openCamera();
+                }}
+              >
+                Testar medição com 1 foto
+              </button>
+            </section>
+          )}
+        </>
       )}
 
       {stage === "camera" && (
@@ -1995,6 +2041,7 @@ export default function AppV2() {
           error={camera.error}
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
           referenceCardAngleDeg={fingerCardCalibrationStep === "measurement" ? referenceCardAngleDeg : null}
+          singlePhotoTestMode={singlePhotoTestMode}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
           onRetry={() => void openCamera()}
@@ -2037,7 +2084,9 @@ export default function AppV2() {
           )}
           <span className="step">{
             phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
-              ? (fingerCardCalibrationStep === "reference" ? "1. ALINHE O CARTÃO" : "2. CARTÃO SOBRE O DEDO")
+              ? (singlePhotoTestMode
+                  ? "1. CARTÃO SOBRE O DEDO"
+                  : (fingerCardCalibrationStep === "reference" ? "1. ALINHE O CARTÃO" : "2. CARTÃO SOBRE O DEDO"))
               : phase === "card" ? "1. CALIBRE O CARTÃO"
               : diameterPhotoTestMode ? "2. MEÇA O DIÂMETRO INTERNO"
               : measurementMode === "anelimetro" ? "2. TESTE O ANELÍMETRO"
@@ -2045,7 +2094,9 @@ export default function AppV2() {
           }</span>
           <h1>{
             phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode
-              ? (fingerCardCalibrationStep === "reference" ? "Alinhe o cartão nas guias" : "Alinhe o cartão sobre o dedo")
+              ? (singlePhotoTestMode
+                  ? "Calibre o cartão nesta foto"
+                  : (fingerCardCalibrationStep === "reference" ? "Alinhe o cartão nas guias" : "Alinhe o cartão sobre o dedo"))
               : phase === "card" ? "Ajuste as laterais e a base do cartão"
               : diameterPhotoTestMode ? "Encaixe as linhas nas bordas internas do anel"
               : measurementMode === "anelimetro" ? "Encaixe as linhas no anelímetro"
@@ -2342,7 +2393,11 @@ export default function AppV2() {
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
-                {fingerCardCalibrationStep === "reference" ? "Salvar 3 linhas e ir para a foto 2" : "Calibrar cartão e medir o dedo"}
+                {singlePhotoTestMode
+                  ? "Calibrar esta foto e medir o dedo"
+                  : fingerCardCalibrationStep === "reference"
+                    ? "Salvar 3 linhas e ir para a foto 2"
+                    : "Calibrar cartão e medir o dedo"}
               </button>
               <div className="card-line-status">
                 {(["left","right","bottom"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
@@ -2350,13 +2405,21 @@ export default function AppV2() {
                 </span>)}
               </div>
               <div className="card-base-status">
-                <strong>{fingerCardCalibrationStep === "reference" ? "Foto 1 — calibração do cartão" : "Foto 2 — cartão sobre o dedo"}</strong>
-                <span>{fingerCardCalibrationStep === "reference"
-                  ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
-                  : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo. Na captura, use a guia fantasma da Foto 1 para aproximar escala e ângulo."}</span>
-                <small>{fingerCardCalibrationStep === "reference"
-                  ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
-                  : "A Foto 2 continua calculando sua própria escala, mas agora a captura é guiada para ficar o mais próxima possível da Foto 1."}</small>
+                <strong>{singlePhotoTestMode
+                  ? "Modo 1 foto — cartão sobre o dedo"
+                  : fingerCardCalibrationStep === "reference"
+                    ? "Foto 1 — calibração do cartão"
+                    : "Foto 2 — cartão sobre o dedo"}</strong>
+                <span>{singlePhotoTestMode
+                  ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão já posicionado sobre o dedo."
+                  : fingerCardCalibrationStep === "reference"
+                    ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
+                    : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo. Na captura, use a guia fantasma da Foto 1 para aproximar escala e ângulo."}</span>
+                <small>{singlePhotoTestMode
+                  ? "A própria largura de 85,60 mm desta foto define a escala usada para medir o dedo."
+                  : fingerCardCalibrationStep === "reference"
+                    ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
+                    : "A Foto 2 continua calculando sua própria escala, mas agora a captura é guiada para ficar o mais próxima possível da Foto 1."}</small>
                 <small>As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar.</small>
               </div>
             </>
@@ -2404,6 +2467,7 @@ export default function AppV2() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
+              <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
