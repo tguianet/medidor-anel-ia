@@ -607,3 +607,50 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   background:#52e0a3;
   box-shadow:0 0 4px #52e0a366;
 }
+
+
+/* Teste 3D: foto lateral do dedo + cartao em pe na mesma base. */
+.side-3d-line {
+  position:absolute;
+  z-index:8;
+  left:6%;
+  right:6%;
+  height:0;
+  border-top:2px solid #f2cf73;
+  filter:drop-shadow(0 0 4px #000);
+  pointer-events:none;
+}
+.side-3d-line.finger-top { border-top-color:#52e0a3; }
+.side-3d-line.base { border-top-color:#79d9ff; }
+.side-3d-line span {
+  position:absolute;
+  left:50%;
+  top:-22px;
+  transform:translateX(-50%);
+  padding:4px 7px;
+  border-radius:999px;
+  color:#171109;
+  background:#f2cf73;
+  font-size:8px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.side-3d-line.finger-top span { background:#52e0a3; color:#071b14; }
+.side-3d-line.base span { background:#79d9ff; color:#06141b; }
+
+.side-3d-controls {
+  display:grid;
+  gap:10px;
+  margin:0 0 16px;
+  padding:14px;
+  border:1px solid #725f38;
+  border-radius:12px;
+  background:#17130f;
+}
+.side-3d-controls label { display:grid; gap:6px; }
+.side-3d-controls label span {
+  color:#f2cf73;
+  font-size:12px;
+  font-weight:800;
+}
+.side-3d-controls input[type="range"] { width:100%; accent-color:#d7b35f; }
