@@ -431,3 +431,38 @@ Regra de trabalho:
 - aro 33 -> 25,26 mm
 
 Esses pontos devem ser tratados como âncoras experimentais fortes para próximos ajustes, sempre preservando a geometria e a calibração da captura antes de alterar a classificação.
+
+
+## 15. Teste 3D experimental — largura + altura do dedo (27/09/2026)
+
+Foi criado um modo privado paralelo chamado **Teste 3D — lateral + superior**.
+
+Objetivo:
+- manter intacto o fluxo principal;
+- adicionar uma segunda dimensão física do dedo;
+- investigar casos em que dois dedos apresentam largura superior parecida, mas usam aros diferentes.
+
+Fluxo:
+1. Foto lateral:
+   - dedo apoiado em superfície plana;
+   - cartão em pé ao lado do dedo, apoiado na mesma superfície;
+   - três linhas ajustáveis: topo do cartão, topo do dedo e base/mesa;
+   - a altura do dedo é calculada pela proporção entre a altura visível do cartão e o lado curto físico do cartão (53,98 mm).
+2. Foto superior:
+   - usa o fluxo de 1 foto já existente;
+   - cartão sobre o dedo;
+   - calibração do cartão;
+   - ajuste do dedo;
+   - 50 refinamentos automáticos;
+   - largura final em mm.
+
+Diagnóstico adicional:
+- altura lateral do dedo em mm;
+- largura superior do dedo em mm;
+- perímetro elíptico estimado pela aproximação de Ramanujan.
+
+Importante:
+- neste estágio o perímetro elíptico é apenas diagnóstico;
+- ele ainda NÃO altera automaticamente o aro calculado;
+- a curva principal permanece preservada;
+- o objetivo é coletar dados reais e verificar se altura + largura explicam os conflitos observados entre dedos com largura semelhante.
