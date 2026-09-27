@@ -140,6 +140,13 @@ export default function AppV2() {
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [singlePhotoTestMode, setSinglePhotoTestMode] = useState(false);
+  const [threeDTestMode, setThreeDTestMode] = useState(false);
+  const [threeDStep, setThreeDStep] = useState<"side" | "top">("side");
+  const [sidePhoto, setSidePhoto] = useState("");
+  const [sideCardTopY, setSideCardTopY] = useState(24);
+  const [sideFingerTopY, setSideFingerTopY] = useState(62);
+  const [sideBaseY, setSideBaseY] = useState(82);
+  const [sideFingerHeightMm, setSideFingerHeightMm] = useState<number | null>(null);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
   const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
@@ -312,6 +319,17 @@ export default function AppV2() {
     }
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const capturedPhoto = canvas.toDataURL("image/jpeg", 0.94);
+
+    // Teste 3D: a primeira captura e lateral. Ela mede apenas a altura
+    // do dedo usando os 53,98 mm do lado curto do cartao como referencia.
+    if (threeDTestMode && threeDStep === "side") {
+      setSidePhoto(capturedPhoto);
+      camera.stopCamera();
+      setStage("side-review");
+      camera.setError("");
+      return;
+    }
+
     setPhoto(capturedPhoto);
 
     // Modo dedo em duas fotos:
@@ -1762,6 +1780,28 @@ export default function AppV2() {
     camera.setError("Reajuste as duas laterais e a linha da base do cartão.");
   };
 
+  const sideMeasurement = (() => {
+    if (!threeDTestMode || !sidePhoto) return null;
+    const cardSpanPercent = sideBaseY - sideCardTopY;
+    const fingerSpanPercent = sideBaseY - sideFingerTopY;
+    if (cardSpanPercent <= 2 || fingerSpanPercent <= 0) return null;
+    const heightMm = CARD_HEIGHT_MM * (fingerSpanPercent / cardSpanPercent);
+    return {
+      heightMm,
+      cardSpanPercent,
+      fingerSpanPercent,
+    };
+  })();
+
+  const estimatedFingerPerimeterMm = (() => {
+    if (!threeDTestMode || liveWidthMm === null || sideFingerHeightMm === null) return null;
+    const a = liveWidthMm / 2;
+    const b = sideFingerHeightMm / 2;
+    if (a <= 0 || b <= 0) return null;
+    // Aproximacao de Ramanujan para a secao eliptica do dedo.
+    return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+  })();
+
   const result = useMemo(() => {
     if (liveWidthMm === null) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
@@ -1991,6 +2031,7 @@ export default function AppV2() {
           <IntroScreen
             error={camera.error}
             onMeasureFinger={() => {
+              setThreeDTestMode(false);
               setSinglePhotoTestMode(false);
               setDiameterPhotoTestMode(false);
               setMeasurementMode("finger");
@@ -2009,6 +2050,7 @@ export default function AppV2() {
                 className="secondary"
                 type="button"
                 onClick={() => {
+                  setThreeDTestMode(false);
                   setSinglePhotoTestMode(true);
                   setDiameterPhotoTestMode(false);
                   setMeasurementMode("finger");
@@ -2022,6 +2064,27 @@ export default function AppV2() {
                 }}
               >
                 Testar medição com 1 foto
+              </button>
+              <button
+                className="secondary"
+                style={{marginTop:10}}
+                type="button"
+                onClick={() => {
+                  setThreeDTestMode(true);
+                  setThreeDStep("side");
+                  setSinglePhotoTestMode(false);
+                  setDiameterPhotoTestMode(false);
+                  setMeasurementMode("finger");
+                  setSidePhoto("");
+                  setSideFingerHeightMm(null);
+                  setSideCardTopY(24);
+                  setSideFingerTopY(62);
+                  setSideBaseY(82);
+                  setFingerCardCalibrationStep("measurement");
+                  void openCamera();
+                }}
+              >
+                Testar 3D — lateral + superior
               </button>
             </section>
           )}
@@ -2060,6 +2123,71 @@ export default function AppV2() {
           onCapture={captureHand}
           onRetry={() => void openHandCamera()}
         />
+      )}
+
+      {stage === "side-review" && (
+        <section className="panel review">
+          <span className="step">TESTE 3D — FOTO LATERAL</span>
+          <h1>Meça a altura do dedo</h1>
+          <p className="lead">
+            Apoie o dedo e o cartão em pé na mesma superfície. Ajuste as três linhas: topo do cartão, topo do dedo e base da mesa.
+          </p>
+
+          <div className="measurement-stage is-active">
+            {sidePhoto && <img src={sidePhoto} alt="Foto lateral para medir a altura do dedo" draggable={false} />}
+            <div className="side-3d-line card-top" style={{top:`${sideCardTopY}%`}}><span>TOPO DO CARTÃO</span></div>
+            <div className="side-3d-line finger-top" style={{top:`${sideFingerTopY}%`}}><span>TOPO DO DEDO</span></div>
+            <div className="side-3d-line base" style={{top:`${sideBaseY}%`}}><span>BASE / MESA</span></div>
+          </div>
+
+          <div className="side-3d-controls">
+            <label>
+              <span>Topo do cartão</span>
+              <input type="range" min="4" max="70" step="0.1" value={sideCardTopY}
+                onChange={(e)=>setSideCardTopY(Number(e.target.value))} />
+            </label>
+            <label>
+              <span>Topo do dedo</span>
+              <input type="range" min="20" max="88" step="0.1" value={sideFingerTopY}
+                onChange={(e)=>setSideFingerTopY(Number(e.target.value))} />
+            </label>
+            <label>
+              <span>Base comum</span>
+              <input type="range" min="45" max="96" step="0.1" value={sideBaseY}
+                onChange={(e)=>setSideBaseY(Number(e.target.value))} />
+            </label>
+          </div>
+
+          <div className="analysis-result">
+            <strong>PRÉVIA DA ALTURA</strong>
+            {sideMeasurement ? (
+              <span>Altura estimada do dedo: {sideMeasurement.heightMm.toFixed(2)} mm</span>
+            ) : (
+              <span>Ajuste as linhas sem cruzá-las.</span>
+            )}
+            <small>Esta etapa não altera a curva atual. Ela apenas adiciona a dimensão lateral para comparação.</small>
+          </div>
+
+          <div className="review-actions">
+            <button className="secondary" type="button" onClick={() => {
+              setSidePhoto("");
+              void openCamera();
+            }}>Refazer foto lateral</button>
+            <button className="primary" type="button" disabled={!sideMeasurement} onClick={() => {
+              if (!sideMeasurement) return;
+              setSideFingerHeightMm(sideMeasurement.heightMm);
+              setThreeDStep("top");
+              setSinglePhotoTestMode(true);
+              setFingerCardCalibrationStep("measurement");
+              setReferenceCardLengthPx(null);
+              setReferenceCardWidthPercent(null);
+              setReferenceCardAngleDeg(null);
+              setMeasurementCardLengthPx(null);
+              setPerspectiveMismatchPercent(null);
+              void openCamera();
+            }}>Salvar altura e tirar foto de cima</button>
+          </div>
+        </section>
       )}
 
       {stage === "review" && (
@@ -2467,8 +2595,10 @@ export default function AppV2() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
-              <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
+              <span>Captura: {threeDTestMode ? "Teste 3D (lateral + superior)" : singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
+              {threeDTestMode && sideFingerHeightMm !== null && <span>Altura lateral: {sideFingerHeightMm.toFixed(2)} mm</span>}
+              {threeDTestMode && estimatedFingerPerimeterMm !== null && <span>Perímetro elíptico estimado: {estimatedFingerPerimeterMm.toFixed(2)} mm</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
