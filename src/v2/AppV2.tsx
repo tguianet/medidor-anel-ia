@@ -19,21 +19,6 @@ const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
 const CARD_HEIGHT_MM = 53.98;
 
-type TestFinger = "mindinho" | "anelar" | "medio" | "indicador";
-
-const FINGER_CORRECTIONS_MM: Record<TestFinger, number> = {
-  mindinho: 1.15,
-  anelar: 0.60,
-  medio: 0.15,
-  indicador: 2.05,
-};
-
-const TEST_FINGER_LABELS: Record<TestFinger, string> = {
-  mindinho: "Mindinho",
-  anelar: "Anelar",
-  medio: "Médio",
-  indicador: "Indicador",
-};
 type Homography = [number,number,number,number,number,number,number,number,number];
 
 const solveLinearSystem = (matrix:number[][], values:number[]) => {
@@ -156,8 +141,6 @@ export default function AppV2() {
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [singlePhotoTestMode, setSinglePhotoTestMode] = useState(false);
-  const [threeDTestMode, setThreeDTestMode] = useState(false);
-  const [selectedTestFinger, setSelectedTestFinger] = useState<TestFinger | null>(null);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
   const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
@@ -301,21 +284,6 @@ export default function AppV2() {
     setCameraAngleGuide("unknown");
     setStage("camera");
     await camera.startCameraStream();
-  };
-
-  const startThreeDFingerTest = (finger: TestFinger) => {
-    setThreeDTestMode(true);
-    setSelectedTestFinger(finger);
-    setSinglePhotoTestMode(true);
-    setDiameterPhotoTestMode(false);
-    setMeasurementMode("finger");
-    setFingerCardCalibrationStep("measurement");
-    setReferenceCardLengthPx(null);
-    setReferenceCardWidthPercent(null);
-    setReferenceCardAngleDeg(null);
-    setMeasurementCardLengthPx(null);
-    setPerspectiveMismatchPercent(null);
-    void openCamera();
   };
 
   const openHandCamera = async () => {
@@ -1731,25 +1699,6 @@ export default function AppV2() {
     return fallback ?? {selected:valid,used:valid.reduce((sum,v)=>sum+v,0)/valid.length,startIndex:0,spreadPercent:0};
   };
 
-  // No teste por dedo, trava a busca em uma janela anatomica central:
-  // 10 cortes antes + regiao central + 10 cortes depois. Isso evita que
-  // o algoritmo "escape" para a ponta/base do dedo so porque encontrou
-  // um plato mais largo longe da linha amarela escolhida pelo usuario.
-  const selectStableRunNearCenter = (values:number[]) => {
-    const valid=values.filter(Number.isFinite).filter(v=>v>0);
-    if(!valid.length) return {selected:[] as number[],used:null as number|null,startIndex:-1,spreadPercent:999};
-
-    const center=Math.floor((valid.length-1)/2);
-    const start=Math.max(0,center-10);
-    const end=Math.min(valid.length,center+11);
-    const central=valid.slice(start,end);
-    const selected=selectWidestStableRun(central);
-    return {
-      ...selected,
-      startIndex:selected.startIndex>=0 ? selected.startIndex+start : selected.startIndex,
-    };
-  };
-
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
     const toPx=(line:Line):Line=>({
       a:{x:line.a.x/100*sourceWidth,y:line.a.y/100*sourceHeight},
@@ -1793,11 +1742,9 @@ export default function AppV2() {
       })
       .filter(v=>Number.isFinite(v)&&v>0&&v<45);
 
-    const stable=threeDTestMode
-      ? selectStableRunNearCenter(widthsMm)
-      : selectWidestStableRun(widthsMm);
+    const stable=selectWidestStableRun(widthsMm);
     return stable.used;
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,threeDTestMode]);
+  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1823,17 +1770,12 @@ export default function AppV2() {
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
 
     if (measurementMode === "finger") {
-      const fingerCorrectionMm =
-        threeDTestMode && selectedTestFinger
-          ? FINGER_CORRECTIONS_MM[selectedTestFinger]
-          : 0;
-      const correctedWidthMm = liveWidthMm + fingerCorrectionMm;
-      const v2 = classifyFingerWidthMm(correctedWidthMm);
+      const v2 = classifyFingerWidthMm(liveWidthMm);
       return {
         rawWidthMm: liveWidthMm,
-        widthMm: correctedWidthMm,
-        measurementCorrectionMm: fingerCorrectionMm,
-        equivalentDiameterMm: correctedWidthMm,
+        widthMm: liveWidthMm,
+        measurementCorrectionMm: 0,
+        equivalentDiameterMm: liveWidthMm,
         fingerEquivalentMabMm: null,
         ringSize: v2.exactRingSize,
         calculationMode: "formula" as const,
@@ -1841,14 +1783,13 @@ export default function AppV2() {
         continuousRing: null,
         nearBoundary: false,
         boundaryDistanceMm: Math.min(
-          Math.abs(correctedWidthMm - v2.lowerBoundaryMm),
-          Math.abs(v2.upperBoundaryMm - correctedWidthMm),
+          Math.abs(liveWidthMm - v2.lowerBoundaryMm),
+          Math.abs(v2.upperBoundaryMm - liveWidthMm),
         ),
       };
     }
-
     return computeRingResult(liveWidthMm, calibrationRules, true, calibrationConfidence);
-  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, threeDTestMode, selectedTestFinger]);
+  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
@@ -1903,9 +1844,7 @@ export default function AppV2() {
     const rawWidthsPx=fingerMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite);
     if(!rawWidthsPx.length) return null;
 
-    const widestRun=threeDTestMode
-      ? selectStableRunNearCenter(rawWidthsPx)
-      : selectWidestStableRun(rawWidthsPx);
+    const widestRun=selectWidestStableRun(rawWidthsPx);
     if(widestRun.used===null) return null;
 
     const physicalWidthsMm=fingerMagnetSamples.map((sample)=>{
@@ -1921,9 +1860,7 @@ export default function AppV2() {
       return pixelsPerMm>0 ? sample.width/pixelsPerMm : NaN;
     }).filter(Number.isFinite);
 
-    const widestPhysical=threeDTestMode
-      ? selectStableRunNearCenter(physicalWidthsMm)
-      : selectWidestStableRun(physicalWidthsMm);
+    const widestPhysical=selectWidestStableRun(physicalWidthsMm);
     const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
 
     return {
@@ -1978,7 +1915,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "Posicione a linha amarela exatamente onde o anel vai ficar. No teste por dedo, o cálculo fica preso aos 21 cortes centrais ao redor dessa linha, evitando medir outra região do dedo."
+          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia. Os 50 refinamentos trabalham na mesma foto calibrada."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
@@ -2055,8 +1992,6 @@ export default function AppV2() {
           <IntroScreen
             error={camera.error}
             onMeasureFinger={() => {
-              setThreeDTestMode(false);
-              setSelectedTestFinger(null);
               setSinglePhotoTestMode(false);
               setDiameterPhotoTestMode(false);
               setMeasurementMode("finger");
@@ -2075,8 +2010,6 @@ export default function AppV2() {
                 className="secondary"
                 type="button"
                 onClick={() => {
-                  setThreeDTestMode(false);
-                  setSelectedTestFinger(null);
                   setSinglePhotoTestMode(true);
                   setDiameterPhotoTestMode(false);
                   setMeasurementMode("finger");
@@ -2091,41 +2024,6 @@ export default function AppV2() {
               >
                 Testar medição com 1 foto
               </button>
-              <button
-                className="secondary"
-                style={{marginTop:10}}
-                type="button"
-                onClick={() => {
-                  setThreeDTestMode(true);
-                  setSelectedTestFinger(null);
-                  setSinglePhotoTestMode(false);
-                  setDiameterPhotoTestMode(false);
-                  setMeasurementMode("finger");
-                }}
-              >
-                Testar correção por dedo
-              </button>
-
-              {threeDTestMode && selectedTestFinger === null && (
-                <div style={{marginTop:14,padding:14,border:"1px solid #725f38",borderRadius:12,background:"#17130f"}}>
-                  <strong style={{display:"block",marginBottom:6,color:"#f2cf73"}}>Qual dedo você vai medir?</strong>
-                  <span style={{display:"block",marginBottom:12,fontSize:12,opacity:.82}}>
-                    Escolha o dedo antes de abrir a câmera. A correção experimental será aplicada somente neste teste.
-                  </span>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    {(["mindinho","anelar","medio","indicador"] as TestFinger[]).map((finger)=>(
-                      <button
-                        key={finger}
-                        className="secondary"
-                        type="button"
-                        onClick={()=>startThreeDFingerTest(finger)}
-                      >
-                        {TEST_FINGER_LABELS[finger]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </section>
           )}
         </>
@@ -2570,15 +2468,11 @@ export default function AppV2() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
-              <span>Captura: {threeDTestMode ? "Teste por dedo (1 foto)" : singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
-              {threeDTestMode && selectedTestFinger && <span>Dedo selecionado: {TEST_FINGER_LABELS[selectedTestFinger]}</span>}
-              {threeDTestMode && <span>Medida base: {result.rawWidthMm.toFixed(2)} mm</span>}
-              {threeDTestMode && <span>Correção por dedo: +{result.measurementCorrectionMm.toFixed(2)} mm</span>}
-              <span>{threeDTestMode ? "Medida final corrigida" : "Medida final"}: {result.widthMm.toFixed(2)} mm</span>
+              <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
+              <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
-                  {threeDTestMode && <span>Janela anatômica: 21 cortes centrais (±10 da linha amarela)</span>}
                   <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
