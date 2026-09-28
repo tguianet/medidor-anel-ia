@@ -219,7 +219,7 @@ export default function AppV2() {
       !camera.cameraOpening &&
       !camera.error &&
       cardReady &&
-      (!VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION || deviceQuality.stabilityScore === null || deviceQuality.stabilityScore >= 70) &&
+      (!VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION || deviceQuality.stabilityScore === null || deviceQuality.stabilityScore >= 75) &&
       measurementMode === "finger" &&
       !diameterPhotoTestMode &&
       // Foto 1 pode ser automatica. Na Foto 2 o usuario precisa casar o
@@ -307,9 +307,17 @@ export default function AppV2() {
     if(
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
-      deviceQuality.stabilityScore < 55
+      deviceQuality.stabilityScore < 65
     ){
-      camera.setError("Celular em movimento. Mantenha o aparelho firme por um instante e capture novamente.");
+      camera.setError("Celular muito instável. Mantenha o aparelho firme e aguarde a estabilidade melhorar antes de capturar.");
+      return;
+    }
+    if(
+      VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
+      deviceQuality.stabilityScore !== null &&
+      deviceQuality.stabilityScore < 75
+    ){
+      camera.setError("Quase lá: mantenha o celular mais firme até a estabilidade chegar a 75 ou mais.");
       return;
     }
     const video = camera.videoRef.current;
@@ -1872,7 +1880,7 @@ export default function AppV2() {
       edgeScore,
       finalConfidence,
       label:confidenceLabel(finalConfidence),
-      accepted:finalConfidence>=70,
+      accepted:finalConfidence>=75,
     };
   },[
     cardLines,
@@ -2641,7 +2649,7 @@ export default function AppV2() {
             <div className="analysis-result">
               <strong>Medição com baixa confiança</strong>
               <span>Confiança: {preFormulaQuality.finalConfidence}/100 · {preFormulaQuality.label}.</span>
-              <span>Refaça a captura com o cartão e o celular mais alinhados e mantenha o aparelho firme.</span>
+              <span>Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais.</span>
             </div>
           )}
           {phase === "finger" && result && leftLocked && rightLocked && (
