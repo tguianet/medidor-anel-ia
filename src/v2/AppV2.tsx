@@ -2140,6 +2140,28 @@ export default function AppV2() {
             onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
             {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {singlePhotoTestMode && selectedMeasuredFinger && (
+              <div
+                style={{
+                  position:"absolute",
+                  top:12,
+                  left:12,
+                  zIndex:20,
+                  padding:"7px 11px",
+                  borderRadius:999,
+                  background:"rgba(0,0,0,.72)",
+                  color:"#f2cf73",
+                  border:"1px solid rgba(242,207,115,.75)",
+                  fontSize:12,
+                  fontWeight:900,
+                  letterSpacing:".04em",
+                  pointerEvents:"none",
+                  boxShadow:"0 3px 10px rgba(0,0,0,.35)"
+                }}
+              >
+                Dedo: {MEASURED_FINGER_LABELS[selectedMeasuredFinger]}
+              </div>
+            )}
             {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode ? (
               <svg
                 className="card-lines-overlay"
