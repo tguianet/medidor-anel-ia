@@ -1943,9 +1943,19 @@ export default function AppV2() {
   },[anatomicalRegionOffsetHistoryY]);
 
   const widthAnalysis = useMemo(() => {
-    if(!pixelsPerMm||!leftLocked||!rightLocked){
-      return {oldMm:null as number|null,newMm:null as number|null,stats:null as ReturnType<typeof robustWidthStats>|null};
-    }
+    const empty = {
+      oldMm:null as number|null,
+      newMm:null as number|null,
+      stats:null as ReturnType<typeof robustWidthStats>|null,
+      homographyMm:null as number|null,
+      localScaleMm:null as number|null,
+      normalizedScaleMm:null as number|null,
+      perspectiveScaleFactor:1,
+      baseMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
+      normalizedMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
+      measurementSource:"local-scale" as const,
+    };
+    if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
 
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     const currentDetectedRegionY=
@@ -1966,35 +1976,134 @@ export default function AppV2() {
         : currentDetectedRegionY;
 
     const samples=fingerBandSamplesPx(anatomicalGuideY);
-    if(!samples || samples.length<35){
-      return {oldMm:null,newMm:null,stats:null};
+    if(!samples || samples.length<35) return empty;
+
+    const baseMmPerPx=1/pixelsPerMm;
+
+    let referenceHomographyMmPerPx:number|null=null;
+    if(
+      VISION_FEATURE_FLAGS.ENABLE_CARD_SCALE_PERSPECTIVE_NORMALIZATION &&
+      measurementCardHomography
+    ){
+      try{
+        const source=photoPixelsRef.current;
+        if(source){
+          const actualQuad=quadPixels(quadFromLines(cardLines));
+          const bottomMid={
+            x:(actualQuad[2].x+actualQuad[3].x)/2,
+            y:(actualQuad[2].y+actualQuad[3].y)/2,
+          };
+          const p0=projectPoint(measurementCardHomography,bottomMid);
+          const p1=projectPoint(measurementCardHomography,{x:bottomMid.x+1,y:bottomMid.y});
+          const v=Math.hypot(p1.x-p0.x,p1.y-p0.y);
+          if(Number.isFinite(v)&&v>0) referenceHomographyMmPerPx=v;
+        }
+      }catch{
+        referenceHomographyMmPerPx=null;
+      }
     }
 
-    const widthsMm=samples
-      .map((sample)=>{
-        if(measurementCardHomography){
-          try{
-            const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
-            const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
-            return Math.hypot(right.x-left.x,right.y-left.y);
-          }catch{
-            return NaN;
-          }
-        }
-        return sample.width/pixelsPerMm;
-      })
-      .filter(v=>Number.isFinite(v)&&v>0&&v<45);
+    const homographyValues:number[]=[];
+    const localValues:number[]=[];
+    const normalizedValues:number[]=[];
+    const correctionFactors:number[]=[];
 
-    const oldStable=selectWidestStableRun(widthsMm).used;
-    const stats=robustWidthStats(widthsMm);
-    const robust=stats.median;
+    for(const sample of samples){
+      const localMm=sample.width*baseMmPerPx;
+      if(Number.isFinite(localMm)&&localMm>0&&localMm<45) localValues.push(localMm);
+
+      let directHomographyMm=NaN;
+      let correctionFactor=1;
+
+      if(measurementCardHomography){
+        try{
+          const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
+          const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
+          directHomographyMm=Math.hypot(right.x-left.x,right.y-left.y);
+
+          if(
+            VISION_FEATURE_FLAGS.ENABLE_CARD_SCALE_PERSPECTIVE_NORMALIZATION &&
+            referenceHomographyMmPerPx &&
+            referenceHomographyMmPerPx>0
+          ){
+            const midX=(sample.left+sample.right)/2;
+            const midY=(sample.y+sample.rightY)/2;
+            const p0=projectPoint(measurementCardHomography,{x:midX,y:midY});
+            const p1=projectPoint(measurementCardHomography,{x:midX+1,y:midY});
+            const fingerHomographyMmPerPx=Math.hypot(p1.x-p0.x,p1.y-p0.y);
+            if(Number.isFinite(fingerHomographyMmPerPx)&&fingerHomographyMmPerPx>0){
+              // Homografia corrige apenas a ESCALA do cartão. Não transforma
+              // as bordas do dedo. A correção é limitada a +/-3% para evitar
+              // extrapolação agressiva fora do plano do cartão.
+              correctionFactor=clamp(
+                fingerHomographyMmPerPx/referenceHomographyMmPerPx,
+                0.97,
+                1.03,
+              );
+            }
+          }
+        }catch{
+          directHomographyMm=NaN;
+          correctionFactor=1;
+        }
+      }
+
+      if(Number.isFinite(directHomographyMm)&&directHomographyMm>0&&directHomographyMm<45){
+        homographyValues.push(directHomographyMm);
+      }
+
+      const normalizedMm=sample.width*baseMmPerPx*correctionFactor;
+      if(Number.isFinite(normalizedMm)&&normalizedMm>0&&normalizedMm<45){
+        normalizedValues.push(normalizedMm);
+        correctionFactors.push(correctionFactor);
+      }
+    }
+
+    const localStats=robustWidthStats(localValues);
+    const homographyStats=robustWidthStats(homographyValues);
+    const normalizedStats=robustWidthStats(normalizedValues);
+
+    const localStable=selectWidestStableRun(localValues).used;
+    const homographyStable=selectWidestStableRun(homographyValues).used;
+    const normalizedStable=selectWidestStableRun(normalizedValues).used;
+
+    const normalizedRobust=normalizedStats.median;
+    const localRobust=localStats.median;
+    const homographyRobust=homographyStats.median;
+
+    const sortedFactors=[...correctionFactors].sort((a,b)=>a-b);
+    const perspectiveScaleFactor=sortedFactors.length
+      ? sortedFactors[Math.floor(sortedFactors.length/2)]
+      : 1;
+
+    const useNormalizedScale=
+      VISION_FEATURE_FLAGS.ENABLE_CARD_SCALE_PERSPECTIVE_NORMALIZATION &&
+      normalizedValues.length>=35;
+
+    const activeStats=useNormalizedScale ? normalizedStats : localStats;
+    const activeStable=useNormalizedScale ? normalizedStable : localStable;
+    const activeRobust=useNormalizedScale ? normalizedRobust : localRobust;
 
     return {
-      oldMm:oldStable,
-      newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && robust!==null ? robust : oldStable,
-      stats,
+      oldMm:activeStable,
+      newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
+      stats:activeStats,
+      homographyMm:homographyRobust ?? homographyStable,
+      localScaleMm:localRobust ?? localStable,
+      normalizedScaleMm:normalizedRobust ?? normalizedStable,
+      perspectiveScaleFactor,
+      baseMmPerPx,
+      normalizedMmPerPx:baseMmPerPx*perspectiveScaleFactor,
+      measurementSource:useNormalizedScale ? "normalized-local-scale" as const : "local-scale" as const,
     };
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,handLandmarkAnalysis?.measuredFinger?.ringRegionY,handLandmarkAnalysis?.measuredFinger?.confidence,contourAnatomy?.detected,contourAnatomy?.ringRegionY,anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY]);
+  },[
+    pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,
+    measurementCardHomography,cardLines,
+    handLandmarkAnalysis?.measuredFinger?.ringRegionY,
+    handLandmarkAnalysis?.measuredFinger?.confidence,
+    contourAnatomy?.detected,contourAnatomy?.ringRegionY,
+    anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY
+  ]);
 
   const liveWidthMm = widthAnalysis.newMm;
 
