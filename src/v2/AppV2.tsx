@@ -87,6 +87,12 @@ export default function AppV2() {
   const autoCaptureLockedRef = useRef(false);
   const recordedMeasurementPhotoRef = useRef<string>("");
   const [measurementHistoryMm, setMeasurementHistoryMm] = useState<number[]>([]);
+  const [captureDeviceQuality, setCaptureDeviceQuality] = useState<{
+    devicePitch:number|null;
+    deviceRoll:number|null;
+    deviceMotion:number|null;
+    stabilityScore:number|null;
+  } | null>(null);
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
@@ -277,6 +283,7 @@ export default function AppV2() {
       autoCaptureTimerRef.current = null;
     }
     autoCaptureLockedRef.current = false;
+    setCaptureDeviceQuality(null);
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
     setPhase("card");
@@ -320,6 +327,14 @@ export default function AppV2() {
       camera.setError("Quase lá: mantenha o celular mais firme até a estabilidade chegar a 75 ou mais.");
       return;
     }
+    const frozenDeviceQuality = {
+      devicePitch: deviceQuality.devicePitch,
+      deviceRoll: deviceQuality.deviceRoll,
+      deviceMotion: deviceQuality.deviceMotion,
+      stabilityScore: deviceQuality.stabilityScore,
+    };
+    setCaptureDeviceQuality(frozenDeviceQuality);
+
     const video = camera.videoRef.current;
     if (!video?.videoWidth) {
       autoCaptureLockedRef.current = false;
@@ -1869,7 +1884,7 @@ export default function AppV2() {
     const finalConfidence=combineConfidenceScore({
       cardScore:calibrationConfidence,
       perspectiveScore,
-      stabilityScore:deviceQuality.stabilityScore,
+      stabilityScore:captureDeviceQuality?.stabilityScore ?? null,
       segmentationScore:null,
       edgeScore,
       depthScore:null,
@@ -1885,7 +1900,7 @@ export default function AppV2() {
   },[
     cardLines,
     calibrationConfidence,
-    deviceQuality.stabilityScore,
+    captureDeviceQuality?.stabilityScore,
     widthAnalysis.stats,
     photo,
   ]);
@@ -2649,6 +2664,7 @@ export default function AppV2() {
             <div className="analysis-result">
               <strong>Medição com baixa confiança</strong>
               <span>Confiança: {preFormulaQuality.finalConfidence}/100 · {preFormulaQuality.label}.</span>
+              <span>Estabilidade da captura: {captureDeviceQuality?.stabilityScore==null?"n/d":captureDeviceQuality.stabilityScore}/100.</span>
               <span>Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais.</span>
             </div>
           )}
@@ -2669,8 +2685,8 @@ export default function AppV2() {
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
                   {measurementAudit && <span>Inclinação detectada do dedo: {measurementAudit.fingerAxisAngleDeg.toFixed(2)}° · cortes corrigidos perpendicularmente</span>}
-                  <span>Device: pitch {deviceQuality.devicePitch===null?"n/d":deviceQuality.devicePitch.toFixed(1)+"°"} · roll {deviceQuality.deviceRoll===null?"n/d":deviceQuality.deviceRoll.toFixed(1)+"°"} · movimento {deviceQuality.deviceMotion===null?"n/d":deviceQuality.deviceMotion.toFixed(2)}</span>
-                  <span>Stability score: {deviceQuality.stabilityScore===null?"n/d":deviceQuality.stabilityScore}</span>
+                  <span>Device na captura: pitch {captureDeviceQuality?.devicePitch==null?"n/d":captureDeviceQuality.devicePitch.toFixed(1)+"°"} · roll {captureDeviceQuality?.deviceRoll==null?"n/d":captureDeviceQuality.deviceRoll.toFixed(1)+"°"} · movimento {captureDeviceQuality?.deviceMotion==null?"n/d":captureDeviceQuality.deviceMotion.toFixed(2)}</span>
+                  <span>Stability na captura: {captureDeviceQuality?.stabilityScore==null?"n/d":captureDeviceQuality.stabilityScore}</span>
                   <span>Perspective score: {measurementAudit.perspectiveScore}</span>
                   <span>Edge score: {measurementAudit.edgeScore}</span>
                   <span>Medida antiga: {measurementAudit.oldMm===null?"n/d":measurementAudit.oldMm.toFixed(2)+" mm"}</span>
