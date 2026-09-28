@@ -19,6 +19,16 @@ const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
 const CARD_HEIGHT_MM = 53.98;
 
+type MeasuredFinger = "polegar" | "indicador" | "medio" | "anelar" | "mindinho";
+
+const MEASURED_FINGER_LABELS: Record<MeasuredFinger, string> = {
+  polegar: "Polegar",
+  indicador: "Indicador",
+  medio: "Médio",
+  anelar: "Anelar",
+  mindinho: "Mindinho",
+};
+
 type Homography = [number,number,number,number,number,number,number,number,number];
 
 const solveLinearSystem = (matrix:number[][], values:number[]) => {
@@ -141,6 +151,7 @@ export default function AppV2() {
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [singlePhotoTestMode, setSinglePhotoTestMode] = useState(false);
+  const [selectedMeasuredFinger, setSelectedMeasuredFinger] = useState<MeasuredFinger | null>(null);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
   const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
@@ -2006,9 +2017,26 @@ export default function AppV2() {
               <p className="lead" style={{marginBottom:12}}>
                 Cartão e dedo na mesma foto. A própria foto fornece a escala de 85,60 mm e os 50 cortes medem o dedo sem usar Foto 1.
               </p>
+              <div style={{margin:"0 0 14px"}}>
+                <strong style={{display:"block",marginBottom:8,color:"#f2cf73"}}>Qual dedo será medido?</strong>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {(["polegar","indicador","medio","anelar","mindinho"] as MeasuredFinger[]).map((finger)=>(
+                    <button
+                      key={finger}
+                      className="secondary"
+                      type="button"
+                      onClick={()=>setSelectedMeasuredFinger(finger)}
+                      style={selectedMeasuredFinger===finger ? {borderColor:"#52e0a3",color:"#52e0a3"} : undefined}
+                    >
+                      {MEASURED_FINGER_LABELS[finger]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <button
                 className="secondary"
                 type="button"
+                disabled={!selectedMeasuredFinger}
                 onClick={() => {
                   setSinglePhotoTestMode(true);
                   setDiameterPhotoTestMode(false);
