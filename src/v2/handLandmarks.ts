@@ -10,13 +10,23 @@ export type FingerName = "index"|"middle"|"ring"|"pinky";
 export type FingerAnatomy = {
   finger:FingerName;
   confidence:number;
-  ringRegionY:number;
-  jointRegionY:number;
+  ringRegionY:number|null;
+  jointRegionY:number|null;
   axisAngleDeg:number;
   mcp:NormalizedLandmark;
   pip:NormalizedLandmark;
   dip:NormalizedLandmark;
   tip:NormalizedLandmark;
+  visibleLandmarks:number;
+  partial:boolean;
+  occludedByCard:boolean;
+};
+
+export type OcclusionRect = {
+  left:number;
+  right:number;
+  top:number;
+  bottom:number;
 };
 
 export type HandLandmarkAnalysis = {
@@ -110,8 +120,31 @@ const angleFromVertical=(a:NormalizedLandmark,b:NormalizedLandmark)=>
 export const inferFingerAnatomy = (
   landmarks:NormalizedLandmark[],
   measurementCenterX:number,
+  occlusion:OcclusionRect|null=null,
 ):FingerAnatomy|null => {
   if(landmarks.length<21) return null;
+
+  const insideOcclusion=(point:NormalizedLandmark)=>{
+    if(!occlusion) return false;
+    const marginX=.015;
+    const marginY=.02;
+    return (
+      point.x>=occlusion.left-marginX &&
+      point.x<=occlusion.right+marginX &&
+      point.y>=occlusion.top-marginY &&
+      point.y<=occlusion.bottom+marginY
+    );
+  };
+
+  const fitAxis=(points:NormalizedLandmark[])=>{
+    if(points.length<2) return null;
+    const meanY=points.reduce((s,p)=>s+p.y,0)/points.length;
+    const meanX=points.reduce((s,p)=>s+p.x,0)/points.length;
+    const denom=points.reduce((s,p)=>s+(p.y-meanY)**2,0);
+    if(denom<1e-8) return null;
+    const slope=points.reduce((s,p)=>s+(p.y-meanY)*(p.x-meanX),0)/denom;
+    return {slope,intercept:meanX-slope*meanY};
+  };
 
   const candidates=(Object.keys(FINGER_IDS) as FingerName[]).map((finger)=>{
     const [mcpId,pipId,dipId,tipId]=FINGER_IDS[finger];
@@ -119,21 +152,43 @@ export const inferFingerAnatomy = (
     const pip=landmarks[pipId];
     const dip=landmarks[dipId];
     const tip=landmarks[tipId];
+    const points=[mcp,pip,dip,tip];
+    const visible=points.filter((p)=>!insideOcclusion(p));
+    const axis=fitAxis(visible.length>=2?visible:points);
 
-    // Região onde um anel repousa: terço proximal entre MCP e PIP.
-    // Junta usada apenas como informação anatômica: PIP.
-    const ringPoint=pointOnSegment(mcp,pip,0.38);
+    const mcpVisible=!insideOcclusion(mcp);
+    const pipVisible=!insideOcclusion(pip);
+    const proximalVisible=mcpVisible&&pipVisible;
+
+    const ringPoint=proximalVisible ? pointOnSegment(mcp,pip,0.38) : null;
+    const jointPoint=pipVisible ? pip : null;
+
+    const referencePoint=
+      ringPoint ??
+      visible.reduce((best,p)=>Math.abs(p.x-measurementCenterX)<Math.abs(best.x-measurementCenterX)?p:best,visible[0] ?? mcp);
+
     const fingerLength=Math.max(0.001,dist(mcp,tip));
-    const xDistance=Math.abs(ringPoint.x-measurementCenterX);
-    const geometryScore=Math.max(0,1-xDistance/Math.max(0.08,fingerLength*0.6));
+    const xDistance=Math.abs(referencePoint.x-measurementCenterX);
+    const geometryScore=Math.max(0,1-xDistance/Math.max(0.08,fingerLength*0.65));
+    const visibilityScore=Math.min(1,visible.length/3);
+    const proximalBonus=proximalVisible?1:.72;
+    const confidence=Math.round(100*(geometryScore*.58+visibilityScore*.22+proximalBonus*.20));
+
+    let axisAngleDeg=angleFromVertical(mcp,pip);
+    if(axis){
+      axisAngleDeg=Math.atan(axis.slope)*180/Math.PI;
+    }
 
     return {
       finger,
-      confidence:Math.round(geometryScore*100),
-      ringRegionY:ringPoint.y,
-      jointRegionY:pip.y,
-      axisAngleDeg:angleFromVertical(mcp,pip),
+      confidence,
+      ringRegionY:ringPoint?.y ?? null,
+      jointRegionY:jointPoint?.y ?? null,
+      axisAngleDeg,
       mcp,pip,dip,tip,
+      visibleLandmarks:visible.length,
+      partial:visible.length<4 || !proximalVisible,
+      occludedByCard:points.some(insideOcclusion),
     };
   }).sort((a,b)=>b.confidence-a.confidence);
 
@@ -143,6 +198,7 @@ export const inferFingerAnatomy = (
 export const analyzeHandLandmarks = async(
   imageSrc:string,
   measurementCenterX:number,
+  occlusion:OcclusionRect|null=null,
 ):Promise<HandLandmarkAnalysis>=>{
   try{
     const image=await loadImage(imageSrc);
@@ -163,7 +219,7 @@ export const analyzeHandLandmarks = async(
       };
     }
 
-    const anatomy=inferFingerAnatomy(landmarks,measurementCenterX);
+    const anatomy=inferFingerAnatomy(landmarks,measurementCenterX,occlusion);
     const handedScore=Math.round((handedness?.score ?? .75)*100);
     const anatomyScore=anatomy?.confidence ?? 0;
     const score=Math.round(handedScore*.45+anatomyScore*.55);
