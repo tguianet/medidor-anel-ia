@@ -85,6 +85,8 @@ export default function AppV2() {
   const cardLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const autoCaptureTimerRef = useRef<number | null>(null);
   const autoCaptureLockedRef = useRef(false);
+  const recordedMeasurementPhotoRef = useRef<string>("");
+  const [measurementHistoryMm, setMeasurementHistoryMm] = useState<number[]>([]);
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
@@ -217,6 +219,7 @@ export default function AppV2() {
       !camera.cameraOpening &&
       !camera.error &&
       cardReady &&
+      (!VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION || deviceQuality.stabilityScore === null || deviceQuality.stabilityScore >= 70) &&
       measurementMode === "finger" &&
       !diameterPhotoTestMode &&
       // Foto 1 pode ser automatica. Na Foto 2 o usuario precisa casar o
@@ -259,6 +262,7 @@ export default function AppV2() {
     cardReady,
     camera.cameraOpening,
     camera.error,
+    deviceQuality.stabilityScore,
     measurementMode,
     diameterPhotoTestMode,
     fingerCardCalibrationStep,
@@ -300,6 +304,14 @@ export default function AppV2() {
 
   const capture = async () => {
     if (autoCaptureLockedRef.current && stage !== "camera") return;
+    if(
+      VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
+      deviceQuality.stabilityScore !== null &&
+      deviceQuality.stabilityScore < 55
+    ){
+      camera.setError("Celular em movimento. Mantenha o aparelho firme por um instante e capture novamente.");
+      return;
+    }
     const video = camera.videoRef.current;
     if (!video?.videoWidth) {
       autoCaptureLockedRef.current = false;
@@ -1870,6 +1882,34 @@ export default function AppV2() {
     photo,
   ]);
 
+  useEffect(() => {
+    if(
+      !photo ||
+      !leftLocked ||
+      !rightLocked ||
+      liveWidthMm===null ||
+      !preFormulaQuality.accepted ||
+      recordedMeasurementPhotoRef.current===photo
+    ) return;
+
+    recordedMeasurementPhotoRef.current=photo;
+    setMeasurementHistoryMm((current)=>[...current.slice(-9),Number(liveWidthMm.toFixed(3))]);
+  },[photo,leftLocked,rightLocked,liveWidthMm,preFormulaQuality.accepted]);
+
+  const measurementRepeatability = useMemo(() => {
+    if(!measurementHistoryMm.length) return {count:0,mean:null as number|null,sd:null as number|null,range:null as number|null};
+    const mean=measurementHistoryMm.reduce((s,v)=>s+v,0)/measurementHistoryMm.length;
+    const variance=measurementHistoryMm.length>1
+      ? measurementHistoryMm.reduce((s,v)=>s+(v-mean)**2,0)/(measurementHistoryMm.length-1)
+      : 0;
+    return {
+      count:measurementHistoryMm.length,
+      mean,
+      sd:Math.sqrt(variance),
+      range:Math.max(...measurementHistoryMm)-Math.min(...measurementHistoryMm),
+    };
+  },[measurementHistoryMm]);
+
   const finalMeasurementConfidence = calibrationConfidence;
 
   const calibrationQualityLabel =
@@ -2631,6 +2671,9 @@ export default function AppV2() {
                   <span>Mediana filtrada: {measurementAudit.robustMedianMm===null?"n/d":measurementAudit.robustMedianMm.toFixed(2)+" mm"} · média aparada: {measurementAudit.robustTrimmedMeanMm===null?"n/d":measurementAudit.robustTrimmedMeanMm.toFixed(2)+" mm"}</span>
                   <span>Cortes filtrados: {measurementAudit.robustFilteredCount} · outliers removidos: {measurementAudit.robustOutlierCount}</span>
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
+                  <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
+                  <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
+                  <span>Depth: {VISION_FEATURE_FLAGS.ENABLE_DEPTH_VALIDATION ? "habilitado/aguardando fonte" : "não disponível · fallback visão computacional"}</span>
                   <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
