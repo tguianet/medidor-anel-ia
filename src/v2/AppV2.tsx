@@ -1860,13 +1860,22 @@ export default function AppV2() {
 
     let cancelled=false;
     const centerX=((leftLine+rightLine)/2)/100;
-    void analyzeHandLandmarks(photo,centerX).then((analysis)=>{
+    const cardForOcclusion=quadFromLines(cardLines);
+    const xs=cardForOcclusion.map(p=>p.x/100);
+    const ys=cardForOcclusion.map(p=>p.y/100);
+    const occlusion={
+      left:Math.min(...xs),
+      right:Math.max(...xs),
+      top:Math.min(...ys),
+      bottom:Math.max(...ys),
+    };
+    void analyzeHandLandmarks(photo,centerX,occlusion).then((analysis)=>{
       if(cancelled) return;
       setHandLandmarkAnalysis(analysis);
     });
 
     return ()=>{ cancelled=true; };
-  },[photo,measurementMode,phase,leftLine,rightLine]);
+  },[photo,measurementMode,phase,leftLine,rightLine,cardLines]);
 
   useEffect(() => {
     const anatomy=handLandmarkAnalysis?.measuredFinger;
@@ -1875,6 +1884,7 @@ export default function AppV2() {
       !photo ||
       !anatomy ||
       anatomy.confidence<60 ||
+      anatomy.ringRegionY===null ||
       autoAnatomyAppliedPhotoRef.current===photo
     ) return;
 
@@ -1893,7 +1903,8 @@ export default function AppV2() {
     const anatomicalGuideY=
       VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
       anatomy &&
-      anatomy.confidence>=60
+      anatomy.confidence>=60 &&
+      anatomy.ringRegionY!==null
         ? clamp(anatomy.ringRegionY*100,28,84)
         : ringGuideY;
 
@@ -1944,7 +1955,13 @@ export default function AppV2() {
       cardScore:calibrationConfidence,
       perspectiveScore,
       stabilityScore:captureDeviceQuality?.stabilityScore ?? null,
-      segmentationScore:handLandmarkAnalysis?.detected ? handLandmarkAnalysis.score : null,
+      segmentationScore:handLandmarkAnalysis?.detected
+        ? Math.round(
+            handLandmarkAnalysis.score *
+            (handLandmarkAnalysis.measuredFinger?.partial ? 0.82 : 1) *
+            (handLandmarkAnalysis.measuredFinger?.occludedByCard ? 0.88 : 1)
+          )
+        : null,
       edgeScore,
       depthScore:null,
     });
@@ -2157,7 +2174,8 @@ export default function AppV2() {
   const auditGuideY =
     VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
     handLandmarkAnalysis?.measuredFinger &&
-    handLandmarkAnalysis.measuredFinger.confidence>=60
+    handLandmarkAnalysis.measuredFinger.confidence>=60 &&
+    handLandmarkAnalysis.measuredFinger.ringRegionY!==null
       ? clamp(handLandmarkAnalysis.measuredFinger.ringRegionY*100,28,84)
       : ringGuideY;
   const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx(auditGuideY) : null;
@@ -2839,8 +2857,9 @@ export default function AppV2() {
                   <span>Cortes filtrados: {measurementAudit.robustFilteredCount} · outliers removidos: {measurementAudit.robustOutlierCount}</span>
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
-                  {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · ringRegionY {(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)}% · jointRegionY {(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)}%</span>}
-                  <span>Região anatômica aplicada: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 ? "AUTOMÁTICA" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
+                  {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · visíveis {handLandmarkAnalysis.measuredFinger.visibleLandmarks}/4 · {handLandmarkAnalysis.measuredFinger.partial ? "parcial" : "completo"} · cartão ocultando {handLandmarkAnalysis.measuredFinger.occludedByCard ? "sim" : "não"}</span>}
+                  {handLandmarkAnalysis?.measuredFinger && <span>ringRegionY {handLandmarkAnalysis.measuredFinger.ringRegionY===null?"oculta/fallback":(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)+"%"} · jointRegionY {handLandmarkAnalysis.measuredFinger.jointRegionY===null?"oculta":(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)+"%"}</span>}
+                  <span>Região anatômica aplicada: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "AUTOMÁTICA" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
