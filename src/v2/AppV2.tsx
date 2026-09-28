@@ -11,6 +11,10 @@ import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { classifyFingerWidthMm } from "./ringClassifier";
+import { VISION_FEATURE_FLAGS } from "./featureFlags";
+import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
+import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
+import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
@@ -70,6 +74,7 @@ const projectPoint = (h:Homography, point:Point):Point => {
 
 export default function AppV2() {
   const camera = useCameraStream();
+  const deviceQuality = useDeviceCaptureQuality(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION);
   // Diagnostico privado: fica dentro da mesma pagina para nao interferir
   // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
   const [debugMode, setDebugMode] = useState(false);
@@ -260,6 +265,9 @@ export default function AppV2() {
   ]);
 
   const openCamera = async () => {
+    if(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION){
+      void deviceQuality.requestPermission();
+    }
     if (autoCaptureTimerRef.current !== null) {
       window.clearTimeout(autoCaptureTimerRef.current);
       autoCaptureTimerRef.current = null;
@@ -693,25 +701,56 @@ export default function AppV2() {
         setPerspectiveMismatchPercent(null);
       }
 
-      // Volta ao metodo de 3 linhas: a escala vem diretamente da largura
-      // de 85,60 mm medida na linha da base da foto 2. Sem homografia.
-      setMeasurementCardHomography(null);
-      const pxPerMm=widthPx/CARD_WIDTH_MM;
-
       const leftPercent={x:segment.leftPx.x/source.width*100,y:segment.leftPx.y/source.height*100};
       const rightPercent={x:segment.rightPx.x/source.width*100,y:segment.rightPx.y/source.height*100};
       const bottomY=(leftPercent.y+rightPercent.y)/2;
       const syntheticTopY=clamp(bottomY-28,2,96);
-      const quad:[Point,Point,Point,Point]=[
+      const syntheticQuad:[Point,Point,Point,Point]=[
         {x:leftPercent.x,y:syntheticTopY},
         {x:rightPercent.x,y:syntheticTopY},
         rightPercent,
         leftPercent,
       ];
 
+      let pxPerMm=widthPx/CARD_WIDTH_MM;
+      let activeQuad=syntheticQuad;
+      let activeHomography:Homography|null=null;
+      let cardConfidence=96;
+
+      if(VISION_FEATURE_FLAGS.ENABLE_PERSPECTIVE_CORRECTION){
+        try{
+          const actualQuad=quadFromLines(cardLines);
+          const geometry=assessCardQuadGeometry(actualQuad,CARD_WIDTH_MM,CARD_HEIGHT_MM);
+          cardConfidence=Math.min(cardConfidence,geometry.confidence);
+
+          if(!geometry.valid){
+            camera.setError(geometry.reason || "Perspectiva do cartão fora do limite. Refaça a captura.");
+            return;
+          }
+
+          const actualPx=validateCardQuad(actualQuad);
+          activeHomography=buildHomography(
+            actualPx,
+            [{x:0,y:0},{x:CARD_WIDTH_MM,y:0},{x:CARD_WIDTH_MM,y:CARD_HEIGHT_MM},{x:0,y:CARD_HEIGHT_MM}],
+          );
+          activeQuad=actualQuad;
+
+          const averageWidthPx=quadAverageWidthPx(actualQuad);
+          if(Number.isFinite(averageWidthPx)&&averageWidthPx>0){
+            pxPerMm=averageWidthPx/CARD_WIDTH_MM;
+            setMeasurementCardLengthPx(averageWidthPx);
+          }
+        }catch{
+          // Fallback seguro: mantém a calibração antiga por 85,60 mm.
+          activeHomography=null;
+          activeQuad=syntheticQuad;
+        }
+      }
+
+      setMeasurementCardHomography(activeHomography);
       setFingerCardCalibrationStep("done");
-      setCalibrationConfidence(96);
-      activateFingerMeasurement(leftPercent.x,rightPercent.x,bottomY,96,quad,pxPerMm);
+      setCalibrationConfidence(cardConfidence);
+      activateFingerMeasurement(leftPercent.x,rightPercent.x,bottomY,cardConfidence,activeQuad,pxPerMm);
     }catch{
       camera.setError("Ajuste as duas laterais e a linha da base exatamente nas bordas do cartão.");
     }
@@ -1759,11 +1798,15 @@ export default function AppV2() {
   // A diferenca para a foto 1 fica somente como diagnostico e NAO altera o dedo.
   const v2PhotoScaleCorrection = 1;
 
-  const liveWidthMm = useMemo(() => {
-    if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
+  const widthAnalysis = useMemo(() => {
+    if(!pixelsPerMm||!leftLocked||!rightLocked){
+      return {oldMm:null as number|null,newMm:null as number|null,stats:null as ReturnType<typeof robustWidthStats>|null};
+    }
 
     const samples=fingerBandSamplesPx();
-    if(!samples || samples.length<35) return null;
+    if(!samples || samples.length<35){
+      return {oldMm:null,newMm:null,stats:null};
+    }
 
     const widthsMm=samples
       .map((sample)=>{
@@ -1780,9 +1823,18 @@ export default function AppV2() {
       })
       .filter(v=>Number.isFinite(v)&&v>0&&v<45);
 
-    const stable=selectWidestStableRun(widthsMm);
-    return stable.used;
+    const oldStable=selectWidestStableRun(widthsMm).used;
+    const stats=robustWidthStats(widthsMm);
+    const robust=stats.median;
+
+    return {
+      oldMm:oldStable,
+      newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && robust!==null ? robust : oldStable,
+      stats,
+    };
   },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
+
+  const liveWidthMm = widthAnalysis.newMm;
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1900,7 +1952,25 @@ export default function AppV2() {
     }).filter(Number.isFinite);
 
     const widestPhysical=selectWidestStableRun(physicalWidthsMm);
+    const robustPhysical=robustWidthStats(physicalWidthsMm);
     const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
+
+    let perspectiveScore=100;
+    try{
+      const geometry=assessCardQuadGeometry(quadFromLines(cardLines),CARD_WIDTH_MM,CARD_HEIGHT_MM);
+      perspectiveScore=geometry.confidence;
+    }catch{
+      perspectiveScore=72;
+    }
+
+    const finalConfidence=combineConfidenceScore({
+      cardScore:calibrationConfidence,
+      perspectiveScore,
+      stabilityScore:deviceQuality.stabilityScore,
+      segmentationScore:null,
+      edgeScore:robustPhysical.edgeScore,
+      depthScore:null,
+    });
 
     return {
       rawWidthsPx,
@@ -1908,12 +1978,22 @@ export default function AppV2() {
       cardScaleMmPerPx:pixelsPerMm>0?1/pixelsPerMm:null,
       rawCardMm:widestPhysical.used,
       normalizedMm:liveWidthMm,
+      oldMm:widthAnalysis.oldMm,
+      newMm:widthAnalysis.newMm,
       correctionPercent:0,
       spreadPx,
       spreadPercent:widestRun.used>0?spreadPx/widestRun.used*100:0,
       selectedUpperWidthsPx:widestRun.selected,
       selectedRunStart:widestRun.startIndex+1,
       fingerAxisAngleDeg:fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
+      robustMedianMm:robustPhysical.median,
+      robustTrimmedMeanMm:robustPhysical.trimmedMean,
+      robustFilteredCount:robustPhysical.filtered.length,
+      robustOutlierCount:robustPhysical.outlierCount,
+      edgeScore:robustPhysical.edgeScore,
+      perspectiveScore,
+      finalConfidence,
+      finalConfidenceLabel:confidenceLabel(finalConfidence),
     };
   })();
 
@@ -2496,7 +2576,13 @@ export default function AppV2() {
             </div>
           )}
 
-          {phase === "finger" && result && leftLocked && rightLocked && (
+          {measurementAudit && measurementAudit.finalConfidence < 70 && phase === "finger" && (
+            <div className="analysis-result">
+              <strong>Medição com baixa confiança</strong>
+              <span>Refaça a captura com o cartão e o celular mais alinhados e mantenha o aparelho firme.</span>
+            </div>
+          )}
+          {phase === "finger" && result && leftLocked && rightLocked && (!measurementAudit || measurementAudit.finalConfidence >= 70) && (
             <div className="analysis-result commercial-result">
               <span><strong>Número justo: {clamp(result.ringSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {result.ringSize}</strong>
@@ -2513,6 +2599,16 @@ export default function AppV2() {
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
                   {measurementAudit && <span>Inclinação detectada do dedo: {measurementAudit.fingerAxisAngleDeg.toFixed(2)}° · cortes corrigidos perpendicularmente</span>}
+                  <span>Device: pitch {deviceQuality.devicePitch===null?"n/d":deviceQuality.devicePitch.toFixed(1)+"°"} · roll {deviceQuality.deviceRoll===null?"n/d":deviceQuality.deviceRoll.toFixed(1)+"°"} · movimento {deviceQuality.deviceMotion===null?"n/d":deviceQuality.deviceMotion.toFixed(2)}</span>
+                  <span>Stability score: {deviceQuality.stabilityScore===null?"n/d":deviceQuality.stabilityScore}</span>
+                  <span>Perspective score: {measurementAudit.perspectiveScore}</span>
+                  <span>Edge score: {measurementAudit.edgeScore}</span>
+                  <span>Medida antiga: {measurementAudit.oldMm===null?"n/d":measurementAudit.oldMm.toFixed(2)+" mm"}</span>
+                  <span>Medida nova robusta: {measurementAudit.newMm===null?"n/d":measurementAudit.newMm.toFixed(2)+" mm"}</span>
+                  {measurementAudit.oldMm!==null && measurementAudit.newMm!==null && <span>Diferença old→new: {(measurementAudit.newMm-measurementAudit.oldMm>=0?"+":"")}{(measurementAudit.newMm-measurementAudit.oldMm).toFixed(2)} mm</span>}
+                  <span>Mediana filtrada: {measurementAudit.robustMedianMm===null?"n/d":measurementAudit.robustMedianMm.toFixed(2)+" mm"} · média aparada: {measurementAudit.robustTrimmedMeanMm===null?"n/d":measurementAudit.robustTrimmedMeanMm.toFixed(2)+" mm"}</span>
+                  <span>Cortes filtrados: {measurementAudit.robustFilteredCount} · outliers removidos: {measurementAudit.robustOutlierCount}</span>
+                  <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
                   <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
