@@ -2946,11 +2946,11 @@ export default function AppV2() {
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
             </div>
           )}
-          {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
+          {debugMode && phase === "finger" && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
-              <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
+              <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
