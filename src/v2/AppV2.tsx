@@ -90,14 +90,14 @@ export default function AppV2() {
   const recordedMeasurementPhotoRef = useRef<string>("");
   const autoAnatomyAppliedPhotoRef = useRef<string>("");
   const measurementHistoryTimerRef = useRef<number | null>(null);
-  type StableCapture = { mm:number; regionY:number; photoKey:string; ts:number };
+  type StableCapture = { mm:number; regionOffsetY:number; photoKey:string; ts:number };
   const [stableCaptures, setStableCaptures] = useState<StableCapture[]>([]);
   const measurementHistoryMm = useMemo(
     () => stableCaptures.map(item => item.mm),
     [stableCaptures]
   );
-  const anatomicalRegionHistoryY = useMemo(
-    () => stableCaptures.map(item => item.regionY),
+  const anatomicalRegionOffsetHistoryY = useMemo(
+    () => stableCaptures.map(item => item.regionOffsetY),
     [stableCaptures]
   );
   const resetMeasurementSession = () => {
@@ -1922,25 +1922,25 @@ export default function AppV2() {
   ]);
 
   const anatomicalRegionFusion = useMemo(() => {
-    const valid=[...anatomicalRegionHistoryY].filter(v=>Number.isFinite(v)&&v>=20&&v<=90);
+    const valid=[...anatomicalRegionOffsetHistoryY].filter(v=>Number.isFinite(v)&&Math.abs(v)<=25);
     if(!VISION_FEATURE_FLAGS.ENABLE_ANATOMICAL_REGION_FUSION || valid.length<3){
       return {
         active:false,
         count:valid.length,
-        medianY:null as number|null,
-        rangeY:valid.length ? Math.max(...valid)-Math.min(...valid) : null as number|null,
+        medianOffsetY:null as number|null,
+        rangeOffsetY:valid.length ? Math.max(...valid)-Math.min(...valid) : null as number|null,
       };
     }
 
     const lastThree=valid.slice(-3).sort((a,b)=>a-b);
-    const rangeY=Math.max(...lastThree)-Math.min(...lastThree);
+    const rangeOffsetY=Math.max(...lastThree)-Math.min(...lastThree);
     return {
-      active:rangeY<=3,
+      active:rangeOffsetY<=3,
       count:lastThree.length,
-      medianY:lastThree[1],
-      rangeY,
+      medianOffsetY:lastThree[1],
+      rangeOffsetY,
     };
-  },[anatomicalRegionHistoryY]);
+  },[anatomicalRegionOffsetHistoryY]);
 
   const widthAnalysis = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked){
@@ -1961,8 +1961,8 @@ export default function AppV2() {
     const anatomicalGuideY=
       VISION_FEATURE_FLAGS.ENABLE_ANATOMICAL_REGION_FUSION &&
       anatomicalRegionFusion.active &&
-      anatomicalRegionFusion.medianY!==null
-        ? clamp(anatomicalRegionFusion.medianY,28,84)
+      anatomicalRegionFusion.medianOffsetY!==null
+        ? clamp(ringGuideY + anatomicalRegionFusion.medianOffsetY,28,84)
         : currentDetectedRegionY;
 
     const samples=fingerBandSamplesPx(anatomicalGuideY);
@@ -1994,7 +1994,7 @@ export default function AppV2() {
       newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && robust!==null ? robust : oldStable,
       stats,
     };
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,handLandmarkAnalysis?.measuredFinger?.ringRegionY,handLandmarkAnalysis?.measuredFinger?.confidence,contourAnatomy?.detected,contourAnatomy?.ringRegionY,anatomicalRegionFusion.active,anatomicalRegionFusion.medianY]);
+  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,handLandmarkAnalysis?.measuredFinger?.ringRegionY,handLandmarkAnalysis?.measuredFinger?.confidence,contourAnatomy?.detected,contourAnatomy?.ringRegionY,anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY]);
 
   const liveWidthMm = widthAnalysis.newMm;
 
@@ -2071,12 +2071,12 @@ export default function AppV2() {
           : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null
             ? clamp(contourAnatomy.ringRegionY,28,84)
             : ringGuideY;
-      const stableRegionY=Number(detectedRegionY.toFixed(3));
+      const stableRegionOffsetY=Number((detectedRegionY-ringGuideY).toFixed(3));
 
       setStableCaptures((current)=>{
         const entry:StableCapture={
           mm:stableMm,
-          regionY:stableRegionY,
+          regionOffsetY:stableRegionOffsetY,
           photoKey:photo,
           ts:Date.now(),
         };
@@ -2270,8 +2270,8 @@ export default function AppV2() {
   const auditGuideY =
     VISION_FEATURE_FLAGS.ENABLE_ANATOMICAL_REGION_FUSION &&
     anatomicalRegionFusion.active &&
-    anatomicalRegionFusion.medianY!==null
-      ? clamp(anatomicalRegionFusion.medianY,28,84)
+    anatomicalRegionFusion.medianOffsetY!==null
+      ? clamp(ringGuideY + anatomicalRegionFusion.medianOffsetY,28,84)
       : VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
         handLandmarkAnalysis?.measuredFinger &&
         handLandmarkAnalysis.measuredFinger.confidence>=60 &&
@@ -2971,12 +2971,12 @@ export default function AppV2() {
                   {handLandmarkAnalysis?.measuredFinger && <span>ringRegionY {handLandmarkAnalysis.measuredFinger.ringRegionY===null?"oculta/fallback":(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)+"%"} · jointRegionY {handLandmarkAnalysis.measuredFinger.jointRegionY===null?"oculta":(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)+"%"}</span>}
                   <span>Contorno anatômico: {contourAnatomy?.detected ? "detectado" : "não detectado"}{contourAnatomy ? ` · score ${contourAnatomy.score} · ${contourAnatomy.reason}` : ""}</span>
                   {contourAnatomy?.ringRegionY!==null && contourAnatomy?.ringRegionY!==undefined && <span>Contour ringRegionY: {contourAnatomy.ringRegionY.toFixed(1)}% · jointRegionY {contourAnatomy.jointRegionY===null?"n/d":contourAnatomy.jointRegionY.toFixed(1)+"%"} · CV {contourAnatomy.widthCvPercent===null?"n/d":contourAnatomy.widthCvPercent.toFixed(2)+"%"}</span>}
-                  <span>Fusão da região anatômica: {anatomicalRegionFusion.active ? "ATIVA" : anatomicalRegionFusion.count>=3 ? `REPROVADA · amplitude ${(anatomicalRegionFusion.rangeY ?? 0).toFixed(1)}% > 3,0%` : `aguardando 3 regiões válidas (${anatomicalRegionFusion.count}/3)`}{anatomicalRegionFusion.active && anatomicalRegionFusion.medianY!==null ? ` · mediana Y ${anatomicalRegionFusion.medianY.toFixed(1)}% · amplitude ${(anatomicalRegionFusion.rangeY ?? 0).toFixed(1)}%` : ""}</span>
+                  <span>Fusão da região anatômica: {anatomicalRegionFusion.active ? "ATIVA" : anatomicalRegionFusion.count>=3 ? `REPROVADA · amplitude do offset ${(anatomicalRegionFusion.rangeOffsetY ?? 0).toFixed(1)}% > 3,0%` : `aguardando 3 regiões válidas (${anatomicalRegionFusion.count}/3)`}{anatomicalRegionFusion.active && anatomicalRegionFusion.medianOffsetY!==null ? ` · offset mediano ${anatomicalRegionFusion.medianOffsetY.toFixed(1)}% · amplitude ${(anatomicalRegionFusion.rangeOffsetY ?? 0).toFixed(1)}%` : ""}</span>
                   <span>Região anatômica aplicada: {anatomicalRegionFusion.active ? "FUSÃO" : handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "LANDMARKS" : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null ? "CONTORNO" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : temporalFusion.count>=3 ? `REPROVADA · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm > 0,350 mm` : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
-                  <span>Capturas pareadas: {stableCaptures.slice(-3).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ Y ${item.regionY.toFixed(1)}%`).join(" · ") || "nenhuma"}</span>
+                  <span>Capturas pareadas: {stableCaptures.slice(-3).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ offset ${item.regionOffsetY>=0?"+":""}${item.regionOffsetY.toFixed(1)}%`).join(" · ") || "nenhuma"}</span>
                   <span>Histórico: registra somente após 0,9 s estável e atualiza a mesma foto se o ajuste mudar.</span>
                   <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
