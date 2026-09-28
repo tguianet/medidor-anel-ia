@@ -1608,38 +1608,78 @@ export default function AppV2() {
 
     const leftFit=fitXByY(leftPoints);
     const rightFit=fitXByY(rightPoints);
-    const axisSlope=clamp((leftFit.slope+rightFit.slope)/2,-0.45,0.45);
+
+    // Detecta a inclinacao pelo eixo CENTRAL do dedo, nao pela tela.
+    // Isso deixa a medida transversal perpendicular ao proprio dedo mesmo
+    // quando a foto entra alguns graus torta.
+    const centerPoints=leftPoints.map((leftPoint,index)=>({
+      x:(leftPoint.x+rightPoints[index].x)/2,
+      y:(leftPoint.y+rightPoints[index].y)/2,
+    }));
+    const centerFit=fitXByY(centerPoints);
+    const axisSlope=clamp(centerFit.slope,-0.45,0.45);
+    const axisAngleDeg=Math.atan(axisSlope)*180/Math.PI;
+
+    // Vetor unitario perpendicular ao eixo do dedo.
     const normalLength=Math.hypot(1,axisSlope);
     const nx=1/normalLength;
     const ny=-axisSlope/normalLength;
-    const axisAngleDeg=Math.atan(axisSlope)*180/Math.PI;
+
+    const intersectionWithFit=(
+      fit:{slope:number;intercept:number},
+      center:{x:number;y:number},
+    )=>{
+      // reta normal: P(t)=center+t*(nx,ny)
+      // borda: x=fit.slope*y+fit.intercept
+      const denominator=nx-fit.slope*ny;
+      if(Math.abs(denominator)<1e-8) return null;
+      const t=(fit.slope*center.y+fit.intercept-center.x)/denominator;
+      if(!Number.isFinite(t)) return null;
+      return {
+        x:center.x+t*nx,
+        y:center.y+t*ny,
+        t,
+      };
+    };
 
     return leftPoints.map((leftPoint,index)=>{
       const rightPoint=rightPoints[index];
-      const denominator=nx-rightFit.slope*ny;
-      let t=denominator!==0
-        ? (rightFit.slope*leftPoint.y+rightFit.intercept-leftPoint.x)/denominator
-        : rightPoint.x-leftPoint.x;
+      const center={
+        x:(leftPoint.x+rightPoint.x)/2,
+        y:(leftPoint.y+rightPoint.y)/2,
+      };
+      const leftHit=intersectionWithFit(leftFit,center);
+      const rightHit=intersectionWithFit(rightFit,center);
 
-      if(!Number.isFinite(t) || t<=0){
-        t=(rightPoint.x-leftPoint.x)*Math.cos(Math.atan(axisSlope));
+      let measuredLeftX=leftPoint.x;
+      let measuredLeftY=leftPoint.y;
+      let measuredRightX=rightPoint.x;
+      let measuredRightY=rightPoint.y;
+      let width=Math.hypot(rightPoint.x-leftPoint.x,rightPoint.y-leftPoint.y);
+
+      if(leftHit&&rightHit&&leftHit.t<rightHit.t){
+        measuredLeftX=leftHit.x;
+        measuredLeftY=leftHit.y;
+        measuredRightX=rightHit.x;
+        measuredRightY=rightHit.y;
+        width=Math.abs(rightHit.t-leftHit.t);
+      }else{
+        // Fallback conservador para o comportamento anterior.
+        width=(rightPoint.x-leftPoint.x)*Math.cos(Math.atan(axisSlope));
       }
 
-      const orthogonalRightX=leftPoint.x+t*nx;
-      const orthogonalRightY=leftPoint.y+t*ny;
-
       return {
-        left:leftPoint.x,
-        right:orthogonalRightX,
-        y:leftPoint.y,
-        rightY:orthogonalRightY,
-        width:Math.abs(t),
+        left:measuredLeftX,
+        right:measuredRightX,
+        y:measuredLeftY,
+        rightY:measuredRightY,
+        width:Math.abs(width),
         horizontalWidth:rightPoint.x-leftPoint.x,
         axisAngleDeg,
         yPercent:leftPoint.yPercent,
-        rightYPercent:toScreenYPercent(orthogonalRightY),
-        leftPercent:toScreenXPercent(leftPoint.x),
-        rightPercent:toScreenXPercent(orthogonalRightX),
+        rightYPercent:toScreenYPercent(measuredRightY),
+        leftPercent:toScreenXPercent(measuredLeftX),
+        rightPercent:toScreenXPercent(measuredRightX),
         confidence:Math.round(clamp(
           45+Math.min(26,leftPoint.score*.55)+Math.min(26,rightPoint.score*.55),
           0,99
@@ -2472,6 +2512,7 @@ export default function AppV2() {
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
+                  {measurementAudit && <span>Inclinação detectada do dedo: {measurementAudit.fingerAxisAngleDeg.toFixed(2)}° · cortes corrigidos perpendicularmente</span>}
                   <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
