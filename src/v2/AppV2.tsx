@@ -2153,6 +2153,38 @@ export default function AppV2() {
     photo,
   ]);
 
+  const captureQualityGate = useMemo(() => {
+    const reasons:string[]=[];
+    const stability=captureDeviceQuality?.stabilityScore ?? null;
+
+    if(preFormulaQuality.perspectiveScore<92){
+      reasons.push(`perspectiva ${preFormulaQuality.perspectiveScore} < 92`);
+    }
+    if(stability!==null && stability<90){
+      reasons.push(`estabilidade ${stability} < 90`);
+    }
+    if(preFormulaQuality.edgeScore<90){
+      reasons.push(`bordas ${preFormulaQuality.edgeScore} < 90`);
+    }
+    if(preFormulaQuality.finalConfidence<90){
+      reasons.push(`confiança ${preFormulaQuality.finalConfidence} < 90`);
+    }
+
+    return {
+      accepted:reasons.length===0,
+      reasons,
+      perspectiveMin:92,
+      stabilityMin:90,
+      edgeMin:90,
+      confidenceMin:90,
+    };
+  },[
+    preFormulaQuality.perspectiveScore,
+    preFormulaQuality.edgeScore,
+    preFormulaQuality.finalConfidence,
+    captureDeviceQuality?.stabilityScore,
+  ]);
+
   useEffect(() => {
     if(measurementHistoryTimerRef.current!==null){
       window.clearTimeout(measurementHistoryTimerRef.current);
@@ -2164,7 +2196,8 @@ export default function AppV2() {
       !leftLocked ||
       !rightLocked ||
       liveWidthMm===null ||
-      !preFormulaQuality.accepted
+      !preFormulaQuality.accepted ||
+      !captureQualityGate.accepted
     ) return;
 
     // Aguarda a medição parar de mudar antes de registrar a captura.
@@ -2213,6 +2246,7 @@ export default function AppV2() {
     };
   },[
     photo,leftLocked,rightLocked,liveWidthMm,preFormulaQuality.accepted,
+    captureQualityGate.accepted,
     handLandmarkAnalysis?.measuredFinger?.confidence,
     handLandmarkAnalysis?.measuredFinger?.ringRegionY,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,ringGuideY
@@ -2414,7 +2448,7 @@ export default function AppV2() {
     }).filter(Number.isFinite);
 
     const widestPhysical=selectWidestStableRun(physicalWidthsMm);
-    const robustPhysical=robustWidthStats(physicalWidthsMm);
+    const activeRobust=widthAnalysis.stats;
     const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
 
     const perspectiveScore=preFormulaQuality.perspectiveScore;
@@ -2434,11 +2468,11 @@ export default function AppV2() {
       selectedUpperWidthsPx:widestRun.selected,
       selectedRunStart:widestRun.startIndex+1,
       fingerAxisAngleDeg:fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
-      robustMedianMm:robustPhysical.median,
-      robustTrimmedMeanMm:robustPhysical.trimmedMean,
-      robustFilteredCount:robustPhysical.filtered.length,
-      robustOutlierCount:robustPhysical.outlierCount,
-      edgeScore:robustPhysical.edgeScore,
+      robustMedianMm:activeRobust?.median ?? null,
+      robustTrimmedMeanMm:activeRobust?.trimmedMean ?? null,
+      robustFilteredCount:activeRobust?.filtered.length ?? 0,
+      robustOutlierCount:activeRobust?.outlierCount ?? 0,
+      edgeScore:activeRobust?.edgeScore ?? 0,
       perspectiveScore,
       finalConfidence,
       finalConfidenceLabel:confidenceLabel(finalConfidence),
@@ -3074,6 +3108,10 @@ export default function AppV2() {
                   <span>Mediana filtrada: {measurementAudit.robustMedianMm===null?"n/d":measurementAudit.robustMedianMm.toFixed(2)+" mm"} · média aparada: {measurementAudit.robustTrimmedMeanMm===null?"n/d":measurementAudit.robustTrimmedMeanMm.toFixed(2)+" mm"}</span>
                   <span>Cortes filtrados: {measurementAudit.robustFilteredCount} · outliers removidos: {measurementAudit.robustOutlierCount}</span>
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
+                  <span>Gate da captura: {captureQualityGate.accepted ? "ACEITA" : "DESCARTADA"}{!captureQualityGate.accepted ? ` · ${captureQualityGate.reasons.join(" · ")}` : ""}</span>
+                  <span>Comparação geométrica: homografia direta {widthAnalysis.homographyMm?.toFixed(2) ?? "n/d"} mm · escala local {widthAnalysis.localScaleMm?.toFixed(2) ?? "n/d"} mm · escala normalizada {widthAnalysis.normalizedScaleMm?.toFixed(2) ?? "n/d"} mm</span>
+                  <span>Fonte ativa: {widthAnalysis.measurementSource==="normalized-local-scale" ? "ESCALA LOCAL + NORMALIZAÇÃO DE PERSPECTIVA" : "ESCALA LOCAL"}</span>
+                  <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
                   {handLandmarkAnalysis?.error && <span>Landmark erro: {handLandmarkAnalysis.error}</span>}
                   {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · visíveis {handLandmarkAnalysis.measuredFinger.visibleLandmarks}/4 · {handLandmarkAnalysis.measuredFinger.partial ? "parcial" : "completo"} · cartão ocultando {handLandmarkAnalysis.measuredFinger.occludedByCard ? "sim" : "não"}</span>}
@@ -3086,7 +3124,7 @@ export default function AppV2() {
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : temporalFusion.count>=3 ? `REPROVADA · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm > 0,350 mm` : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
                   <span>Capturas pareadas: {stableCaptures.slice(-3).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ offset ${item.regionOffsetY>=0?"+":""}${item.regionOffsetY.toFixed(1)}%`).join(" · ") || "nenhuma"}</span>
-                  <span>Histórico: registra somente após 0,9 s estável e atualiza a mesma foto se o ajuste mudar.</span>
+                  <span>Histórico: registra somente captura APROVADA pelo gate após 0,9 s estável; captura reprovada não entra na fusão.</span>
                   <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
                   <span>Depth: {VISION_FEATURE_FLAGS.ENABLE_DEPTH_VALIDATION ? "habilitado/aguardando fonte" : "não disponível · fallback visão computacional"}</span>
