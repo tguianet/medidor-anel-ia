@@ -466,3 +466,35 @@ Importante:
 - ele ainda NÃO altera automaticamente o aro calculado;
 - a curva principal permanece preservada;
 - o objetivo é coletar dados reais e verificar se altura + largura explicam os conflitos observados entre dedos com largura semelhante.
+
+
+## 16. Teste experimental por dedo — 27/09/2026
+
+O antigo teste 3D com foto lateral foi substituído por um teste de 1 foto com correção fixa por dedo.
+
+Fluxo:
+1. usuário abre o teste privado;
+2. escolhe o dedo antes de abrir a câmera;
+3. faz a medição superior normal com cartão sobre o dedo;
+4. o sistema calcula a medida base;
+5. aplica a correção experimental do dedo escolhido;
+6. a medida corrigida é enviada ao classificador de aro.
+
+Correções atuais:
+- mindinho: +1,15 mm
+- anelar: +0,60 mm
+- médio: +0,15 mm
+- indicador: +2,05 mm
+
+Essas correções vieram da diferença entre a média das duas medidas de paquímetro do dedo e o diâmetro interno do anel que efetivamente serve, com base nos dados passados pelo usuário:
+- mindinho 16,9 x 16,2 -> média 16,55 -> anel 17,70 -> +1,15
+- anelar 19,3 x 20,1 -> média 19,70 -> anel 20,30 -> +0,60
+- médio 21,4 x 21,5 -> média 21,45 -> anel 21,60 -> +0,15
+- indicador 20,4 x 18,7 -> média 19,55 -> anel 21,60 -> +2,05
+
+Importante:
+- esta lógica é experimental;
+- ela só atua no modo privado de teste;
+- não altera o fluxo comercial principal;
+- a foto lateral foi removida;
+- o diagnóstico privado mostra dedo escolhido, medida base, correção e medida final corrigida.
