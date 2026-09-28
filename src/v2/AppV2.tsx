@@ -150,6 +150,7 @@ export default function AppV2() {
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("finger");
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [singlePhotoTestMode, setSinglePhotoTestMode] = useState(false);
+  const [legacySinglePhotoTestMode, setLegacySinglePhotoTestMode] = useState(false);
   const [selectedMeasuredFinger, setSelectedMeasuredFinger] = useState<MeasuredFinger | null>(null);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
@@ -2002,6 +2003,7 @@ export default function AppV2() {
           <IntroScreen
             error={camera.error}
             onMeasureFinger={() => {
+              setLegacySinglePhotoTestMode(false);
               setSinglePhotoTestMode(true);
               setDiameterPhotoTestMode(false);
               setMeasurementMode("finger");
@@ -2021,6 +2023,9 @@ export default function AppV2() {
               <p className="lead" style={{marginBottom:12}}>
                 Cartão e dedo na mesma foto. A própria foto fornece a escala de 85,60 mm e os 50 cortes medem o dedo sem usar Foto 1.
               </p>
+              <small style={{display:"block",marginBottom:12,opacity:.75}}>
+                “Testar 1 foto original” usa o fluxo histórico validado, isolado das experiências posteriores.
+              </small>
               <div style={{margin:"0 0 14px"}}>
                 <strong style={{display:"block",marginBottom:8,color:"#f2cf73"}}>Qual dedo será medido?</strong>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -2055,6 +2060,28 @@ export default function AppV2() {
                 }}
               >
                 Abrir medição com 1 foto
+              </button>
+              <button
+                className="secondary"
+                style={{marginTop:10}}
+                type="button"
+                onClick={() => {
+                  // Fluxo historico validado em cbb025d2: exatamente 1 foto,
+                  // sem correcao por dedo, sem giro e sem trava extra.
+                  setLegacySinglePhotoTestMode(true);
+                  setSinglePhotoTestMode(true);
+                  setDiameterPhotoTestMode(false);
+                  setMeasurementMode("finger");
+                  setFingerCardCalibrationStep("measurement");
+                  setReferenceCardLengthPx(null);
+                  setReferenceCardWidthPercent(null);
+                  setReferenceCardAngleDeg(null);
+                  setMeasurementCardLengthPx(null);
+                  setPerspectiveMismatchPercent(null);
+                  void openCamera();
+                }}
+              >
+                Testar 1 foto original
               </button>
             </section>
           )}
@@ -2144,7 +2171,7 @@ export default function AppV2() {
             onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
             {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
-            {singlePhotoTestMode && selectedMeasuredFinger && (
+            {singlePhotoTestMode && !legacySinglePhotoTestMode && selectedMeasuredFinger && (
               <div
                 style={{
                   position:"absolute",
@@ -2522,7 +2549,7 @@ export default function AppV2() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
-              <span>Captura: {singlePhotoTestMode ? "1 foto" : "2 fotos"}</span>
+              <span>Captura: {legacySinglePhotoTestMode ? "1 foto original (teste congelado)" : singlePhotoTestMode ? "1 foto" : "2 fotos"}</span>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
