@@ -86,8 +86,13 @@ export default function AppV2() {
   const autoCaptureTimerRef = useRef<number | null>(null);
   const autoCaptureLockedRef = useRef(false);
   const recordedMeasurementPhotoRef = useRef<string>("");
+  const measurementHistoryTimerRef = useRef<number | null>(null);
   const [measurementHistoryMm, setMeasurementHistoryMm] = useState<number[]>([]);
   const resetMeasurementSession = () => {
+    if(measurementHistoryTimerRef.current!==null){
+      window.clearTimeout(measurementHistoryTimerRef.current);
+      measurementHistoryTimerRef.current=null;
+    }
     recordedMeasurementPhotoRef.current="";
     setMeasurementHistoryMm([]);
   };
@@ -1910,17 +1915,46 @@ export default function AppV2() {
   ]);
 
   useEffect(() => {
+    if(measurementHistoryTimerRef.current!==null){
+      window.clearTimeout(measurementHistoryTimerRef.current);
+      measurementHistoryTimerRef.current=null;
+    }
+
     if(
       !photo ||
       !leftLocked ||
       !rightLocked ||
       liveWidthMm===null ||
-      !preFormulaQuality.accepted ||
-      recordedMeasurementPhotoRef.current===photo
+      !preFormulaQuality.accepted
     ) return;
 
-    recordedMeasurementPhotoRef.current=photo;
-    setMeasurementHistoryMm((current)=>[...current.slice(-9),Number(liveWidthMm.toFixed(3))]);
+    // Aguarda a medição parar de mudar antes de registrar a captura.
+    // Se o usuário ainda ajustar as linhas na mesma foto, substituímos
+    // o último valor dessa foto em vez de contar uma nova captura.
+    measurementHistoryTimerRef.current=window.setTimeout(()=>{
+      const stableMm=Number(liveWidthMm.toFixed(3));
+
+      setMeasurementHistoryMm((current)=>{
+        if(recordedMeasurementPhotoRef.current===photo){
+          if(!current.length) return [stableMm];
+          const next=[...current];
+          next[next.length-1]=stableMm;
+          return next;
+        }
+
+        recordedMeasurementPhotoRef.current=photo;
+        return [...current.slice(-9),stableMm];
+      });
+
+      measurementHistoryTimerRef.current=null;
+    },900);
+
+    return ()=>{
+      if(measurementHistoryTimerRef.current!==null){
+        window.clearTimeout(measurementHistoryTimerRef.current);
+        measurementHistoryTimerRef.current=null;
+      }
+    };
   },[photo,leftLocked,rightLocked,liveWidthMm,preFormulaQuality.accepted]);
 
   const measurementRepeatability = useMemo(() => {
@@ -2748,6 +2782,7 @@ export default function AppV2() {
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
+                  <span>Histórico: registra somente após 0,9 s estável e atualiza a mesma foto se o ajuste mudar.</span>
                   <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
                   <span>Depth: {VISION_FEATURE_FLAGS.ENABLE_DEPTH_VALIDATION ? "habilitado/aguardando fonte" : "não disponível · fallback visão computacional"}</span>
