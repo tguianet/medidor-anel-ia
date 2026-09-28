@@ -1,4 +1,4 @@
-export type Stage = "intro" | "camera" | "review" | "side-review" | "hand-camera" | "hand-review";
+export type Stage = "intro" | "camera" | "review" | "hand-camera" | "hand-review";
 export type MeasurePhase = "card" | "finger";
 export type CardEdge = "top" | "right" | "bottom" | "left";
 export type CardLineDrag = `card-line-${CardEdge}` | `card-line-${CardEdge}-a` | `card-line-${CardEdge}-b`;
