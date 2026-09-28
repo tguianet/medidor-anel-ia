@@ -54,19 +54,45 @@ type MediaPipeModule = {
   };
 };
 
-const MP_VERSION="0.10.22";
-const MP_ESM_URL=`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/+esm`;
-const MP_WASM_URL=`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`;
+const MP_VERSION="0.10.21";
+const MP_CDN_ROOT=`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+const MP_ESM_URLS=[
+  MP_CDN_ROOT,
+  `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.mjs`,
+];
+const MP_WASM_URL=`${MP_CDN_ROOT}/wasm`;
 const HAND_MODEL_URL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
 let modulePromise:Promise<MediaPipeModule>|null=null;
 let landmarkerPromise:Promise<Awaited<ReturnType<MediaPipeModule["HandLandmarker"]["createFromOptions"]>>>|null=null;
 
 const dynamicImport=(url:string)=>
-  (new Function("url","return import(url)") as (url:string)=>Promise<MediaPipeModule>)(url);
+  (new Function("url","return import(url)") as (url:string)=>Promise<unknown>)(url);
+
+const normalizeModule=(loaded:unknown):MediaPipeModule=>{
+  const value=loaded as {default?:unknown};
+  const candidate=(value?.default ?? loaded) as Partial<MediaPipeModule>;
+  if(!candidate?.FilesetResolver || !candidate?.HandLandmarker){
+    throw new Error("mediapipe-module-without-required-exports");
+  }
+  return candidate as MediaPipeModule;
+};
 
 const getModule=()=>{
-  if(!modulePromise) modulePromise=dynamicImport(MP_ESM_URL);
+  if(!modulePromise){
+    modulePromise=(async()=>{
+      const errors:string[]=[];
+      for(const url of MP_ESM_URLS){
+        try{
+          const loaded=await dynamicImport(url);
+          return normalizeModule(loaded);
+        }catch(error){
+          errors.push(`${url}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      throw new Error(`MediaPipe não carregou. ${errors.join(" | ")}`);
+    })();
+  }
   return modulePromise;
 };
 
