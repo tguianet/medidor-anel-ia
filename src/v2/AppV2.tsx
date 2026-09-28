@@ -720,7 +720,8 @@ export default function AppV2() {
       if(VISION_FEATURE_FLAGS.ENABLE_PERSPECTIVE_CORRECTION){
         try{
           const actualQuad=quadFromLines(cardLines);
-          const geometry=assessCardQuadGeometry(actualQuad,CARD_WIDTH_MM,CARD_HEIGHT_MM);
+          const actualPx=validateCardQuad(actualQuad);
+          const geometry=assessCardQuadGeometry(actualPx,CARD_WIDTH_MM,CARD_HEIGHT_MM);
           cardConfidence=Math.min(cardConfidence,geometry.confidence);
 
           if(!geometry.valid){
@@ -728,7 +729,6 @@ export default function AppV2() {
             return;
           }
 
-          const actualPx=validateCardQuad(actualQuad);
           activeHomography=buildHomography(
             actualPx,
             [{x:0,y:0},{x:CARD_WIDTH_MM,y:0},{x:CARD_WIDTH_MM,y:CARD_HEIGHT_MM},{x:0,y:CARD_HEIGHT_MM}],
@@ -1957,7 +1957,8 @@ export default function AppV2() {
 
     let perspectiveScore=100;
     try{
-      const geometry=assessCardQuadGeometry(quadFromLines(cardLines),CARD_WIDTH_MM,CARD_HEIGHT_MM);
+      const geometryQuad=quadPixels(quadFromLines(cardLines));
+      const geometry=assessCardQuadGeometry(geometryQuad,CARD_WIDTH_MM,CARD_HEIGHT_MM);
       perspectiveScore=geometry.confidence;
     }catch{
       perspectiveScore=72;
