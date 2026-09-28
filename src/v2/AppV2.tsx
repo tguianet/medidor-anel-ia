@@ -1836,6 +1836,40 @@ export default function AppV2() {
 
   const liveWidthMm = widthAnalysis.newMm;
 
+  const preFormulaQuality = useMemo(() => {
+    let perspectiveScore=100;
+    try{
+      const geometryQuad=quadPixels(quadFromLines(cardLines));
+      perspectiveScore=assessCardQuadGeometry(geometryQuad,CARD_WIDTH_MM,CARD_HEIGHT_MM).confidence;
+    }catch{
+      perspectiveScore=72;
+    }
+
+    const edgeScore=widthAnalysis.stats?.edgeScore ?? 0;
+    const finalConfidence=combineConfidenceScore({
+      cardScore:calibrationConfidence,
+      perspectiveScore,
+      stabilityScore:deviceQuality.stabilityScore,
+      segmentationScore:null,
+      edgeScore,
+      depthScore:null,
+    });
+
+    return {
+      perspectiveScore,
+      edgeScore,
+      finalConfidence,
+      label:confidenceLabel(finalConfidence),
+      accepted:finalConfidence>=70,
+    };
+  },[
+    cardLines,
+    calibrationConfidence,
+    deviceQuality.stabilityScore,
+    widthAnalysis.stats,
+    photo,
+  ]);
+
   const finalMeasurementConfidence = calibrationConfidence;
 
   const calibrationQualityLabel =
@@ -1856,6 +1890,7 @@ export default function AppV2() {
 
   const result = useMemo(() => {
     if (liveWidthMm === null) return null;
+    if (!preFormulaQuality.accepted) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
 
@@ -1880,7 +1915,7 @@ export default function AppV2() {
     }
 
     return computeRingResult(liveWidthMm, calibrationRules, true, calibrationConfidence);
-  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
+  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted]);
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
@@ -1955,23 +1990,8 @@ export default function AppV2() {
     const robustPhysical=robustWidthStats(physicalWidthsMm);
     const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
 
-    let perspectiveScore=100;
-    try{
-      const geometryQuad=quadPixels(quadFromLines(cardLines));
-      const geometry=assessCardQuadGeometry(geometryQuad,CARD_WIDTH_MM,CARD_HEIGHT_MM);
-      perspectiveScore=geometry.confidence;
-    }catch{
-      perspectiveScore=72;
-    }
-
-    const finalConfidence=combineConfidenceScore({
-      cardScore:calibrationConfidence,
-      perspectiveScore,
-      stabilityScore:deviceQuality.stabilityScore,
-      segmentationScore:null,
-      edgeScore:robustPhysical.edgeScore,
-      depthScore:null,
-    });
+    const perspectiveScore=preFormulaQuality.perspectiveScore;
+    const finalConfidence=preFormulaQuality.finalConfidence;
 
     return {
       rawWidthsPx,
@@ -2577,13 +2597,14 @@ export default function AppV2() {
             </div>
           )}
 
-          {measurementAudit && measurementAudit.finalConfidence < 70 && phase === "finger" && (
+          {phase === "finger" && liveWidthMm !== null && !preFormulaQuality.accepted && (
             <div className="analysis-result">
               <strong>Medição com baixa confiança</strong>
+              <span>Confiança: {preFormulaQuality.finalConfidence}/100 · {preFormulaQuality.label}.</span>
               <span>Refaça a captura com o cartão e o celular mais alinhados e mantenha o aparelho firme.</span>
             </div>
           )}
-          {phase === "finger" && result && leftLocked && rightLocked && (!measurementAudit || measurementAudit.finalConfidence >= 70) && (
+          {phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
               <span><strong>Número justo: {clamp(result.ringSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {result.ringSize}</strong>
