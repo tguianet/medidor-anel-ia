@@ -90,8 +90,16 @@ export default function AppV2() {
   const recordedMeasurementPhotoRef = useRef<string>("");
   const autoAnatomyAppliedPhotoRef = useRef<string>("");
   const measurementHistoryTimerRef = useRef<number | null>(null);
-  const [measurementHistoryMm, setMeasurementHistoryMm] = useState<number[]>([]);
-  const [anatomicalRegionHistoryY, setAnatomicalRegionHistoryY] = useState<number[]>([]);
+  type StableCapture = { mm:number; regionY:number; photoKey:string; ts:number };
+  const [stableCaptures, setStableCaptures] = useState<StableCapture[]>([]);
+  const measurementHistoryMm = useMemo(
+    () => stableCaptures.map(item => item.mm),
+    [stableCaptures]
+  );
+  const anatomicalRegionHistoryY = useMemo(
+    () => stableCaptures.map(item => item.regionY),
+    [stableCaptures]
+  );
   const resetMeasurementSession = () => {
     if(measurementHistoryTimerRef.current!==null){
       window.clearTimeout(measurementHistoryTimerRef.current);
@@ -99,8 +107,7 @@ export default function AppV2() {
     }
     recordedMeasurementPhotoRef.current="";
     autoAnatomyAppliedPhotoRef.current="";
-    setMeasurementHistoryMm([]);
-    setAnatomicalRegionHistoryY([]);
+    setStableCaptures([]);
     setHandLandmarkAnalysis(null);
   };
   const [captureDeviceQuality, setCaptureDeviceQuality] = useState<{
@@ -1926,11 +1933,12 @@ export default function AppV2() {
     }
 
     const lastThree=valid.slice(-3).sort((a,b)=>a-b);
+    const rangeY=Math.max(...lastThree)-Math.min(...lastThree);
     return {
-      active:true,
+      active:rangeY<=3,
       count:lastThree.length,
       medianY:lastThree[1],
-      rangeY:Math.max(...lastThree)-Math.min(...lastThree),
+      rangeY,
     };
   },[anatomicalRegionHistoryY]);
 
@@ -2065,26 +2073,24 @@ export default function AppV2() {
             : ringGuideY;
       const stableRegionY=Number(detectedRegionY.toFixed(3));
 
-      setAnatomicalRegionHistoryY((current)=>{
-        if(recordedMeasurementPhotoRef.current===photo){
-          if(!current.length) return [stableRegionY];
-          const next=[...current];
-          next[next.length-1]=stableRegionY;
-          return next;
-        }
-        return [...current.slice(-9),stableRegionY];
-      });
+      setStableCaptures((current)=>{
+        const entry:StableCapture={
+          mm:stableMm,
+          regionY:stableRegionY,
+          photoKey:photo,
+          ts:Date.now(),
+        };
 
-      setMeasurementHistoryMm((current)=>{
-        if(recordedMeasurementPhotoRef.current===photo){
-          if(!current.length) return [stableMm];
+        // Mesma foto: atualiza o ultimo registro em vez de contar nova captura.
+        const last=current[current.length-1];
+        if(last?.photoKey===photo){
           const next=[...current];
-          next[next.length-1]=stableMm;
+          next[next.length-1]=entry;
           return next;
         }
 
         recordedMeasurementPhotoRef.current=photo;
-        return [...current.slice(-9),stableMm];
+        return [...current.slice(-9),entry];
       });
 
       measurementHistoryTimerRef.current=null;
@@ -2135,12 +2141,13 @@ export default function AppV2() {
 
     const lastThree=valid.slice(-3).sort((a,b)=>a-b);
     const medianMm=lastThree[1];
+    const rangeMm=Math.max(...lastThree)-Math.min(...lastThree);
     return {
-      active:true,
+      active:rangeMm<=0.35,
       count:lastThree.length,
-      fusedMm:medianMm,
+      fusedMm:rangeMm<=0.35 ? medianMm : liveWidthMm,
       medianMm,
-      rangeMm:Math.max(...lastThree)-Math.min(...lastThree),
+      rangeMm,
     };
   },[
     measurementHistoryMm,
@@ -2148,6 +2155,17 @@ export default function AppV2() {
     liveWidthMm,
     measurementRepeatability.range,
   ]);
+
+  const captureFusionReady =
+    !VISION_FEATURE_FLAGS.ENABLE_TEMPORAL_FUSION ||
+    stableCaptures.length<3 ||
+    (
+      temporalFusion.active &&
+      (
+        !VISION_FEATURE_FLAGS.ENABLE_ANATOMICAL_REGION_FUSION ||
+        anatomicalRegionFusion.active
+      )
+    );
 
   const widthSentToFormulaMm =
     VISION_FEATURE_FLAGS.ENABLE_TEMPORAL_FUSION &&
@@ -2177,6 +2195,7 @@ export default function AppV2() {
   const result = useMemo(() => {
     if (widthSentToFormulaMm === null) return null;
     if (!preFormulaQuality.accepted) return null;
+    if (stableCaptures.length>=3 && !captureFusionReady) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(widthSentToFormulaMm, calibrationConfidence);
 
@@ -2201,7 +2220,7 @@ export default function AppV2() {
     }
 
     return computeRingResult(widthSentToFormulaMm, calibrationRules, true, calibrationConfidence);
-  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted]);
+  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted, stableCaptures.length, captureFusionReady]);
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
@@ -2898,12 +2917,13 @@ export default function AppV2() {
             </div>
           )}
 
-          {anatomicalRegionFusion.active && (anatomicalRegionFusion.rangeY ?? 0) > 3 && phase === "finger" && (
+          {stableCaptures.length>=3 && !captureFusionReady && phase === "finger" && (
             <div className="analysis-result">
-              <strong>Região anatômica variou demais</strong>
-              <span>As 3 capturas variaram {(anatomicalRegionFusion.rangeY ?? 0).toFixed(1)}% na altura do dedo. Faça outra captura mantendo o cartão e o dedo na mesma posição.</span>
+              <strong>Capturas ainda não convergiram</strong>
+              <span>Faça mais uma captura mantendo o cartão e o dedo na mesma posição. O resultado final fica bloqueado enquanto a largura ou a região anatômica variarem acima do limite.</span>
             </div>
           )}
+
           {temporalFusion.active && (temporalFusion.rangeMm ?? 0) > 0.35 && phase === "finger" && (
             <div className="analysis-result">
               <strong>Repetibilidade ainda baixa</strong>
@@ -2951,11 +2971,12 @@ export default function AppV2() {
                   {handLandmarkAnalysis?.measuredFinger && <span>ringRegionY {handLandmarkAnalysis.measuredFinger.ringRegionY===null?"oculta/fallback":(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)+"%"} · jointRegionY {handLandmarkAnalysis.measuredFinger.jointRegionY===null?"oculta":(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)+"%"}</span>}
                   <span>Contorno anatômico: {contourAnatomy?.detected ? "detectado" : "não detectado"}{contourAnatomy ? ` · score ${contourAnatomy.score} · ${contourAnatomy.reason}` : ""}</span>
                   {contourAnatomy?.ringRegionY!==null && contourAnatomy?.ringRegionY!==undefined && <span>Contour ringRegionY: {contourAnatomy.ringRegionY.toFixed(1)}% · jointRegionY {contourAnatomy.jointRegionY===null?"n/d":contourAnatomy.jointRegionY.toFixed(1)+"%"} · CV {contourAnatomy.widthCvPercent===null?"n/d":contourAnatomy.widthCvPercent.toFixed(2)+"%"}</span>}
-                  <span>Fusão da região anatômica: {anatomicalRegionFusion.active ? "ATIVA" : `aguardando 3 regiões válidas (${anatomicalRegionFusion.count}/3)`}{anatomicalRegionFusion.active && anatomicalRegionFusion.medianY!==null ? ` · mediana Y ${anatomicalRegionFusion.medianY.toFixed(1)}% · amplitude ${(anatomicalRegionFusion.rangeY ?? 0).toFixed(1)}%` : ""}</span>
+                  <span>Fusão da região anatômica: {anatomicalRegionFusion.active ? "ATIVA" : anatomicalRegionFusion.count>=3 ? `REPROVADA · amplitude ${(anatomicalRegionFusion.rangeY ?? 0).toFixed(1)}% > 3,0%` : `aguardando 3 regiões válidas (${anatomicalRegionFusion.count}/3)`}{anatomicalRegionFusion.active && anatomicalRegionFusion.medianY!==null ? ` · mediana Y ${anatomicalRegionFusion.medianY.toFixed(1)}% · amplitude ${(anatomicalRegionFusion.rangeY ?? 0).toFixed(1)}%` : ""}</span>
                   <span>Região anatômica aplicada: {anatomicalRegionFusion.active ? "FUSÃO" : handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "LANDMARKS" : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null ? "CONTORNO" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
-                  <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
+                  <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : temporalFusion.count>=3 ? `REPROVADA · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm > 0,350 mm` : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
+                  <span>Capturas pareadas: {stableCaptures.slice(-3).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ Y ${item.regionY.toFixed(1)}%`).join(" · ") || "nenhuma"}</span>
                   <span>Histórico: registra somente após 0,9 s estável e atualiza a mesma foto se o ajuste mudar.</span>
                   <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
