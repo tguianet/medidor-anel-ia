@@ -87,6 +87,10 @@ export default function AppV2() {
   const autoCaptureLockedRef = useRef(false);
   const recordedMeasurementPhotoRef = useRef<string>("");
   const [measurementHistoryMm, setMeasurementHistoryMm] = useState<number[]>([]);
+  const resetMeasurementSession = () => {
+    recordedMeasurementPhotoRef.current="";
+    setMeasurementHistoryMm([]);
+  };
   const [captureDeviceQuality, setCaptureDeviceQuality] = useState<{
     devicePitch:number|null;
     deviceRoll:number|null;
@@ -1933,6 +1937,45 @@ export default function AppV2() {
     };
   },[measurementHistoryMm]);
 
+  const temporalFusion = useMemo(() => {
+    const valid=[...measurementHistoryMm].filter(v=>Number.isFinite(v)&&v>0);
+    if(
+      !VISION_FEATURE_FLAGS.ENABLE_TEMPORAL_FUSION ||
+      measurementMode!=="finger" ||
+      valid.length<3
+    ){
+      return {
+        active:false,
+        count:valid.length,
+        fusedMm:liveWidthMm,
+        medianMm:null as number|null,
+        rangeMm:measurementRepeatability.range,
+      };
+    }
+
+    const lastThree=valid.slice(-3).sort((a,b)=>a-b);
+    const medianMm=lastThree[1];
+    return {
+      active:true,
+      count:lastThree.length,
+      fusedMm:medianMm,
+      medianMm,
+      rangeMm:Math.max(...lastThree)-Math.min(...lastThree),
+    };
+  },[
+    measurementHistoryMm,
+    measurementMode,
+    liveWidthMm,
+    measurementRepeatability.range,
+  ]);
+
+  const widthSentToFormulaMm =
+    VISION_FEATURE_FLAGS.ENABLE_TEMPORAL_FUSION &&
+    temporalFusion.active &&
+    temporalFusion.fusedMm!==null
+      ? temporalFusion.fusedMm
+      : liveWidthMm;
+
   const finalMeasurementConfidence = calibrationConfidence;
 
   const calibrationQualityLabel =
@@ -1952,18 +1995,18 @@ export default function AppV2() {
   };
 
   const result = useMemo(() => {
-    if (liveWidthMm === null) return null;
+    if (widthSentToFormulaMm === null) return null;
     if (!preFormulaQuality.accepted) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
-    if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(liveWidthMm, calibrationConfidence);
+    if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(widthSentToFormulaMm, calibrationConfidence);
 
     if (measurementMode === "finger") {
-      const v2 = classifyFingerWidthMm(liveWidthMm);
+      const v2 = classifyFingerWidthMm(widthSentToFormulaMm);
       return {
-        rawWidthMm: liveWidthMm,
-        widthMm: liveWidthMm,
+        rawWidthMm: widthSentToFormulaMm,
+        widthMm: widthSentToFormulaMm,
         measurementCorrectionMm: 0,
-        equivalentDiameterMm: liveWidthMm,
+        equivalentDiameterMm: widthSentToFormulaMm,
         fingerEquivalentMabMm: null,
         ringSize: v2.exactRingSize,
         calculationMode: "formula" as const,
@@ -1971,14 +2014,14 @@ export default function AppV2() {
         continuousRing: null,
         nearBoundary: false,
         boundaryDistanceMm: Math.min(
-          Math.abs(liveWidthMm - v2.lowerBoundaryMm),
-          Math.abs(v2.upperBoundaryMm - liveWidthMm),
+          Math.abs(widthSentToFormulaMm - v2.lowerBoundaryMm),
+          Math.abs(v2.upperBoundaryMm - widthSentToFormulaMm),
         ),
       };
     }
 
-    return computeRingResult(liveWidthMm, calibrationRules, true, calibrationConfidence);
-  }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted]);
+    return computeRingResult(widthSentToFormulaMm, calibrationRules, true, calibrationConfidence);
+  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted]);
 
   const resetPhoto = () => {
     if(measurementMode==="finger" && !diameterPhotoTestMode){
@@ -2195,6 +2238,7 @@ export default function AppV2() {
           <IntroScreen
             error={camera.error}
             onMeasureFinger={() => {
+              resetMeasurementSession();
               setSinglePhotoTestMode(false);
               setDiameterPhotoTestMode(false);
               setMeasurementMode("finger");
@@ -2213,6 +2257,7 @@ export default function AppV2() {
                 className="secondary"
                 type="button"
                 onClick={() => {
+                  resetMeasurementSession();
                   setSinglePhotoTestMode(true);
                   setDiameterPhotoTestMode(false);
                   setMeasurementMode("finger");
@@ -2660,6 +2705,12 @@ export default function AppV2() {
             </div>
           )}
 
+          {temporalFusion.active && (temporalFusion.rangeMm ?? 0) > 0.35 && phase === "finger" && (
+            <div className="analysis-result">
+              <strong>Repetibilidade ainda baixa</strong>
+              <span>As 3 capturas ainda variaram {(temporalFusion.rangeMm ?? 0).toFixed(3)} mm. Faça mais uma captura mantendo a mesma região do dedo.</span>
+            </div>
+          )}
           {phase === "finger" && liveWidthMm !== null && !preFormulaQuality.accepted && (
             <div className="analysis-result">
               <strong>Medição com baixa confiança</strong>
@@ -2696,6 +2747,8 @@ export default function AppV2() {
                   <span>Cortes filtrados: {measurementAudit.robustFilteredCount} · outliers removidos: {measurementAudit.robustOutlierCount}</span>
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
+                  <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
+                  <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
                   <span>Depth: {VISION_FEATURE_FLAGS.ENABLE_DEPTH_VALIDATION ? "habilitado/aguardando fonte" : "não disponível · fallback visão computacional"}</span>
                   <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
