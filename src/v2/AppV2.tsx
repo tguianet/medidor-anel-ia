@@ -15,6 +15,7 @@ import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
 import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks";
+import { analyzeFingerContourAnatomy } from "./fingerContourAnatomy";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
@@ -1894,6 +1895,23 @@ export default function AppV2() {
     autoAnatomyAppliedPhotoRef.current=photo;
   },[photo,handLandmarkAnalysis]);
 
+  const contourAnatomy = useMemo(() => {
+    if(!photo || !leftLocked || !rightLocked) return null;
+    const samples=fingerBandSamplesPx(ringGuideY);
+    if(!samples?.length) return null;
+    return analyzeFingerContourAnatomy(
+      samples.map(sample=>({
+        yPercent:sample.yPercent,
+        width:sample.width,
+        confidence:sample.confidence,
+      })),
+      ringGuideY,
+    );
+  },[
+    photo,leftLocked,rightLocked,leftLine,rightLine,ringGuideY,zoom,panX,panY,
+    measurementCardHomography
+  ]);
+
   const widthAnalysis = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked){
       return {oldMm:null as number|null,newMm:null as number|null,stats:null as ReturnType<typeof robustWidthStats>|null};
@@ -1906,7 +1924,9 @@ export default function AppV2() {
       anatomy.confidence>=60 &&
       anatomy.ringRegionY!==null
         ? clamp(anatomy.ringRegionY*100,28,84)
-        : ringGuideY;
+        : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null
+          ? clamp(contourAnatomy.ringRegionY,28,84)
+          : ringGuideY;
 
     const samples=fingerBandSamplesPx(anatomicalGuideY);
     if(!samples || samples.length<35){
@@ -1937,7 +1957,7 @@ export default function AppV2() {
       newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && robust!==null ? robust : oldStable,
       stats,
     };
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,handLandmarkAnalysis?.measuredFinger?.ringRegionY,handLandmarkAnalysis?.measuredFinger?.confidence]);
+  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,handLandmarkAnalysis?.measuredFinger?.ringRegionY,handLandmarkAnalysis?.measuredFinger?.confidence,contourAnatomy?.detected,contourAnatomy?.ringRegionY]);
 
   const liveWidthMm = widthAnalysis.newMm;
 
@@ -1961,7 +1981,9 @@ export default function AppV2() {
             (handLandmarkAnalysis.measuredFinger?.partial ? 0.82 : 1) *
             (handLandmarkAnalysis.measuredFinger?.occludedByCard ? 0.88 : 1)
           )
-        : null,
+        : contourAnatomy?.detected
+          ? contourAnatomy.score
+          : null,
       edgeScore,
       depthScore:null,
     });
@@ -1980,6 +2002,8 @@ export default function AppV2() {
     widthAnalysis.stats,
     handLandmarkAnalysis?.detected,
     handLandmarkAnalysis?.score,
+    contourAnatomy?.detected,
+    contourAnatomy?.score,
     photo,
   ]);
 
@@ -2177,7 +2201,9 @@ export default function AppV2() {
     handLandmarkAnalysis.measuredFinger.confidence>=60 &&
     handLandmarkAnalysis.measuredFinger.ringRegionY!==null
       ? clamp(handLandmarkAnalysis.measuredFinger.ringRegionY*100,28,84)
-      : ringGuideY;
+      : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null
+        ? clamp(contourAnatomy.ringRegionY,28,84)
+        : ringGuideY;
   const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx(auditGuideY) : null;
 
   const measurementAudit = (() => {
@@ -2860,7 +2886,9 @@ export default function AppV2() {
                   {handLandmarkAnalysis?.error && <span>Landmark erro: {handLandmarkAnalysis.error}</span>}
                   {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · visíveis {handLandmarkAnalysis.measuredFinger.visibleLandmarks}/4 · {handLandmarkAnalysis.measuredFinger.partial ? "parcial" : "completo"} · cartão ocultando {handLandmarkAnalysis.measuredFinger.occludedByCard ? "sim" : "não"}</span>}
                   {handLandmarkAnalysis?.measuredFinger && <span>ringRegionY {handLandmarkAnalysis.measuredFinger.ringRegionY===null?"oculta/fallback":(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)+"%"} · jointRegionY {handLandmarkAnalysis.measuredFinger.jointRegionY===null?"oculta":(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)+"%"}</span>}
-                  <span>Região anatômica aplicada: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "AUTOMÁTICA" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
+                  <span>Contorno anatômico: {contourAnatomy?.detected ? "detectado" : "não detectado"}{contourAnatomy ? ` · score ${contourAnatomy.score} · ${contourAnatomy.reason}` : ""}</span>
+                  {contourAnatomy?.ringRegionY!==null && contourAnatomy?.ringRegionY!==undefined && <span>Contour ringRegionY: {contourAnatomy.ringRegionY.toFixed(1)}% · jointRegionY {contourAnatomy.jointRegionY===null?"n/d":contourAnatomy.jointRegionY.toFixed(1)+"%"} · CV {contourAnatomy.widthCvPercent===null?"n/d":contourAnatomy.widthCvPercent.toFixed(2)+"%"}</span>}
+                  <span>Região anatômica aplicada: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "LANDMARKS" : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null ? "CONTORNO" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
