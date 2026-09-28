@@ -1710,25 +1710,6 @@ export default function AppV2() {
     return fallback ?? {selected:valid,used:valid.reduce((sum,v)=>sum+v,0)/valid.length,startIndex:0,spreadPercent:0};
   };
 
-  // Modo 1 foto: limita a escolha do plato a uma janela anatomica central
-  // de 21 cortes ao redor da linha amarela (10 acima + centro + 10 abaixo).
-  // Assim evitamos que a leitura escape para a base ou ponta do dedo.
-  const selectStableRunNearCenter = (values:number[]) => {
-    const valid=values.filter(Number.isFinite).filter(v=>v>0);
-    if(!valid.length) return {selected:[] as number[],used:null as number|null,startIndex:-1,spreadPercent:999};
-
-    const center=Math.floor((valid.length-1)/2);
-    const start=Math.max(0,center-10);
-    const end=Math.min(valid.length,center+11);
-    const central=valid.slice(start,end);
-    const selected=selectWidestStableRun(central);
-
-    return {
-      ...selected,
-      startIndex:selected.startIndex>=0 ? selected.startIndex+start : selected.startIndex,
-    };
-  };
-
   const cardWidthAtImageY = (imageY:number, sourceWidth:number, sourceHeight:number) => {
     const toPx=(line:Line):Line=>({
       a:{x:line.a.x/100*sourceWidth,y:line.a.y/100*sourceHeight},
@@ -1772,11 +1753,9 @@ export default function AppV2() {
       })
       .filter(v=>Number.isFinite(v)&&v>0&&v<45);
 
-    const stable=singlePhotoTestMode
-      ? selectStableRunNearCenter(widthsMm)
-      : selectWidestStableRun(widthsMm);
+    const stable=selectWidestStableRun(widthsMm);
     return stable.used;
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,singlePhotoTestMode]);
+  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1876,9 +1855,7 @@ export default function AppV2() {
     const rawWidthsPx=fingerMagnetSamples.map((sample)=>sample.width).filter(Number.isFinite);
     if(!rawWidthsPx.length) return null;
 
-    const widestRun=singlePhotoTestMode
-      ? selectStableRunNearCenter(rawWidthsPx)
-      : selectWidestStableRun(rawWidthsPx);
+    const widestRun=selectWidestStableRun(rawWidthsPx);
     if(widestRun.used===null) return null;
 
     const physicalWidthsMm=fingerMagnetSamples.map((sample)=>{
@@ -1894,9 +1871,7 @@ export default function AppV2() {
       return pixelsPerMm>0 ? sample.width/pixelsPerMm : NaN;
     }).filter(Number.isFinite);
 
-    const widestPhysical=singlePhotoTestMode
-      ? selectStableRunNearCenter(physicalWidthsMm)
-      : selectWidestStableRun(physicalWidthsMm);
+    const widestPhysical=selectWidestStableRun(physicalWidthsMm);
     const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
 
     return {
@@ -1951,7 +1926,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "Posicione a linha amarela exatamente onde o anel vai ficar. Os 50 refinamentos são analisados, mas o cálculo usa apenas a janela anatômica central de 21 cortes ao redor dessa linha."
+          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia. Os 50 refinamentos trabalham na mesma foto calibrada."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
@@ -2554,7 +2529,6 @@ export default function AppV2() {
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
-                  {singlePhotoTestMode && <span>Janela anatômica ativa: 21 cortes centrais (±10 da linha amarela)</span>}
                   <span>Varredura: {measurementAudit.rawWidthsPx.length} cortes · {measurementAudit.rawWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
