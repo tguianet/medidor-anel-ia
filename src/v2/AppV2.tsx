@@ -152,9 +152,6 @@ export default function AppV2() {
   const [diameterPhotoTestMode, setDiameterPhotoTestMode] = useState(false);
   const [singlePhotoTestMode, setSinglePhotoTestMode] = useState(false);
   const [selectedMeasuredFinger, setSelectedMeasuredFinger] = useState<MeasuredFinger | null>(null);
-  const [rotationTestMode, setRotationTestMode] = useState(false);
-  const [rotationSourcePhoto, setRotationSourcePhoto] = useState("");
-  const [photoRotationDeg, setPhotoRotationDeg] = useState(0);
   const [calibrationRules, setCalibrationRules] = useState<CalibrationRule[]>([]);
   const [fingerCardCalibrationStep, setFingerCardCalibrationStep] = useState<"reference" | "measurement" | "done">("reference");
   const [referenceCardLine, setReferenceCardLine] = useState<Line>({ a:{x:15,y:50}, b:{x:85,y:50} });
@@ -300,76 +297,6 @@ export default function AppV2() {
     await camera.startCameraStream();
   };
 
-  const applyRotationTestPhoto = async (nextDeg:number) => {
-    if(!rotationTestMode || !rotationSourcePhoto) return;
-    const deg=clamp(nextDeg,-12,12);
-    const image=new Image();
-    await new Promise<void>((resolve,reject)=>{
-      image.onload=()=>resolve();
-      image.onerror=()=>reject(new Error("rotation-image-load"));
-      image.src=rotationSourcePhoto;
-    });
-
-    const canvas=document.createElement("canvas");
-    canvas.width=image.naturalWidth;
-    canvas.height=image.naturalHeight;
-    const context=canvas.getContext("2d");
-    if(!context) return;
-
-    context.fillStyle="#000";
-    context.fillRect(0,0,canvas.width,canvas.height);
-    context.translate(canvas.width/2,canvas.height/2);
-    context.rotate(deg*Math.PI/180);
-    context.drawImage(image,-canvas.width/2,-canvas.height/2,canvas.width,canvas.height);
-
-    const rotated=canvas.toDataURL("image/jpeg",0.94);
-    setPhotoRotationDeg(deg);
-    setPhoto(rotated);
-    setPixelsPerMm(null);
-    setCalibrationConfidence(0);
-    setPhase("card");
-    setZoom(1);
-    setPanX(0);
-    setPanY(0);
-    setLeftLocked(false);
-    setRightLocked(false);
-    setCardLineLocked({top:false,right:false,bottom:false,left:false});
-    setCardSnapLines({});
-    setSelectedCardLine(null);
-    setMeasurementCardHomography(null);
-    setPerspectiveReady(false);
-
-    try{
-      const calibration=await calibratePhoto(rotated);
-      const detectedLeft=clamp(calibration.cardBox.x*100,2,94);
-      const detectedRight=clamp((calibration.cardBox.x+calibration.cardBox.width)*100,6,98);
-      const finalLeft=Math.min(detectedLeft,detectedRight-5);
-      const finalRight=Math.max(detectedRight,detectedLeft+5);
-      const finalBottom=clamp((calibration.cardBox.y+calibration.cardBox.height)*100,10,88);
-      const top=clamp(calibration.cardBox.y*100,3,finalBottom-5);
-      const padY=Math.min(7,Math.max(3,(finalBottom-top)*0.15));
-      setCardLeft(finalLeft);
-      setCardRight(finalRight);
-      setCardBottom(finalBottom);
-      setCardLines({
-        top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
-        right:{a:{x:finalRight,y:clamp(top-padY,1,99)},b:{x:finalRight,y:clamp(finalBottom+padY,1,99)}},
-        bottom:{a:{x:finalLeft,y:finalBottom},b:{x:finalRight,y:finalBottom}},
-        left:{a:{x:finalLeft,y:clamp(top-padY,1,99)},b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)}},
-      });
-    }catch{
-      setCardLeft(15);
-      setCardRight(85);
-      setCardBottom(58);
-      setCardLines({
-        top:{a:{x:15,y:28},b:{x:85,y:28}},
-        right:{a:{x:85,y:22},b:{x:85,y:64}},
-        bottom:{a:{x:15,y:58},b:{x:85,y:58}},
-        left:{a:{x:15,y:22},b:{x:15,y:64}},
-      });
-    }
-  };
-
   const openHandCamera = async () => {
     setStage("hand-camera");
     await camera.startCameraStream();
@@ -397,11 +324,6 @@ export default function AppV2() {
     }
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const capturedPhoto = canvas.toDataURL("image/jpeg", 0.94);
-
-    if(rotationTestMode){
-      setRotationSourcePhoto(capturedPhoto);
-      setPhotoRotationDeg(0);
-    }
 
     setPhoto(capturedPhoto);
 
@@ -2081,10 +2003,15 @@ export default function AppV2() {
           <IntroScreen
             error={camera.error}
             onMeasureFinger={() => {
-              setSinglePhotoTestMode(false);
+              setSinglePhotoTestMode(true);
               setDiameterPhotoTestMode(false);
               setMeasurementMode("finger");
-              setFingerCardCalibrationStep("reference");
+              setFingerCardCalibrationStep("measurement");
+              setReferenceCardLengthPx(null);
+              setReferenceCardWidthPercent(null);
+              setReferenceCardAngleDeg(null);
+              setMeasurementCardLengthPx(null);
+              setPerspectiveMismatchPercent(null);
               void openCamera();
             }}
           />
@@ -2116,9 +2043,6 @@ export default function AppV2() {
                 type="button"
                 disabled={!selectedMeasuredFinger}
                 onClick={() => {
-                  setRotationTestMode(false);
-                  setRotationSourcePhoto("");
-                  setPhotoRotationDeg(0);
                   setSinglePhotoTestMode(true);
                   setDiameterPhotoTestMode(false);
                   setMeasurementMode("finger");
@@ -2131,31 +2055,9 @@ export default function AppV2() {
                   void openCamera();
                 }}
               >
-                Testar medição com 1 foto
+                Abrir medição com 1 foto
               </button>
-              <button
-                className="secondary"
-                style={{marginTop:10}}
-                type="button"
-                disabled={!selectedMeasuredFinger}
-                onClick={() => {
-                  setRotationTestMode(true);
-                  setRotationSourcePhoto("");
-                  setPhotoRotationDeg(0);
-                  setSinglePhotoTestMode(true);
-                  setDiameterPhotoTestMode(false);
-                  setMeasurementMode("finger");
-                  setFingerCardCalibrationStep("measurement");
-                  setReferenceCardLengthPx(null);
-                  setReferenceCardWidthPercent(null);
-                  setReferenceCardAngleDeg(null);
-                  setMeasurementCardLengthPx(null);
-                  setPerspectiveMismatchPercent(null);
-                  void openCamera();
-                }}
-              >
-                Teste giro de dedo
-              </button>
+
             </section>
           )}
         </>
@@ -2540,14 +2442,6 @@ export default function AppV2() {
             )}
           </div>
 
-          {rotationTestMode && singlePhotoTestMode && phase === "card" && (
-            <div className="zoom-controls" aria-label="Controles de giro da foto">
-              <button type="button" onClick={() => void applyRotationTestPhoto(photoRotationDeg-1)} aria-label="Girar um grau para a esquerda">↶</button>
-              <strong>{photoRotationDeg.toFixed(0)}°</strong>
-              <button type="button" onClick={() => void applyRotationTestPhoto(photoRotationDeg+1)} aria-label="Girar um grau para a direita">↷</button>
-              <button className="zoom-reset" type="button" onClick={() => void applyRotationTestPhoto(0)}>Zerar giro</button>
-            </div>
-          )}
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
@@ -2630,8 +2524,7 @@ export default function AppV2() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
-              <span>Captura: {rotationTestMode ? "Teste giro de dedo" : singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
-              {rotationTestMode && <span>Giro aplicado antes da calibração: {photoRotationDeg.toFixed(0)}°</span>}
+              <span>Captura: {singlePhotoTestMode ? "1 foto" : "2 fotos"}</span>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
