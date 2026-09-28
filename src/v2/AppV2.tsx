@@ -28,7 +28,6 @@ const MEASURED_FINGER_LABELS: Record<MeasuredFinger, string> = {
   anelar: "Anelar",
   mindinho: "Mindinho",
 };
-
 type Homography = [number,number,number,number,number,number,number,number,number];
 
 const solveLinearSystem = (matrix:number[][], values:number[]) => {
@@ -324,7 +323,6 @@ export default function AppV2() {
     }
     canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const capturedPhoto = canvas.toDataURL("image/jpeg", 0.94);
-
     setPhoto(capturedPhoto);
 
     // Modo dedo em duas fotos:
@@ -1732,58 +1730,6 @@ export default function AppV2() {
   // A diferenca para a foto 1 fica somente como diagnostico e NAO altera o dedo.
   const v2PhotoScaleCorrection = 1;
 
-  // Trava experimental do modo 1 foto:
-  // as linhas verdes continuam sendo a referencia principal e os 50 cortes
-  // podem apenas refinar alguns pixels ao redor dessa largura manual.
-  const manualFingerGuideMeasurement = () => {
-    const stage=measureRef.current;
-    const source=photoPixelsRef.current;
-    if(!stage||!source||!pixelsPerMm||!leftLocked||!rightLocked) return null;
-
-    const rect=stage.getBoundingClientRect();
-    const xAtY=(line:Line,yPercent:number)=>{
-      const dy=line.b.y-line.a.y;
-      if(Math.abs(dy)<1e-6) return (line.a.x+line.b.x)/2;
-      const t=clamp((yPercent-line.a.y)/dy,0,1);
-      return line.a.x+(line.b.x-line.a.x)*t;
-    };
-    const toImageX=(percent:number)=>(
-      (((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width
-    );
-    const toImageY=(percent:number)=>(
-      (((percent/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*source.height
-    );
-
-    const leftPercent=xAtY(fingerLines.left,ringGuideY);
-    const rightPercent=xAtY(fingerLines.right,ringGuideY);
-    const y=toImageY(ringGuideY);
-    const leftX=toImageX(leftPercent);
-    const rightX=toImageX(rightPercent);
-    const widthPx=Math.abs(rightX-leftX);
-    if(!Number.isFinite(widthPx)||widthPx<=1) return null;
-
-    let widthMm:number;
-    if(measurementCardHomography){
-      try{
-        const left=projectPoint(measurementCardHomography,{x:leftX,y});
-        const right=projectPoint(measurementCardHomography,{x:rightX,y});
-        widthMm=Math.hypot(right.x-left.x,right.y-left.y);
-      }catch{
-        widthMm=widthPx/pixelsPerMm;
-      }
-    }else{
-      widthMm=widthPx/pixelsPerMm;
-    }
-
-    if(!Number.isFinite(widthMm)||widthMm<=0) return null;
-
-    const tolerancePx=clamp(widthPx*0.02,2,4);
-    const mmPerLocalPx=widthMm/widthPx;
-    const toleranceMm=tolerancePx*mmPerLocalPx;
-
-    return {widthPx,widthMm,tolerancePx,toleranceMm};
-  };
-
   const liveWidthMm = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
 
@@ -1806,21 +1752,8 @@ export default function AppV2() {
       .filter(v=>Number.isFinite(v)&&v>0&&v<45);
 
     const stable=selectWidestStableRun(widthsMm);
-    if(stable.used===null) return null;
-
-    if(singlePhotoTestMode){
-      const manual=manualFingerGuideMeasurement();
-      if(manual){
-        return clamp(
-          stable.used,
-          manual.widthMm-manual.toleranceMm,
-          manual.widthMm+manual.toleranceMm,
-        );
-      }
-    }
-
     return stable.used;
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography,singlePhotoTestMode,fingerLines]);
+  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1864,6 +1797,7 @@ export default function AppV2() {
         ),
       };
     }
+
     return computeRingResult(liveWidthMm, calibrationRules, true, calibrationConfidence);
   }, [liveWidthMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode]);
 
@@ -1938,15 +1872,6 @@ export default function AppV2() {
 
     const widestPhysical=selectWidestStableRun(physicalWidthsMm);
     const spreadPx=Math.max(...rawWidthsPx)-Math.min(...rawWidthsPx);
-    const manualGuide=singlePhotoTestMode ? manualFingerGuideMeasurement() : null;
-    const automaticMm=widestPhysical.used;
-    const guardedMm=liveWidthMm;
-    const guardApplied=Boolean(
-      singlePhotoTestMode &&
-      manualGuide &&
-      automaticMm!==null &&
-      Math.abs(automaticMm-guardedMm)>0.0005
-    );
 
     return {
       rawWidthsPx,
@@ -1960,12 +1885,6 @@ export default function AppV2() {
       selectedUpperWidthsPx:widestRun.selected,
       selectedRunStart:widestRun.startIndex+1,
       fingerAxisAngleDeg:fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
-      manualGuideWidthPx:manualGuide?.widthPx ?? null,
-      manualGuideWidthMm:manualGuide?.widthMm ?? null,
-      autoWidthMm:automaticMm,
-      guardTolerancePx:manualGuide?.tolerancePx ?? null,
-      guardToleranceMm:manualGuide?.toleranceMm ?? null,
-      guardApplied,
     };
   })();
 
@@ -2006,7 +1925,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "Posicione a linha amarela na altura do anel e ajuste as duas linhas verdes nas bordas reais. Os 50 refinamentos só podem corrigir alguns pixels em torno dessa largura manual."
+          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia. Os 50 refinamentos trabalham na mesma foto calibrada."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
@@ -2137,7 +2056,6 @@ export default function AppV2() {
               >
                 Abrir medição com 1 foto
               </button>
-
             </section>
           )}
         </>
@@ -2613,14 +2531,6 @@ export default function AppV2() {
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
-                  {singlePhotoTestMode && measurementAudit.manualGuideWidthPx !== null && (
-                    <>
-                      <span>Largura manual das linhas: {measurementAudit.manualGuideWidthPx.toFixed(2)} px · {measurementAudit.manualGuideWidthMm?.toFixed(2)} mm</span>
-                      <span>Refino permitido: ±{measurementAudit.guardTolerancePx?.toFixed(2)} px · ±{measurementAudit.guardToleranceMm?.toFixed(2)} mm</span>
-                      {measurementAudit.autoWidthMm !== null && <span>Largura automática antes da trava: {measurementAudit.autoWidthMm.toFixed(2)} mm</span>}
-                      <span>Trava manual aplicada: {measurementAudit.guardApplied ? "sim" : "não"}</span>
-                    </>
-                  )}
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
                   {measurementAudit.rawCardMm !== null && <span>Medida bruta foto 2: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
