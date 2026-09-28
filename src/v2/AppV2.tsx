@@ -14,6 +14,7 @@ import { classifyFingerWidthMm } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
+import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
@@ -95,6 +96,7 @@ export default function AppV2() {
     }
     recordedMeasurementPhotoRef.current="";
     setMeasurementHistoryMm([]);
+    setHandLandmarkAnalysis(null);
   };
   const [captureDeviceQuality, setCaptureDeviceQuality] = useState<{
     devicePitch:number|null;
@@ -102,6 +104,7 @@ export default function AppV2() {
     deviceMotion:number|null;
     stabilityScore:number|null;
   } | null>(null);
+  const [handLandmarkAnalysis, setHandLandmarkAnalysis] = useState<HandLandmarkAnalysis | null>(null);
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
@@ -1842,6 +1845,27 @@ export default function AppV2() {
   // A diferenca para a foto 1 fica somente como diagnostico e NAO altera o dedo.
   const v2PhotoScaleCorrection = 1;
 
+  useEffect(() => {
+    if(
+      !VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS ||
+      !photo ||
+      measurementMode!=="finger" ||
+      phase!=="finger"
+    ){
+      if(!photo) setHandLandmarkAnalysis(null);
+      return;
+    }
+
+    let cancelled=false;
+    const centerX=((leftLine+rightLine)/2)/100;
+    void analyzeHandLandmarks(photo,centerX).then((analysis)=>{
+      if(cancelled) return;
+      setHandLandmarkAnalysis(analysis);
+    });
+
+    return ()=>{ cancelled=true; };
+  },[photo,measurementMode,phase,leftLine,rightLine]);
+
   const widthAnalysis = useMemo(() => {
     if(!pixelsPerMm||!leftLocked||!rightLocked){
       return {oldMm:null as number|null,newMm:null as number|null,stats:null as ReturnType<typeof robustWidthStats>|null};
@@ -1894,7 +1918,7 @@ export default function AppV2() {
       cardScore:calibrationConfidence,
       perspectiveScore,
       stabilityScore:captureDeviceQuality?.stabilityScore ?? null,
-      segmentationScore:null,
+      segmentationScore:handLandmarkAnalysis?.detected ? handLandmarkAnalysis.score : null,
       edgeScore,
       depthScore:null,
     });
@@ -1911,6 +1935,8 @@ export default function AppV2() {
     calibrationConfidence,
     captureDeviceQuality?.stabilityScore,
     widthAnalysis.stats,
+    handLandmarkAnalysis?.detected,
+    handLandmarkAnalysis?.score,
     photo,
   ]);
 
@@ -2780,6 +2806,9 @@ export default function AppV2() {
                   <span>Mediana filtrada: {measurementAudit.robustMedianMm===null?"n/d":measurementAudit.robustMedianMm.toFixed(2)+" mm"} · média aparada: {measurementAudit.robustTrimmedMeanMm===null?"n/d":measurementAudit.robustTrimmedMeanMm.toFixed(2)+" mm"}</span>
                   <span>Cortes filtrados: {measurementAudit.robustFilteredCount} · outliers removidos: {measurementAudit.robustOutlierCount}</span>
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
+                  <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
+                  {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · ringRegionY {(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)}% · jointRegionY {(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)}%</span>}
+                  {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA" : "aguardando 3 capturas válidas"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · mediana 3 capturas ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
                   <span>Histórico: registra somente após 0,9 s estável e atualiza a mesma foto se o ajuste mudar.</span>
