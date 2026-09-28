@@ -107,6 +107,7 @@ export default function AppV2() {
   const [rightLine, setRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(60);
   const [ringGuideY, setRingGuideY] = useState(60);
+  const [jointGuideY, setJointGuideY] = useState(46);
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -509,6 +510,7 @@ export default function AppV2() {
     const nextMeasureY=clamp(baseBottom+17,42,76);
     setMeasureY(nextMeasureY);
     setRingGuideY(nextMeasureY);
+    setJointGuideY(clamp(nextMeasureY-14,30,82));
     setFingerLines({
       left:{a:{x:38,y:clamp(nextMeasureY-16,4,96)},b:{x:38,y:clamp(nextMeasureY+16,4,96)}},
       right:{a:{x:62,y:clamp(nextMeasureY-16,4,96)},b:{x:62,y:clamp(nextMeasureY+16,4,96)}},
@@ -932,8 +934,18 @@ export default function AppV2() {
       setRightManualRefined(false);
       const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
       const nextY=clamp(dragStartRef.current.right + dy, 30, 88);
-      setMeasureY(nextY);
-      setRingGuideY(nextY);
+      const safeY=Math.max(nextY,jointGuideY+4);
+      setMeasureY(safeY);
+      setRingGuideY(safeY);
+    }
+    if (target === "joint-height") {
+      setLeftLocked(false);
+      setRightLocked(false);
+      setLeftManualRefined(false);
+      setRightManualRefined(false);
+      const dy = ((clientY - dragStartRef.current.y) / rect.height) * 100;
+      const nextY=clamp(dragStartRef.current.right + dy, 18, 82);
+      setJointGuideY(Math.min(nextY, ringGuideY-4));
     }
     if (target === "pan") {
       setLeftLocked(false);
@@ -955,9 +967,16 @@ export default function AppV2() {
       target === "right" ? "right" :
       null;
     draggingRef.current = target;
-    dragStartRef.current = { x: event.clientX, y: event.clientY, left: cardLeft, top: cardBottom, right: target === "height" ? ringGuideY : cardRight, bottom: cardBottom };
+    dragStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      left: cardLeft,
+      top: cardBottom,
+      right: target === "height" ? ringGuideY : target === "joint-height" ? jointGuideY : cardRight,
+      bottom: cardBottom
+    };
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (target !== "height") updateDrag(event.clientX, event.clientY);
+    if (target !== "height" && target !== "joint-height") updateDrag(event.clientX, event.clientY);
   };
 
   const startCardCornerDrag = (index:number, event:React.PointerEvent) => {
@@ -1329,7 +1348,7 @@ export default function AppV2() {
     setFingerLoupe(null);
   };
 
-  const fingerBandSamplesPx = () => {
+  const fingerBandSamplesPx = (guideY = ringGuideY) => {
     const stage=measureRef.current;
     const source=photoPixelsRef.current;
     if(!stage||!source||!leftLocked||!rightLocked) return null;
@@ -1371,7 +1390,7 @@ export default function AppV2() {
     // para encontrar a borda real do dedo.
     const rawYPercents=Array.from({length:50},(_,index)=>{
       const off=-10+(index*(20/49));
-      return clamp(ringGuideY+off,6,94);
+      return clamp(guideY+off,6,94);
     });
     const yPercents=rawYPercents.filter((value,index,array)=>
       index===0 || Math.abs(value-array[index-1])>0.02
@@ -1482,7 +1501,7 @@ export default function AppV2() {
     // Encontra a semente perto da linha amarela. As linhas manuais continuam
     // limitando a busca durante toda a varredura.
     const centerIndex=yPercents.reduce((bestIndex,value,index)=>
-      Math.abs(value-ringGuideY)<Math.abs(yPercents[bestIndex]-ringGuideY)?index:bestIndex
+      Math.abs(value-guideY)<Math.abs(yPercents[bestIndex]-guideY)?index:bestIndex
     ,0);
 
     let seedIndex=-1;
@@ -1759,12 +1778,8 @@ export default function AppV2() {
   // A diferenca para a foto 1 fica somente como diagnostico e NAO altera o dedo.
   const v2PhotoScaleCorrection = 1;
 
-  const liveWidthMm = useMemo(() => {
-    if(!pixelsPerMm||!leftLocked||!rightLocked) return null;
-
-    const samples=fingerBandSamplesPx();
-    if(!samples || samples.length<35) return null;
-
+  const stablePhysicalWidthFromSamples = (samples:ReturnType<typeof fingerBandSamplesPx>) => {
+    if(!pixelsPerMm||!samples||samples.length<35) return null;
     const widthsMm=samples
       .map((sample)=>{
         if(measurementCardHomography){
@@ -1782,7 +1797,32 @@ export default function AppV2() {
 
     const stable=selectWidestStableRun(widthsMm);
     return stable.used;
-  },[pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,measurementCardHomography]);
+  };
+
+  const dualFingerMeasurement = useMemo(() => {
+    if(!pixelsPerMm||!leftLocked||!rightLocked) {
+      return {ringMm:null as number|null,jointMm:null as number|null,usedMm:null as number|null,source:null as "anel"|"junta"|null};
+    }
+
+    const ringSamples=fingerBandSamplesPx(ringGuideY);
+    const jointSamples=fingerBandSamplesPx(jointGuideY);
+    const ringMm=stablePhysicalWidthFromSamples(ringSamples);
+    const jointMm=stablePhysicalWidthFromSamples(jointSamples);
+
+    const candidates=[
+      ringMm!==null ? {source:"anel" as const,value:ringMm} : null,
+      jointMm!==null ? {source:"junta" as const,value:jointMm} : null,
+    ].filter((item): item is {source:"anel"|"junta";value:number}=>item!==null);
+
+    if(!candidates.length) return {ringMm,jointMm,usedMm:null,source:null};
+    const winner=candidates.reduce((best,item)=>item.value>best.value?item:best,candidates[0]);
+    return {ringMm,jointMm,usedMm:winner.value,source:winner.source};
+  },[
+    pixelsPerMm,leftLine,rightLine,ringGuideY,jointGuideY,zoom,panX,panY,
+    leftLocked,rightLocked,measurementCardHomography,fingerLines
+  ]);
+
+  const liveWidthMm = dualFingerMeasurement.usedMm;
 
   const finalMeasurementConfidence = calibrationConfidence;
 
@@ -1875,7 +1915,9 @@ export default function AppV2() {
     return 1/pixelsPerMm;
   })();
 
-  const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx() : null;
+  const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked
+    ? fingerBandSamplesPx(dualFingerMeasurement.source==="junta" ? jointGuideY : ringGuideY)
+    : null;
 
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
@@ -1954,7 +1996,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia. Os 50 refinamentos trabalham na mesma foto calibrada."
+          ? "Posicione uma linha amarela na JUNTA e a outra onde o ANEL vai ficar. O sistema mede os dois pontos e usa automaticamente a maior largura."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
@@ -2293,7 +2335,51 @@ export default function AppV2() {
                     />
                   </svg>
                 )}
-                <button
+                                <button
+                  type="button"
+                  className="ring-height-guide joint-guide"
+                  style={{
+                    position:"absolute",
+                    left:`${Math.min(leftLine,rightLine)}%`,
+                    top:`${jointGuideY}%`,
+                    width:`${Math.abs(rightLine-leftLine)}%`,
+                    height:"24px",
+                    transform:"translateY(-50%)",
+                    border:0,
+                    padding:0,
+                    background:"transparent",
+                    cursor:"ns-resize",
+                    zIndex:6,
+                    touchAction:"none",
+                  }}
+                  onPointerDown={(event)=>startDrag("joint-height",event)}
+                  aria-label="Linha horizontal da junta do dedo"
+                >
+                  <span style={{
+                    position:"absolute",
+                    left:0,
+                    right:0,
+                    top:"50%",
+                    height:"3px",
+                    transform:"translateY(-50%)",
+                    background:"#ffd86b",
+                    boxShadow:"0 0 0 1px rgba(0,0,0,.35)",
+                  }} />
+                  <span style={{
+                    position:"absolute",
+                    left:"50%",
+                    top:"50%",
+                    transform:"translate(-50%,-50%)",
+                    padding:"3px 7px",
+                    borderRadius:"999px",
+                    background:"rgba(0,0,0,.72)",
+                    color:"#ffd86b",
+                    fontSize:"10px",
+                    fontWeight:700,
+                    whiteSpace:"nowrap",
+                  }}>JUNTA</span>
+                </button>
+<button
                   type="button"
                   className="ring-height-guide"
                   style={{
@@ -2509,6 +2595,9 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
+              {dualFingerMeasurement.ringMm !== null && <span>Medida na posição do anel: {dualFingerMeasurement.ringMm.toFixed(2)} mm</span>}
+              {dualFingerMeasurement.jointMm !== null && <span>Medida na junta: {dualFingerMeasurement.jointMm.toFixed(2)} mm</span>}
+              {dualFingerMeasurement.source && <span>Medida usada: {dualFingerMeasurement.source==="junta" ? "JUNTA" : "POSIÇÃO DO ANEL"} · maior das duas</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
