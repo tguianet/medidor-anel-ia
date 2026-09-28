@@ -105,6 +105,8 @@ export default function AppV2() {
   const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
   const [rightLine, setRightLine] = useState(38);
+  const [jointLeftLine, setJointLeftLine] = useState(25);
+  const [jointRightLine, setJointRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(60);
   const [ringGuideY, setRingGuideY] = useState(60);
   const [jointGuideY, setJointGuideY] = useState(46);
@@ -507,6 +509,8 @@ export default function AppV2() {
     setCalibrationConfidence(confidence);
     setLeftLine(38);
     setRightLine(62);
+    setJointLeftLine(38);
+    setJointRightLine(62);
     const nextMeasureY=clamp(baseBottom+17,42,76);
     setMeasureY(nextMeasureY);
     setRingGuideY(nextMeasureY);
@@ -926,6 +930,14 @@ export default function AppV2() {
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
       setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+    }
+    if (target === "joint-left") {
+      const nextLeft=Math.min(x, jointRightLine - 3);
+      setJointLeftLine(nextLeft);
+    }
+    if (target === "joint-right") {
+      const nextRight=Math.max(x, jointLeftLine + 3);
+      setJointRightLine(nextRight);
     }
     if (target === "height") {
       setLeftLocked(false);
@@ -1348,7 +1360,7 @@ export default function AppV2() {
     setFingerLoupe(null);
   };
 
-  const fingerBandSamplesPx = (guideY = ringGuideY) => {
+  const fingerBandSamplesPx = (guideY = ringGuideY, guideLeft = leftLine, guideRight = rightLine) => {
     const stage=measureRef.current;
     const source=photoPixelsRef.current;
     if(!stage||!source||!leftLocked||!rightLocked) return null;
@@ -1514,8 +1526,8 @@ export default function AppV2() {
 
     for(const index of seedOrder){
       const yPercent=yPercents[index];
-      const leftGuide=toImageX(leftLine);
-      const rightGuide=toImageX(rightLine);
+      const leftGuide=toImageX(guideLeft);
+      const rightGuide=toImageX(guideRight);
       const candidate=sampleAt(yPercent,leftGuide,rightGuide,null,null,seedRadius);
       if(candidate){
         seedIndex=index;
@@ -1537,8 +1549,8 @@ export default function AppV2() {
 
         // Cada corte volta a usar as linhas manuais como centro de busca.
         // A borda anterior entra apenas como continuidade, impedindo saltos.
-        const manualLeft=toImageX(leftLine);
-        const manualRight=toImageX(rightLine);
+        const manualLeft=toImageX(guideLeft);
+        const manualRight=toImageX(guideRight);
         let pair=sampleAt(
           yPercent,
           manualLeft,
@@ -1804,8 +1816,8 @@ export default function AppV2() {
       return {ringMm:null as number|null,jointMm:null as number|null,usedMm:null as number|null,source:null as "anel"|"junta"|null};
     }
 
-    const ringSamples=fingerBandSamplesPx(ringGuideY);
-    const jointSamples=fingerBandSamplesPx(jointGuideY);
+    const ringSamples=fingerBandSamplesPx(ringGuideY,leftLine,rightLine);
+    const jointSamples=fingerBandSamplesPx(jointGuideY,jointLeftLine,jointRightLine);
     const ringMm=stablePhysicalWidthFromSamples(ringSamples);
     const jointMm=stablePhysicalWidthFromSamples(jointSamples);
 
@@ -1818,7 +1830,7 @@ export default function AppV2() {
     const winner=candidates.reduce((best,item)=>item.value>best.value?item:best,candidates[0]);
     return {ringMm,jointMm,usedMm:winner.value,source:winner.source};
   },[
-    pixelsPerMm,leftLine,rightLine,ringGuideY,jointGuideY,zoom,panX,panY,
+    pixelsPerMm,leftLine,rightLine,jointLeftLine,jointRightLine,ringGuideY,jointGuideY,zoom,panX,panY,
     leftLocked,rightLocked,measurementCardHomography,fingerLines
   ]);
 
@@ -1916,7 +1928,9 @@ export default function AppV2() {
   })();
 
   const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked
-    ? fingerBandSamplesPx(dualFingerMeasurement.source==="junta" ? jointGuideY : ringGuideY)
+    ? (dualFingerMeasurement.source==="junta"
+        ? fingerBandSamplesPx(jointGuideY,jointLeftLine,jointRightLine)
+        : fingerBandSamplesPx(ringGuideY,leftLine,rightLine))
     : null;
 
   const measurementAudit = (() => {
@@ -1996,7 +2010,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "Posicione uma linha amarela na JUNTA e a outra onde o ANEL vai ficar. O sistema mede os dois pontos e usa automaticamente a maior largura."
+          ? "Ajuste o par AZUL na junta e o par VERDE na falange onde o anel ficará. Cada região tem linhas independentes; o sistema mede as duas e usa automaticamente a maior."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
@@ -2340,9 +2354,9 @@ export default function AppV2() {
                   className="ring-height-guide joint-guide"
                   style={{
                     position:"absolute",
-                    left:`${Math.min(leftLine,rightLine)}%`,
+                    left:`${Math.min(jointLeftLine,jointRightLine)}%`,
                     top:`${jointGuideY}%`,
-                    width:`${Math.abs(rightLine-leftLine)}%`,
+                    width:`${Math.abs(jointRightLine-jointLeftLine)}%`,
                     height:"24px",
                     transform:"translateY(-50%)",
                     border:0,
@@ -2362,7 +2376,7 @@ export default function AppV2() {
                     top:"50%",
                     height:"3px",
                     transform:"translateY(-50%)",
-                    background:"#ffd86b",
+                    background:"#4ab8ff",
                     boxShadow:"0 0 0 1px rgba(0,0,0,.35)",
                   }} />
                   <span style={{
@@ -2373,7 +2387,7 @@ export default function AppV2() {
                     padding:"3px 7px",
                     borderRadius:"999px",
                     background:"rgba(0,0,0,.72)",
-                    color:"#ffd86b",
+                    color:"#4ab8ff",
                     fontSize:"10px",
                     fontWeight:700,
                     whiteSpace:"nowrap",
@@ -2422,6 +2436,68 @@ export default function AppV2() {
                     fontWeight:700,
                     whiteSpace:"nowrap",
                   }}>ALTURA DO ANEL</span>
+                </button>
+                <button
+                  type="button"
+                  className="finger-full-line joint-left"
+                  style={{
+                    position:"absolute",
+                    left:`${jointLeftLine}%`,
+                    top:0,
+                    width:"18px",
+                    height:"100%",
+                    transform:"translateX(-50%)",
+                    border:0,
+                    padding:0,
+                    background:"transparent",
+                    cursor:"ew-resize",
+                    zIndex:8,
+                    touchAction:"none",
+                  }}
+                  onPointerDown={(event)=>startDrag("joint-left",event)}
+                  aria-label="Linha esquerda da junta"
+                >
+                  <span style={{
+                    position:"absolute",
+                    left:"50%",
+                    top:0,
+                    bottom:0,
+                    width:"2px",
+                    transform:"translateX(-50%)",
+                    background:"#4ab8ff",
+                    boxShadow:"0 0 0 1px rgba(0,0,0,.28)",
+                  }} />
+                </button>
+                <button
+                  type="button"
+                  className="finger-full-line joint-right"
+                  style={{
+                    position:"absolute",
+                    left:`${jointRightLine}%`,
+                    top:0,
+                    width:"18px",
+                    height:"100%",
+                    transform:"translateX(-50%)",
+                    border:0,
+                    padding:0,
+                    background:"transparent",
+                    cursor:"ew-resize",
+                    zIndex:8,
+                    touchAction:"none",
+                  }}
+                  onPointerDown={(event)=>startDrag("joint-right",event)}
+                  aria-label="Linha direita da junta"
+                >
+                  <span style={{
+                    position:"absolute",
+                    left:"50%",
+                    top:0,
+                    bottom:0,
+                    width:"2px",
+                    transform:"translateX(-50%)",
+                    background:"#4ab8ff",
+                    boxShadow:"0 0 0 1px rgba(0,0,0,.28)",
+                  }} />
                 </button>
                 <button
                   type="button"
@@ -2598,6 +2674,7 @@ export default function AppV2() {
               {dualFingerMeasurement.ringMm !== null && <span>Medida na posição do anel: {dualFingerMeasurement.ringMm.toFixed(2)} mm</span>}
               {dualFingerMeasurement.jointMm !== null && <span>Medida na junta: {dualFingerMeasurement.jointMm.toFixed(2)} mm</span>}
               {dualFingerMeasurement.source && <span>Medida usada: {dualFingerMeasurement.source==="junta" ? "JUNTA" : "POSIÇÃO DO ANEL"} · maior das duas</span>}
+              <span>Guias independentes: junta = azul · falange = verde</span>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
