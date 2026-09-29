@@ -609,24 +609,86 @@ export default function AppV2() {
           const cardW=Math.max(40,right0-left0);
           const cardH=Math.max(30,bottom0-top0);
 
-          const bestVertical=(expectedX:number)=>{
-            let bestX=expectedX;
-            let bestScore=-Infinity;
-            for(let dx=-14;dx<=14;dx+=1){
-              const x=expectedX+dx;
-              const contrasts:number[]=[];
-              for(let y=top0+cardH*0.16;y<=bottom0-cardH*0.16;y+=Math.max(4,cardH/22)){
-                contrasts.push(Math.abs(gray(x-3,y)-gray(x+3,y)));
-              }
-              const edge=robustMean(contrasts);
-              const score=edge-Math.abs(dx)*0.24;
-              if(score>bestScore){bestScore=score;bestX=x;}
-            }
-            return {x:bestX,score:bestScore,shift:bestX-expectedX};
+          type VerticalEdgeCandidate={
+            x:number;
+            dx:number;
+            edge:number;
+            coverage:number;
+            score:number;
           };
 
-          const leftEdge=bestVertical(left0);
-          const rightEdge=bestVertical(right0);
+          // Procura a BORDA FISICA EXTERNA de cada lateral.
+          // Primeiro identifica quais candidatos possuem contraste forte e
+          // continuidade vertical. Entre candidatos equivalentes, prefere:
+          //   esquerda -> o mais externo para a esquerda
+          //   direita  -> o mais externo para a direita
+          // Isso evita grudar em faixa, texto ou desenho interno do cartão.
+          const bestVertical=(expectedX:number,side:"left"|"right")=>{
+            const direction=side==="left" ? -1 : 1;
+            const candidates:VerticalEdgeCandidate[]=[];
+
+            for(let dx=-18;dx<=18;dx+=1){
+              const x=expectedX+dx;
+              const contrasts:number[]=[];
+              let strong=0;
+              let samples=0;
+
+              for(let y=top0+cardH*0.14;y<=bottom0-cardH*0.14;y+=Math.max(4,cardH/24)){
+                const contrast=Math.abs(gray(x-3,y)-gray(x+3,y));
+                contrasts.push(contrast);
+                if(contrast>=10) strong++;
+                samples++;
+              }
+
+              const edge=robustMean(contrasts);
+              const coverage=strong/Math.max(1,samples);
+              const outward=Math.max(0,direction*dx);
+              const inward=Math.max(0,-direction*dx);
+
+              // Continuidade vertical pesa mais que um pico isolado.
+              // Pequeno bônus externo só desempata bordas fisicamente plausíveis.
+              const score=
+                edge +
+                coverage*12 +
+                outward*0.22 -
+                inward*0.18 -
+                Math.abs(dx)*0.035;
+
+              candidates.push({x,dx,edge,coverage,score});
+            }
+
+            const maxEdge=Math.max(...candidates.map(candidate=>candidate.edge));
+            const maxCoverage=Math.max(...candidates.map(candidate=>candidate.coverage));
+
+            const physicalCandidates=candidates.filter(candidate=>
+              candidate.edge>=Math.max(7,maxEdge*0.78) &&
+              candidate.coverage>=Math.max(0.52,maxCoverage-0.18)
+            );
+
+            const pool=physicalCandidates.length ? physicalCandidates : candidates;
+
+            // Dentro do conjunto de bordas fortes/contínuas, escolhemos a mais
+            // externa. O score serve de desempate caso duas fiquem praticamente
+            // na mesma posição.
+            pool.sort((a,b)=>{
+              const outerA=direction*a.dx;
+              const outerB=direction*b.dx;
+              if(Math.abs(outerB-outerA)>0.75) return outerB-outerA;
+              return b.score-a.score;
+            });
+
+            const best=pool[0];
+            return {
+              x:best.x,
+              score:best.score,
+              edge:best.edge,
+              coverage:best.coverage,
+              shift:best.x-expectedX,
+            };
+          };
+
+          const leftEdge=bestVertical(left0,"left");
+          const rightEdge=bestVertical(right0,"right");
           const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
           const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
 
@@ -651,11 +713,13 @@ export default function AppV2() {
           // So aceitamos o refinamento se as 3 bordas possuem contraste real.
           // Caso contrario, mantemos o retangulo inicial como fallback.
           if(
-            leftEdge.score<7 ||
-            rightEdge.score<7 ||
+            leftEdge.edge<7 ||
+            rightEdge.edge<7 ||
+            leftEdge.coverage<0.52 ||
+            rightEdge.coverage<0.52 ||
             bottomEdge.score<7 ||
             refinedRight-refinedLeft<cardW*0.92 ||
-            refinedRight-refinedLeft>cardW*1.08
+            refinedRight-refinedLeft>cardW*1.10
           ){
             return null;
           }
@@ -4502,7 +4566,7 @@ export default function AppV2() {
                   <span>Gate da captura: {captureQualityGate.accepted ? "ACEITA" : "DESCARTADA"}{!captureQualityGate.accepted ? ` · ${captureQualityGate.reasons.join(" · ")}` : ""}</span>
                   <span>Comparação geométrica: homografia direta {widthAnalysis.homographyMm?.toFixed(2) ?? "n/d"} mm · escala local {widthAnalysis.localScaleMm?.toFixed(2) ?? "n/d"} mm · escala normalizada {widthAnalysis.normalizedScaleMm?.toFixed(2) ?? "n/d"} mm</span>
                   <span>Fonte ativa: CALIBRAÇÃO 85,60 MM POR INTERSEÇÕES</span>
-                  <span>Cartão automático: detector aproximado + auto-snap físico das laterais/base antes da escala.</span>
+                  <span>Cartão automático: detector aproximado + auto-snap físico EXTERNO das laterais + base antes da escala.</span>
                   <span>Homografia: somente diagnóstico/validação de perspectiva · não altera a medida</span>
                   <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm · somente diagnóstico</span>
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
