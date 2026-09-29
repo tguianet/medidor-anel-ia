@@ -18,7 +18,18 @@ const imageSize=(src:string)=>new Promise<{width:number;height:number}>((resolve
   img.src=src;
 });
 
-export default function LightCardDetectorTest({photo}:{photo:string}){
+export type LightCardDetectionPayload={
+  confidence:number;
+  cardBox:{x:number;y:number;width:number;height:number};
+};
+
+export default function LightCardDetectorTest({
+  photo,
+  onApply,
+}:{
+  photo:string;
+  onApply?:(payload:LightCardDetectionPayload)=>void;
+}){
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState<LightResult|null>(null);
   const [error,setError]=useState("");
@@ -108,9 +119,23 @@ export default function LightCardDetectorTest({photo}:{photo:string}){
             <span>Largura candidata: <strong>{widthPx?.toFixed(1) ?? "n/d"} px</strong></span>
             <span>Escala candidata: <strong>{result.mmPerPx.toFixed(4)} mm/px</strong></span>
             <small style={{opacity:.72}}>
-              Somente diagnóstico. Não altera as linhas, a calibração oficial de 85,60 mm nem a fórmula.
+              A detecção ainda não altera a fórmula. Você pode aplicar a caixa encontrada somente nas 3 linhas do cartão.
             </small>
           </div>
+
+          <button
+            className="primary"
+            type="button"
+            disabled={result.confidence<90}
+            onClick={()=>onApply?.({
+              confidence:result.confidence,
+              cardBox:result.cardBox,
+            })}
+          >
+            {result.confidence>=90
+              ? "Aplicar detecção nas 3 linhas"
+              : "Confiança insuficiente para aplicar"}
+          </button>
         </>
       )}
     </section>
