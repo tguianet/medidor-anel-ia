@@ -35,6 +35,41 @@ export default function CameraScreen({
       </div>
       <div className="viewport">
         <video ref={videoRef} playsInline muted autoPlay />
+        <div
+          aria-live="polite"
+          style={{
+            position:"absolute",
+            top:18,
+            left:"50%",
+            transform:"translateX(-50%)",
+            zIndex:50,
+            minWidth:"230px",
+            maxWidth:"calc(100% - 28px)",
+            padding:"10px 14px",
+            borderRadius:14,
+            border:`2px solid ${
+              liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
+                ? "#52e0a3"
+                : "#f0c75e"
+            }`,
+            background:"rgba(18,18,18,.88)",
+            color:
+              liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
+                ? "#52e0a3"
+                : "#f5d477",
+            fontWeight:800,
+            textAlign:"center",
+            lineHeight:1.25,
+            boxShadow:"0 4px 18px rgba(0,0,0,.38)",
+            pointerEvents:"none",
+          }}
+        >
+          {liveFingerTiltDeg===null || liveFingerTiltConfidence<45
+            ? "DEDO: procurando inclinação..."
+            : Math.abs(liveFingerTiltDeg)<=1.5
+              ? `✓ DEDO RETO · ${Math.abs(liveFingerTiltDeg).toFixed(1)}°`
+              : `DEDO ${Math.abs(liveFingerTiltDeg).toFixed(1)}° · AJUSTE ATÉ 0°`}
+        </div>
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
           <div
@@ -68,26 +103,8 @@ export default function CameraScreen({
             <span className="angle-arrow backward">↓</span>
           </div>
 
-          <div
-            className="live-finger-axis"
-            style={{
-              borderColor:
-                liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
-                  ? "#52e0a3"
-                  : undefined,
-              color:
-                liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
-                  ? "#52e0a3"
-                  : undefined,
-            }}
-          >
-            <span>
-              {liveFingerTiltDeg===null || liveFingerTiltConfidence<45
-                ? "ALINHE O DEDO"
-                : Math.abs(liveFingerTiltDeg)<=1.5
-                  ? `✓ DEDO RETO · ${Math.abs(liveFingerTiltDeg).toFixed(1)}°`
-                  : `DEDO ${Math.abs(liveFingerTiltDeg).toFixed(1)}° · AJUSTE ATÉ 0°`}
-            </span>
+          <div className="live-finger-axis">
+            <span>ALINHE O DEDO</span>
           </div>
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
