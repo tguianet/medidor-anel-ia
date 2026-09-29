@@ -1966,6 +1966,7 @@ export default function AppV2() {
       homographyMm:null as number|null,
       localScaleMm:null as number|null,
       normalizedScaleMm:null as number|null,
+      geometryDisagreementMm:0,
       perspectiveScaleFactor:1,
       baseMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
       normalizedMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
@@ -2096,21 +2097,46 @@ export default function AppV2() {
       VISION_FEATURE_FLAGS.ENABLE_CARD_SCALE_PERSPECTIVE_NORMALIZATION &&
       normalizedValues.length>=35;
 
-    const activeStats=useNormalizedScale ? normalizedStats : localStats;
-    const activeStable=useNormalizedScale ? normalizedStable : localStable;
-    const activeRobust=useNormalizedScale ? normalizedRobust : localRobust;
+    const directHomographyValue=homographyRobust ?? homographyStable;
+    const normalizedValue=normalizedRobust ?? normalizedStable;
+    const localValue=localRobust ?? localStable;
+
+    // Correção conservadora:
+    // - nunca aumenta a largura acima da homografia direta quando os métodos divergem;
+    // - mantém a escala local normalizada quando ela já está coerente.
+    // Isso atua somente antes da fórmula de aro.
+    const geometryDisagreementMm=
+      directHomographyValue!==null && localValue!==null
+        ? Math.abs(localValue-directHomographyValue)
+        : 0;
+
+    const preferDirectHomography=
+      useNormalizedScale &&
+      directHomographyValue!==null &&
+      normalizedValue!==null &&
+      geometryDisagreementMm>0.15 &&
+      normalizedValue>directHomographyValue;
+
+    const activeStats=preferDirectHomography ? homographyStats : (useNormalizedScale ? normalizedStats : localStats);
+    const activeStable=preferDirectHomography ? homographyStable : (useNormalizedScale ? normalizedStable : localStable);
+    const activeRobust=preferDirectHomography ? homographyRobust : (useNormalizedScale ? normalizedRobust : localRobust);
 
     return {
       oldMm:activeStable,
       newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
       stats:activeStats,
-      homographyMm:homographyRobust ?? homographyStable,
-      localScaleMm:localRobust ?? localStable,
-      normalizedScaleMm:normalizedRobust ?? normalizedStable,
+      homographyMm:directHomographyValue,
+      localScaleMm:localValue,
+      normalizedScaleMm:normalizedValue,
+      geometryDisagreementMm,
       perspectiveScaleFactor,
       baseMmPerPx,
       normalizedMmPerPx:baseMmPerPx*perspectiveScaleFactor,
-      measurementSource:useNormalizedScale ? "normalized-local-scale" as const : "local-scale" as const,
+      measurementSource:preferDirectHomography
+        ? "homography-guard" as const
+        : useNormalizedScale
+          ? "normalized-local-scale" as const
+          : "local-scale" as const,
     };
   },[
     pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,
@@ -3130,7 +3156,8 @@ export default function AppV2() {
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
                   <span>Gate da captura: {captureQualityGate.accepted ? "ACEITA" : "DESCARTADA"}{!captureQualityGate.accepted ? ` · ${captureQualityGate.reasons.join(" · ")}` : ""}</span>
                   <span>Comparação geométrica: homografia direta {widthAnalysis.homographyMm?.toFixed(2) ?? "n/d"} mm · escala local {widthAnalysis.localScaleMm?.toFixed(2) ?? "n/d"} mm · escala normalizada {widthAnalysis.normalizedScaleMm?.toFixed(2) ?? "n/d"} mm</span>
-                  <span>Fonte ativa: {widthAnalysis.measurementSource==="normalized-local-scale" ? "ESCALA LOCAL + NORMALIZAÇÃO DE PERSPECTIVA" : "ESCALA LOCAL"}</span>
+                  <span>Fonte ativa: {widthAnalysis.measurementSource==="homography-guard" ? "HOMOGRAFIA DIRETA · PROTEÇÃO CONTRA SUPERDIMENSIONAMENTO" : widthAnalysis.measurementSource==="normalized-local-scale" ? "ESCALA LOCAL + NORMALIZAÇÃO DE PERSPECTIVA" : "ESCALA LOCAL"}</span>
+                  <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm{widthAnalysis.measurementSource==="homography-guard" ? " · proteção ativa" : ""}</span>
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
                   {handLandmarkAnalysis?.error && <span>Landmark erro: {handLandmarkAnalysis.error}</span>}
@@ -3143,7 +3170,7 @@ export default function AppV2() {
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
                   <span>Fusão temporal: {temporalFusion.active ? "ATIVA COM 2 FOTOS" : temporalFusion.count>=2 ? `DIVERGENTE · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm > 0,350 mm` : "1 foto suficiente · 2ª somente se necessária"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · média 2 fotos ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
-                  <span>Capturas válidas: {stableCaptures.slice(-2).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ offset ${item.regionOffsetY>=0?"+":""}${item.regionOffsetY.toFixed(1)}%`).join(" · ") || "nenhuma"} · tentativas ${measurementAttemptCount}/2</span>
+                  <span>Capturas válidas: {stableCaptures.slice(-2).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ offset ${item.regionOffsetY>=0?"+":""}${item.regionOffsetY.toFixed(1)}%`).join(" · ") || "nenhuma"} · tentativas {measurementAttemptCount}/2</span>
                   <span>Fluxo comercial: 1 foto aprovada conclui a medição; 2ª foto somente se a primeira precisar recalibrar. Máximo absoluto: 2 tentativas.</span>
                   <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
@@ -3154,11 +3181,11 @@ export default function AppV2() {
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
-                  {measurementAudit.rawCardMm !== null && <span>Medida bruta foto 2: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
-                  <span>Correção extra entre fotos: desativada</span>
+                  {measurementAudit.rawCardMm !== null && <span>Medida bruta: {measurementAudit.rawCardMm.toFixed(2)} mm</span>}
+                  <span>Correção entre fotos: não aplicável no modo 1 foto</span>
                   {measurementAudit.normalizedMm !== null && <span>Medida usada pela V2: {measurementAudit.normalizedMm.toFixed(2)} mm</span>}
                   {referenceCardLengthPx !== null && <span>Cartão foto 1: {referenceCardLengthPx.toFixed(1)} px</span>}
-                  {measurementCardLengthPx !== null && <span>Cartão foto 2: {measurementCardLengthPx.toFixed(1)} px</span>}
+                  {measurementCardLengthPx !== null && <span>Cartão da medição: {measurementCardLengthPx.toFixed(1)} px</span>}
                   {referenceCardLengthPx !== null && measurementCardLengthPx !== null && (
                     <span>Diferença cartão 1→2: {(((measurementCardLengthPx/referenceCardLengthPx)-1)*100).toFixed(2)}%</span>
                   )}
