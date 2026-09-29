@@ -389,6 +389,7 @@ export default function AppV2() {
       score:number;
       consistencyScore:number;
       guide:ReturnType<typeof analyzeLiveCardGuide>;
+      calibration:Awaited<ReturnType<typeof calibratePhoto>> | null;
     };
 
     const scoreGuide = (guide:ReturnType<typeof analyzeLiveCardGuide>) => {
@@ -439,6 +440,7 @@ export default function AppV2() {
 
     let selectedCanvas:HTMLCanvasElement;
     let capturedPhoto:string;
+    let selectedBurstCalibration:Awaited<ReturnType<typeof calibratePhoto>> | null=null;
 
     if(useBurst){
       camera.setError("Selecionando automaticamente o melhor quadro...");
@@ -453,6 +455,7 @@ export default function AppV2() {
           guide,
           score:scoreGuide(guide),
           consistencyScore:0,
+          calibration:null,
         });
         if(index<7){
           await new Promise<void>((resolve)=>window.setTimeout(resolve,65));
@@ -487,46 +490,58 @@ export default function AppV2() {
         }
       }
 
-      // A consistência dedo/cartão pesa mais que pequenas diferenças visuais.
-      // Depois, a confiança real do detector do cartão desempata os finalistas.
-      const finalists=[...candidates]
-        .sort((x,y)=>(y.score+y.consistencyScore)-(x.score+x.consistencyScore))
-        .slice(0,4);
-
-      let best:BurstCandidate|null=null;
-      let bestCalibrationConfidence=-1;
-      let bestCombined=-Infinity;
-
-      for(const candidate of finalists){
+      // Calibramos os 8 frames antes de escolher. Um frame só pode vencer
+      // a rajada se também for elegível para o fluxo automático; assim não
+      // escolhemos um quadro bonito/consistente que depois para na etapa do cartão.
+      for(const candidate of candidates){
         try{
-          const calibration=await calibratePhoto(candidate.photo);
-          const combined=
-            candidate.score +
-            candidate.consistencyScore +
-            calibration.confidence*0.35;
-
-          if(combined>bestCombined){
-            best={...candidate};
-            bestCalibrationConfidence=calibration.confidence;
-            bestCombined=combined;
-          }
+          candidate.calibration=await calibratePhoto(candidate.photo);
         }catch{
-          // Um frame ruim nao invalida a rajada inteira.
+          candidate.calibration=null;
         }
       }
 
-      if(!best){
+      const autoEligible=candidates.filter(candidate=>
+        candidate.calibration!==null &&
+        candidate.calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE
+      );
+
+      if(!autoEligible.length){
+        camera.setError("A rajada não encontrou um quadro com calibração suficiente do cartão. Reenquadre cartão e dedo e tente novamente.");
+        return;
+      }
+
+      // Entre os quadros que já passaram pela calibração mínima, vence o mais
+      // consistente com a mediana dedo/cartão; qualidade visual e confiança
+      // do cartão servem como desempate.
+      let best:BurstCandidate|null=null;
+      let bestCombined=-Infinity;
+
+      for(const candidate of autoEligible){
+        const calibration=candidate.calibration!;
+        const combined=
+          candidate.consistencyScore*1.35 +
+          candidate.score*0.65 +
+          calibration.confidence*0.45;
+
+        if(combined>bestCombined){
+          best=candidate;
+          bestCombined=combined;
+        }
+      }
+
+      if(!best || !best.calibration){
         camera.setError("Não encontrei um quadro confiável nesta rajada. Mantenha cartão e dedo no enquadramento e tente novamente.");
         return;
       }
 
       selectedCanvas=best.canvas;
       capturedPhoto=best.photo;
+      selectedBurstCalibration=best.calibration;
       const ratioText=best.guide.fingerCardRatio===null
         ? "n/d"
         : best.guide.fingerCardRatio.toFixed(4);
-      camera.setError(`Quadro escolhido · razão dedo/cartão ${ratioText}`);
-      window.setTimeout(()=>camera.setError(""),900);
+      camera.setError("");
     }else{
       selectedCanvas=drawCurrentFrame();
       capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
@@ -559,7 +574,7 @@ export default function AppV2() {
       setMeasurementCardHomography(null);
 
       try {
-        const calibration = await calibratePhoto(capturedPhoto);
+        const calibration = selectedBurstCalibration ?? await calibratePhoto(capturedPhoto);
         const detectedLeft = clamp(calibration.cardBox.x * 100, 2, 94);
         const detectedRight = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 6, 98);
         const finalLeft = Math.min(detectedLeft, detectedRight - 5);
