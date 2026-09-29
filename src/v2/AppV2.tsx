@@ -580,22 +580,40 @@ export default function AppV2() {
       setPixelsPerMm(1);
     }
     setCalibrationConfidence(confidence);
-    setLeftLine(38);
-    setRightLine(62);
+
+    // TESTE: as guias verticais do dedo nascem exatamente nas duas
+    // intersecoes da base calibrada do cartao. Isso cria uma origem geometrica
+    // comum entre calibracao e medicao e reduz a variacao causada por o usuario
+    // reposicionar as linhas em X de uma tentativa para outra.
+    const anchoredLeft=clamp(Math.min(baseLeft,baseRight-3),2,95);
+    const anchoredRight=clamp(Math.max(baseRight,baseLeft+3),5,98);
+    setLeftLine(anchoredLeft);
+    setRightLine(anchoredRight);
+
     const nextMeasureY=clamp(baseBottom+17,42,76);
     setMeasureY(nextMeasureY);
     setRingGuideY(nextMeasureY);
     setFingerLines({
-      left:{a:{x:38,y:clamp(nextMeasureY-16,4,96)},b:{x:38,y:clamp(nextMeasureY+16,4,96)}},
-      right:{a:{x:62,y:clamp(nextMeasureY-16,4,96)},b:{x:62,y:clamp(nextMeasureY+16,4,96)}},
+      left:{
+        a:{x:anchoredLeft,y:clamp(baseBottom,4,96)},
+        b:{x:anchoredLeft,y:clamp(nextMeasureY+20,4,96)},
+      },
+      right:{
+        a:{x:anchoredRight,y:clamp(baseBottom,4,96)},
+        b:{x:anchoredRight,y:clamp(nextMeasureY+20,4,96)},
+      },
     });
     setZoom(1);
     setPanX(0);
     setPanY(0);
     camera.setError("");
     setPhase("finger");
-    setLeftLocked(false);
-    setRightLocked(false);
+
+    // Como a propria base do cartao agora posiciona as guias, elas ja entram
+    // travadas como sementes do refinamento automatico. O usuario ainda pode
+    // arrastar manualmente para comparar durante o teste.
+    setLeftLocked(true);
+    setRightLocked(true);
     setLeftFingerTilt(0);
     setRightFingerTilt(0);
     setLeftMagnetConfidence(0);
@@ -2590,7 +2608,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia. Os 50 refinamentos trabalham na mesma foto calibrada."
+          ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos trabalham na mesma foto."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
