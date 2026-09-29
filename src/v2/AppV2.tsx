@@ -87,8 +87,6 @@ export default function AppV2() {
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
   const cardLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
-  const autoCaptureTimerRef = useRef<number | null>(null);
-  const autoCaptureLockedRef = useRef(false);
   const recordedMeasurementPhotoRef = useRef<string>("");
   const autoAnatomyAppliedPhotoRef = useRef<string>("");
   const measurementHistoryTimerRef = useRef<number | null>(null);
@@ -247,76 +245,14 @@ export default function AppV2() {
     return () => window.clearInterval(interval);
   }, [stage, camera.cameraOpening]);
 
-  useEffect(() => {
-    const shouldAutoCapture =
-      stage === "camera" &&
-      !camera.cameraOpening &&
-      !camera.error &&
-      cardReady &&
-      (!VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION || deviceQuality.stabilityScore === null || deviceQuality.stabilityScore >= 90) &&
-      measurementMode === "finger" &&
-      !diameterPhotoTestMode &&
-      (
-        // Fluxo principal: uma unica foto. Assim que o cartao fica verde e
-        // estavel, o disparo acontece automaticamente.
-        (singlePhotoTestMode && fingerCardCalibrationStep === "measurement") ||
-        // Mantem compatibilidade com o fluxo legado privado de referencia.
-        (!singlePhotoTestMode && fingerCardCalibrationStep === "reference")
-      );
-
-    if (!shouldAutoCapture) {
-      if (autoCaptureTimerRef.current !== null) {
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (autoCaptureLockedRef.current || autoCaptureTimerRef.current !== null) return;
-
-    // Verde precisa permanecer valido por 250 ms: rapido para o usuario,
-    // mas longo o bastante para evitar um falso positivo de um unico frame.
-    autoCaptureTimerRef.current = window.setTimeout(() => {
-      autoCaptureTimerRef.current = null;
-      if (
-        autoCaptureLockedRef.current ||
-        stage !== "camera" ||
-        !cardReady ||
-        camera.cameraOpening ||
-        camera.error
-      ) return;
-
-      autoCaptureLockedRef.current = true;
-      void capture();
-    }, 250);
-
-    return () => {
-      if (autoCaptureTimerRef.current !== null) {
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current = null;
-      }
-    };
-  }, [
-    stage,
-    cardReady,
-    camera.cameraOpening,
-    camera.error,
-    deviceQuality.stabilityScore,
-    measurementMode,
-    diameterPhotoTestMode,
-    singlePhotoTestMode,
-    fingerCardCalibrationStep,
-  ]);
+  // Disparo automatico removido.
+  // A deteccao ao vivo do cartao continua apenas como guia visual.
+  // A captura acontece somente quando o usuario toca no botao da camera.
 
   const openCamera = async () => {
     if(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION){
       void deviceQuality.requestPermission();
     }
-    if (autoCaptureTimerRef.current !== null) {
-      window.clearTimeout(autoCaptureTimerRef.current);
-      autoCaptureTimerRef.current = null;
-    }
-    autoCaptureLockedRef.current = false;
     setCaptureDeviceQuality(null);
     setPixelsPerMm(null);
     setCalibrationConfidence(0);
@@ -344,8 +280,6 @@ export default function AppV2() {
   };
 
   const capture = async () => {
-    if (autoCaptureLockedRef.current && stage !== "camera") return;
-
     if(
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
@@ -372,7 +306,6 @@ export default function AppV2() {
 
     const video = camera.videoRef.current;
     if (!video?.videoWidth) {
-      autoCaptureLockedRef.current = false;
       return;
     }
     const canvas = document.createElement("canvas");
