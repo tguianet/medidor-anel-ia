@@ -344,16 +344,6 @@ export default function AppV2() {
   const capture = async () => {
     if (autoCaptureLockedRef.current && stage !== "camera") return;
 
-    if (
-      measurementMode==="finger" &&
-      !diameterPhotoTestMode &&
-      singlePhotoTestMode &&
-      measurementAttemptCount>=2
-    ){
-      camera.setError("Limite de 2 fotos atingido. Reinicie a medição para começar novamente.");
-      autoCaptureLockedRef.current=false;
-      return;
-    }
     if(
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
@@ -382,9 +372,6 @@ export default function AppV2() {
     if (!video?.videoWidth) {
       autoCaptureLockedRef.current = false;
       return;
-    }
-    if(measurementMode==="finger" && !diameterPhotoTestMode && singlePhotoTestMode){
-      setMeasurementAttemptCount((value)=>Math.min(2,value+1));
     }
     const canvas = document.createElement("canvas");
     canvas.width = 900;
@@ -2350,12 +2337,13 @@ export default function AppV2() {
 
   const captureFusionReady = true;
 
+  // Cada foto e uma medicao autonoma.
+  // Nenhum valor anterior pode participar do resultado atual.
+  // Foto reprovada pelo gate nunca chega a formula.
   const widthSentToFormulaMm =
-    VISION_FEATURE_FLAGS.ENABLE_TEMPORAL_FUSION &&
-    temporalFusion.active &&
-    temporalFusion.fusedMm!==null
-      ? temporalFusion.fusedMm
-      : liveWidthMm;
+    captureQualityGate.accepted && preFormulaQuality.accepted
+      ? liveWidthMm
+      : null;
 
 
   const finalMeasurementConfidence = calibrationConfidence;
@@ -2378,7 +2366,7 @@ export default function AppV2() {
 
   const result = useMemo(() => {
     if (widthSentToFormulaMm === null) return null;
-    if (!preFormulaQuality.accepted) return null;
+    if (!preFormulaQuality.accepted || !captureQualityGate.accepted) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(widthSentToFormulaMm, calibrationConfidence);
 
@@ -2403,9 +2391,11 @@ export default function AppV2() {
     }
 
     return computeRingResult(widthSentToFormulaMm, calibrationRules, true, calibrationConfidence);
-  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted]);
+  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted, captureQualityGate.accepted]);
 
   const resetPhoto = () => {
+    // Nova foto = nova medicao. Nao herda largura, regiao ou historico anterior.
+    resetMeasurementSession();
     if(measurementMode==="finger" && !diameterPhotoTestMode){
       setFingerCardCalibrationStep((current)=>current==="done" ? "measurement" : current);
     }
@@ -3105,24 +3095,10 @@ export default function AppV2() {
             </div>
           )}
 
-          {phase==="finger" && singlePhotoTestMode && measurementAttemptCount===1 && !captureQualityGate.accepted && (
+          {phase==="finger" && singlePhotoTestMode && liveWidthMm!==null && !captureQualityGate.accepted && (
             <div className="analysis-result">
-              <strong>Vamos calibrar mais uma vez</strong>
-              <span>A primeira foto não passou na validação. Faça somente mais uma foto; o sistema não pedirá uma terceira.</span>
-            </div>
-          )}
-
-          {phase==="finger" && singlePhotoTestMode && measurementAttemptCount>=2 && !captureQualityGate.accepted && (
-            <div className="analysis-result">
-              <strong>Medição não concluída</strong>
-              <span>As 2 tentativas não atingiram a qualidade mínima. Reinicie a medição para tentar novamente.</span>
-            </div>
-          )}
-
-          {temporalFusion.count===2 && !temporalFusion.active && phase==="finger" && (
-            <div className="analysis-result">
-              <strong>As duas fotos ficaram diferentes</strong>
-              <span>Diferença de {(temporalFusion.rangeMm ?? 0).toFixed(3)} mm. O sistema usa a foto atual aprovada e não solicita uma terceira captura.</span>
+              <strong>Captura descartada</strong>
+              <span>Esta foto não passou na validação. Refaça a captura; a nova foto começa do zero e não será combinada com esta.</span>
             </div>
           )}
           {phase === "finger" && liveWidthMm !== null && !preFormulaQuality.accepted && (
@@ -3171,13 +3147,12 @@ export default function AppV2() {
                   {handLandmarkAnalysis?.measuredFinger && <span>ringRegionY {handLandmarkAnalysis.measuredFinger.ringRegionY===null?"oculta/fallback":(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)+"%"} · jointRegionY {handLandmarkAnalysis.measuredFinger.jointRegionY===null?"oculta":(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)+"%"}</span>}
                   <span>Contorno anatômico: {contourAnatomy?.detected ? "detectado" : "não detectado"}{contourAnatomy ? ` · score ${contourAnatomy.score} · ${contourAnatomy.reason}` : ""}</span>
                   {contourAnatomy?.ringRegionY!==null && contourAnatomy?.ringRegionY!==undefined && <span>Contour ringRegionY: {contourAnatomy.ringRegionY.toFixed(1)}% · jointRegionY {contourAnatomy.jointRegionY===null?"n/d":contourAnatomy.jointRegionY.toFixed(1)+"%"} · CV {contourAnatomy.widthCvPercent===null?"n/d":contourAnatomy.widthCvPercent.toFixed(2)+"%"}</span>}
-                  <span>Fusão da região anatômica: {anatomicalRegionFusion.active ? "ATIVA" : anatomicalRegionFusion.count>=2 ? `DIVERGENTE · amplitude do offset ${(anatomicalRegionFusion.rangeOffsetY ?? 0).toFixed(1)}% > 3,0%` : `1 foto suficiente · comparação só se houver 2ª (${anatomicalRegionFusion.count}/2)`}{anatomicalRegionFusion.active && anatomicalRegionFusion.medianOffsetY!==null ? ` · offset médio ${anatomicalRegionFusion.medianOffsetY.toFixed(1)}% · amplitude ${(anatomicalRegionFusion.rangeOffsetY ?? 0).toFixed(1)}%` : ""}</span>
+                  <span>Região anatômica: somente a foto atual · sem fusão entre capturas</span>
                   <span>Região anatômica aplicada: {anatomicalRegionFusion.active ? "FUSÃO" : handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "LANDMARKS" : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null ? "CONTORNO" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
-                  <span>Repetibilidade: {measurementRepeatability.count} captura(s) · média {measurementRepeatability.mean===null?"n/d":measurementRepeatability.mean.toFixed(2)+" mm"} · desvio {measurementRepeatability.sd===null?"n/d":measurementRepeatability.sd.toFixed(3)+" mm"} · amplitude {measurementRepeatability.range===null?"n/d":measurementRepeatability.range.toFixed(3)+" mm"}</span>
-                  <span>Fusão temporal: {temporalFusion.active ? "ATIVA COM 2 FOTOS" : temporalFusion.count>=2 ? `DIVERGENTE · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm > 0,350 mm` : "1 foto suficiente · 2ª somente se necessária"}{temporalFusion.active && temporalFusion.medianMm!==null ? ` · média 2 fotos ${temporalFusion.medianMm.toFixed(2)} mm · amplitude ${(temporalFusion.rangeMm ?? 0).toFixed(3)} mm` : ""}</span>
-                  <span>Capturas válidas: {stableCaptures.slice(-2).map((item,index)=>`#${index+1} ${item.mm.toFixed(2)} mm @ offset ${item.regionOffsetY>=0?"+":""}${item.regionOffsetY.toFixed(1)}%`).join(" · ") || "nenhuma"} · tentativas {measurementAttemptCount}/2</span>
-                  <span>Fluxo comercial: 1 foto aprovada conclui a medição; 2ª foto somente se a primeira precisar recalibrar. Máximo absoluto: 2 tentativas.</span>
+                  <span>Modo de captura: FOTO ÚNICA AUTÔNOMA</span>
+                  <span>Histórico entre fotos: DESATIVADO · nenhuma média ou fusão entre capturas</span>
+                  <span>Fluxo comercial: cada nova foto recalibra pelo cartão da própria imagem e substitui integralmente a anterior.</span>
                   <span>Largura enviada à fórmula: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Card corners (%): {JSON.stringify(quadFromLines(cardLines))}</span>
                   <span>Depth: {VISION_FEATURE_FLAGS.ENABLE_DEPTH_VALIDATION ? "habilitado/aguardando fonte" : "não disponível · fallback visão computacional"}</span>
