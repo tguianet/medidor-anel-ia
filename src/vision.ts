@@ -13,10 +13,19 @@ export type LiveCardGuideAnalysis = {
   angle: LiveCardAngleGuide;
   skew: number;
   ready: boolean;
+  fingerTiltDeg: number | null;
+  fingerTiltConfidence: number;
 };
 
 export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnalysis => {
-  const fallback: LiveCardGuideAnalysis = { frameAligned: false, angle: "unknown", skew: 0, ready: false };
+  const fallback: LiveCardGuideAnalysis = {
+    frameAligned: false,
+    angle: "unknown",
+    skew: 0,
+    ready: false,
+    fingerTiltDeg: null,
+    fingerTiltConfidence: 0,
+  };
   if (!video.videoWidth || !video.videoHeight) return fallback;
 
   const canvas = document.createElement("canvas");
@@ -141,11 +150,91 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     }
   }
 
+  // Guia leve de inclinacao do dedo em tempo real.
+  // Usa a regiao logo abaixo da base do cartao e acompanha o centro do dedo
+  // em varios cortes. Isto serve apenas para orientar o usuario ANTES da foto.
+  const fingerCenters:{x:number;y:number;score:number}[]=[];
+  const fingerCenterX=canvas.width/2;
+  const fingerTop=Math.min(canvas.height-40,bottom+10);
+  const fingerBottom=Math.min(canvas.height-18,bottom+canvas.height*0.30);
+
+  for(let y=fingerTop;y<=fingerBottom;y+=10){
+    const candidates:{x:number;score:number}[]=[];
+    for(let x=Math.round(canvas.width*0.16);x<=Math.round(canvas.width*0.84);x+=2){
+      const contrast=Math.abs(grayAt(x-3,y)-grayAt(x+3,y));
+      if(contrast>=10) candidates.push({x,score:contrast});
+    }
+
+    const leftCandidates=candidates
+      .filter(c=>c.x<fingerCenterX-8)
+      .sort((a,b)=>
+        (Math.abs(a.x-fingerCenterX)-Math.abs(b.x-fingerCenterX)) ||
+        (b.score-a.score)
+      );
+    const rightCandidates=candidates
+      .filter(c=>c.x>fingerCenterX+8)
+      .sort((a,b)=>
+        (Math.abs(a.x-fingerCenterX)-Math.abs(b.x-fingerCenterX)) ||
+        (b.score-a.score)
+      );
+
+    let bestPair:{left:number;right:number;score:number}|null=null;
+    for(const l of leftCandidates.slice(0,12)){
+      for(const r of rightCandidates.slice(0,12)){
+        const width=r.x-l.x;
+        if(width<canvas.width*0.12 || width>canvas.width*0.48) continue;
+        const center=(l.x+r.x)/2;
+        const centerPenalty=Math.abs(center-fingerCenterX)*0.18;
+        const pairScore=l.score+r.score-centerPenalty;
+        if(!bestPair || pairScore>bestPair.score){
+          bestPair={left:l.x,right:r.x,score:pairScore};
+        }
+      }
+    }
+    if(bestPair){
+      fingerCenters.push({
+        x:(bestPair.left+bestPair.right)/2,
+        y,
+        score:bestPair.score,
+      });
+    }
+  }
+
+  let fingerTiltDeg:number|null=null;
+  let fingerTiltConfidence=0;
+
+  if(fingerCenters.length>=6){
+    const meanY=fingerCenters.reduce((s,p)=>s+p.y,0)/fingerCenters.length;
+    const meanX=fingerCenters.reduce((s,p)=>s+p.x,0)/fingerCenters.length;
+    let numerator=0;
+    let denominator=0;
+    for(const p of fingerCenters){
+      numerator+=(p.y-meanY)*(p.x-meanX);
+      denominator+=(p.y-meanY)*(p.y-meanY);
+    }
+    const slope=denominator>1e-6 ? numerator/denominator : 0;
+    const intercept=meanX-slope*meanY;
+    const residuals=fingerCenters.map(p=>Math.abs(p.x-(slope*p.y+intercept)));
+    const meanResidual=residuals.reduce((s,v)=>s+v,0)/Math.max(1,residuals.length);
+    fingerTiltDeg=Math.atan(slope)*180/Math.PI;
+
+    const coverage=Math.min(1,fingerCenters.length/11);
+    const residualQuality=Math.max(0,1-meanResidual/8);
+    fingerTiltConfidence=Math.round(100*(coverage*0.55+residualQuality*0.45));
+
+    if(fingerTiltConfidence<45 || Math.abs(fingerTiltDeg)>18){
+      fingerTiltDeg=null;
+      fingerTiltConfidence=0;
+    }
+  }
+
   return {
     frameAligned,
     angle,
     skew,
     ready: frameAligned && angle === "aligned",
+    fingerTiltDeg,
+    fingerTiltConfidence,
   };
 };
 
