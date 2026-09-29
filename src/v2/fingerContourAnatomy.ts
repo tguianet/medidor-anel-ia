@@ -32,7 +32,7 @@ const movingMedian=(samples:FingerContourSample[],radius=2)=>
 
 export const analyzeFingerContourAnatomy = (
   rawSamples:FingerContourSample[],
-  manualGuideY:number,
+  _manualGuideY:number,
 ):FingerContourAnatomy => {
   const samples=movingMedian(
     rawSamples
@@ -65,16 +65,16 @@ export const analyzeFingerContourAnatomy = (
       const centerY=(y0+y1)/2;
       const span=Math.max(.001,y1-y0);
       const slope=Math.abs(run[run.length-1].width-run[0].width)/span;
-      const guideDistance=Math.abs(centerY-manualGuideY);
       const averageConfidence=run.reduce((s,x)=>s+x.confidence,0)/run.length;
 
-      // Prefere platô contínuo, próximo da zona indicada pelo usuário,
-      // com pouca variação e sem premiar simplesmente a maior largura.
+      // A regiao do anel agora e 100% anatomica: a posicao manual da linha
+      // amarela NAO participa mais do score. Isso evita que a mesma foto
+      // produza regioes diferentes apenas porque o usuario moveu a guia.
+      // Procuramos o plato mais continuo, confiavel e geometricamente estavel.
       const score=
         averageConfidence
         -cv*9
         -slope*5
-        -guideDistance*1.1
         +Math.min(10,run.length*.6);
 
       runs.push({start,end,score,cv,centerY});
