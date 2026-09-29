@@ -2989,6 +2989,52 @@ export default function AppV2() {
     };
   })();
 
+  const geometricStabilityTest = (() => {
+    if(
+      measurementMode!=="finger" ||
+      !pixelsPerMm ||
+      pixelsPerMm<=0 ||
+      !measurementCardLengthPx ||
+      measurementCardLengthPx<=0 ||
+      !fingerMagnetSamples?.length
+    ){
+      return null;
+    }
+
+    const currentFingerPx=
+      widthSentToFormulaMm!==null
+        ? widthSentToFormulaMm*pixelsPerMm
+        : null;
+
+    const physicalFingerPx=physicalEdgeProfileTest?.widthPx ?? null;
+
+    const currentRatio=
+      currentFingerPx!==null
+        ? currentFingerPx/measurementCardLengthPx
+        : null;
+
+    const physicalRatio=
+      physicalFingerPx!==null
+        ? physicalFingerPx/measurementCardLengthPx
+        : null;
+
+    return {
+      cardPx:measurementCardLengthPx,
+      mmPerPx:1/pixelsPerMm,
+      currentFingerPx,
+      physicalFingerPx,
+      currentRatio,
+      physicalRatio,
+      anatomyY:auditGuideY,
+      pitch:captureDeviceQuality?.devicePitch ?? null,
+      roll:captureDeviceQuality?.deviceRoll ?? null,
+      motion:captureDeviceQuality?.deviceMotion ?? null,
+      stability:captureDeviceQuality?.stabilityScore ?? null,
+      fingerAngleDeg:fingerMagnetSamples[0]?.axisAngleDeg ?? null,
+      perspectiveScore:preFormulaQuality.perspectiveScore,
+    };
+  })();
+
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
 
@@ -3731,6 +3777,28 @@ export default function AppV2() {
                       <span>INSET 2,5 px/lado: {methodComparisonTest.inset.px.toFixed(1)} px · {methodComparisonTest.inset.mm.toFixed(2)} mm · curva atual aro {methodComparisonTest.inset.officialRing} · histórica aro {methodComparisonTest.inset.historicalRing}</span>
                       <span>BORDA FÍSICA: {methodComparisonTest.physical ? `${methodComparisonTest.physical.px.toFixed(1)} px · ${methodComparisonTest.physical.mm.toFixed(2)} mm · curva atual aro ${methodComparisonTest.physical.officialRing} · histórica aro ${methodComparisonTest.physical.historicalRing} · suporte ${methodComparisonTest.physical.support}%` : "n/d"}</span>
                       <small>Diagnóstico somente · nenhum destes testes altera o aro comercial.</small>
+                    </div>
+                  )}
+                  {geometricStabilityTest && (
+                    <div
+                      style={{
+                        marginTop:10,
+                        padding:"10px 12px",
+                        border:"1px solid rgba(126,196,255,.42)",
+                        borderRadius:10,
+                        display:"grid",
+                        gap:6,
+                        background:"rgba(12,20,28,.55)"
+                      }}
+                    >
+                      <strong>ESTABILIDADE GEOMÉTRICA DA FOTO</strong>
+                      <span>Cartão: {geometricStabilityTest.cardPx.toFixed(1)} px · escala {geometricStabilityTest.mmPerPx.toFixed(4)} mm/px</span>
+                      <span>Dedo atual: {geometricStabilityTest.currentFingerPx===null ? "n/d" : geometricStabilityTest.currentFingerPx.toFixed(1)+" px"} · razão dedo/cartão {geometricStabilityTest.currentRatio===null ? "n/d" : geometricStabilityTest.currentRatio.toFixed(4)}</span>
+                      <span>Borda física: {geometricStabilityTest.physicalFingerPx===null ? "n/d" : geometricStabilityTest.physicalFingerPx.toFixed(1)+" px"} · razão física/cartão {geometricStabilityTest.physicalRatio===null ? "n/d" : geometricStabilityTest.physicalRatio.toFixed(4)}</span>
+                      <span>Altura anatômica Y: {geometricStabilityTest.anatomyY.toFixed(1)}% · ângulo dedo {geometricStabilityTest.fingerAngleDeg===null ? "n/d" : geometricStabilityTest.fingerAngleDeg.toFixed(2)+"°"}</span>
+                      <span>Celular: pitch {geometricStabilityTest.pitch===null ? "n/d" : geometricStabilityTest.pitch.toFixed(1)+"°"} · roll {geometricStabilityTest.roll===null ? "n/d" : geometricStabilityTest.roll.toFixed(1)+"°"} · movimento {geometricStabilityTest.motion===null ? "n/d" : geometricStabilityTest.motion.toFixed(2)}</span>
+                      <span>Stability {geometricStabilityTest.stability===null ? "n/d" : geometricStabilityTest.stability} · perspective {geometricStabilityTest.perspectiveScore}</span>
+                      <small>Diagnóstico somente · este quadro ainda não bloqueia nem corrige o resultado.</small>
                     </div>
                   )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
