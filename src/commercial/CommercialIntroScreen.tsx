@@ -5,54 +5,64 @@ type Props = {
 
 export default function CommercialIntroScreen({ error, onMeasureFinger }: Props) {
   return (
-    <section className="panel intro commercial-intro commercial-intro-v2">
-      <div className="commercial-hero-mark" aria-hidden="true">
-        <span className="commercial-ring-icon">◯</span>
-        <span className="commercial-ring-spark">✦</span>
-      </div>
+    <section className="commercial-hero">
+      <div className="commercial-hero-glow commercial-hero-glow-a" />
+      <div className="commercial-hero-glow commercial-hero-glow-b" />
 
-      <span className="step">MEDIDOR DE ANEL IA</span>
-      <h1>
-        Descubra o tamanho <em>ideal</em> do seu anel em segundos
-      </h1>
-      <p className="lead">
-        Uma única foto com o cartão sobre o dedo. A calibração e a medição continuam
-        usando exatamente o motor atual do sistema.
-      </p>
-
-      <div className="commercial-benefits" aria-label="Benefícios">
-        <div>
-          <span className="commercial-benefit-icon" aria-hidden="true">▣</span>
-          <span><strong>Use qualquer cartão</strong><small>O cartão serve como referência física da medida.</small></span>
+      <div className="commercial-brand">
+        <div className="commercial-ring-mark" aria-hidden="true">
+          <span className="commercial-ring-orbit commercial-ring-orbit-a" />
+          <span className="commercial-ring-orbit commercial-ring-orbit-b" />
+          <span className="commercial-ring-gem" />
         </div>
         <div>
-          <span className="commercial-benefit-icon" aria-hidden="true">⌖</span>
-          <span><strong>Medição inteligente</strong><small>O sistema encontra as bordas e calcula o aro.</small></span>
-        </div>
-        <div>
-          <span className="commercial-benefit-icon" aria-hidden="true">✓</span>
-          <span><strong>Resultado fácil de entender</strong><small>Veja as opções justo, exato e conforto.</small></span>
+          <div className="commercial-brand-title">Medidor de</div>
+          <div className="commercial-brand-title">Anel IA</div>
         </div>
       </div>
 
-      <div className="commercial-flow-preview" aria-label="Fluxo de medição">
-        <div><b>1</b><span>Posicione</span></div>
-        <i aria-hidden="true">›</i>
-        <div><b>2</b><span>Meça</span></div>
-        <i aria-hidden="true">›</i>
-        <div><b>3</b><span>Confira</span></div>
+      <div className="commercial-hero-copy">
+        <span className="commercial-kicker">MEDIÇÃO INTELIGENTE</span>
+        <h1>
+          Descubra o <em>aro ideal</em><br />
+          do seu anel<br />
+          em <em>segundos</em>
+        </h1>
+        <p>
+          Uma única captura com o cartão sobre o dedo. O sistema calibra,
+          mede e apresenta o resultado automaticamente.
+        </p>
       </div>
 
-      <button className="primary commercial-start" onClick={onMeasureFinger}>
-        <span>COMEÇAR MEDIÇÃO</span>
-        <b aria-hidden="true">›</b>
+      <div className="commercial-benefits">
+        <div className="commercial-benefit">
+          <span className="commercial-benefit-icon commercial-card-icon" aria-hidden="true">
+            <i />
+          </span>
+          <span>Use qualquer<br />cartão bancário</span>
+        </div>
+
+        <div className="commercial-benefit">
+          <span className="commercial-benefit-icon commercial-target-icon" aria-hidden="true">
+            <i />
+          </span>
+          <span>Apenas 1 foto<br />com o cartão sobre o dedo</span>
+        </div>
+
+        <div className="commercial-benefit">
+          <span className="commercial-benefit-icon commercial-check-icon" aria-hidden="true">
+            <i>✓</i>
+          </span>
+          <span>Resultado exato<br />e conforto</span>
+        </div>
+      </div>
+
+      <button className="commercial-start" onClick={onMeasureFinger}>
+        <span>COMEÇAR</span>
+        <span className="commercial-start-arrow">›</span>
       </button>
 
-      <p className="commercial-safe-note">
-        Nenhuma alteração foi feita na calibração, nas linhas, na fórmula ou no cálculo do aro.
-      </p>
-
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error commercial-error">{error}</p>}
     </section>
   );
 }
