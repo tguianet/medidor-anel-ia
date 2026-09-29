@@ -10,6 +10,9 @@ type Props = {
   cameraAngleGuide: "forward" | "backward" | "aligned" | "unknown";
   liveFingerTiltDeg?: number | null;
   liveFingerTiltConfidence?: number;
+  liveOpticalCenterOffsetPx?: number | null;
+  liveCardFingerOffsetPx?: number | null;
+  liveOpticalCenterConfidence?: number;
   cameraOpening: boolean;
   error: string;
   referenceCardWidthPercent?: number | null;
@@ -23,6 +26,7 @@ type Props = {
 export default function CameraScreen({
   videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide,
   liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
+  liveOpticalCenterOffsetPx = null, liveCardFingerOffsetPx = null, liveOpticalCenterConfidence = 0,
   cameraOpening, error,
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
   onClose, onCapture, onRetry,
@@ -69,6 +73,51 @@ export default function CameraScreen({
             : Math.abs(liveFingerTiltDeg)<=1.5
               ? `✓ DEDO RETO · ${Math.abs(liveFingerTiltDeg).toFixed(1)}°`
               : `DEDO ${Math.abs(liveFingerTiltDeg).toFixed(1)}° · AJUSTE ATÉ 0°`}
+        </div>
+        <div
+          aria-live="polite"
+          style={{
+            position:"absolute",
+            top:88,
+            left:"50%",
+            transform:"translateX(-50%)",
+            zIndex:49,
+            minWidth:"250px",
+            maxWidth:"calc(100% - 28px)",
+            padding:"9px 12px",
+            borderRadius:12,
+            border:`2px solid ${
+              liveOpticalCenterOffsetPx!==null &&
+              liveCardFingerOffsetPx!==null &&
+              Math.abs(liveOpticalCenterOffsetPx)<=6 &&
+              Math.abs(liveCardFingerOffsetPx)<=5
+                ? "#52e0a3"
+                : "#7ec4ff"
+            }`,
+            background:"rgba(12,18,24,.88)",
+            color:
+              liveOpticalCenterOffsetPx!==null &&
+              liveCardFingerOffsetPx!==null &&
+              Math.abs(liveOpticalCenterOffsetPx)<=6 &&
+              Math.abs(liveCardFingerOffsetPx)<=5
+                ? "#52e0a3"
+                : "#9ed2ff",
+            fontWeight:800,
+            textAlign:"center",
+            lineHeight:1.25,
+            boxShadow:"0 4px 18px rgba(0,0,0,.32)",
+            pointerEvents:"none",
+          }}
+        >
+          {liveOpticalCenterOffsetPx===null || liveCardFingerOffsetPx===null || liveOpticalCenterConfidence<45
+            ? "CELULAR: procurando centro óptico..."
+            : Math.abs(liveOpticalCenterOffsetPx)<=6 && Math.abs(liveCardFingerOffsetPx)<=5
+              ? `✓ CELULAR CENTRALIZADO · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px · cartão↔dedo ${liveCardFingerOffsetPx.toFixed(1)} px`
+              : liveOpticalCenterOffsetPx>6
+                ? `← MOVA O CELULAR PARA A ESQUERDA · centro +${liveOpticalCenterOffsetPx.toFixed(1)} px`
+                : liveOpticalCenterOffsetPx<-6
+                  ? `MOVA O CELULAR PARA A DIREITA → · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px`
+                  : `CENTRE CARTÃO SOBRE O DEDO · diferença ${liveCardFingerOffsetPx.toFixed(1)} px`}
         </div>
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
