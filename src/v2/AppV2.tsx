@@ -1498,7 +1498,7 @@ export default function AppV2() {
     // As linhas verdes sao o gabarito; cada corte apenas refina alguns pixels
     // para encontrar a borda real do dedo.
     const rawYPercents=Array.from({length:50},(_,index)=>{
-      const span=Math.max(6,Math.min(30,scanHalfSpan));
+      const span=Math.max(2.5,Math.min(30,scanHalfSpan));
       const off=-span+(index*((span*2)/49));
       return clamp(guideYPercent+off,6,94);
     });
@@ -2139,7 +2139,11 @@ export default function AppV2() {
         ? clamp(ringGuideY + anatomicalRegionFusion.medianOffsetY,28,84)
         : currentDetectedRegionY;
 
-    const samples=fingerBandSamplesPx(anatomicalGuideY);
+    // Depois que a região anatômica do anel foi encontrada, a largura
+    // oficial deve ser medida SOMENTE perto dela. Não varremos mais +/-10%,
+    // porque a parte inferior do dedo é naturalmente mais larga e podia
+    // puxar o resultado para cima.
+    const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
     if(!samples || samples.length<35) return empty;
 
     const baseMmPerPx=1/pixelsPerMm;
@@ -2656,7 +2660,7 @@ export default function AppV2() {
         : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null
           ? clamp(contourAnatomy.ringRegionY,28,84)
           : ringGuideY;
-  const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx(auditGuideY) : null;
+  const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx(auditGuideY,2.5) : null;
 
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
@@ -2733,7 +2737,7 @@ export default function AppV2() {
     ? (guidedStep === 1
         ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
         : guidedStep === 2
-          ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos trabalham na mesma foto."
+          ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos ficam concentrados nessa mesma altura."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
