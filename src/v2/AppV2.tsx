@@ -577,10 +577,108 @@ export default function AppV2() {
         const calibration = selectedBurstCalibration ?? await calibratePhoto(capturedPhoto);
         const detectedLeft = clamp(calibration.cardBox.x * 100, 2, 94);
         const detectedRight = clamp((calibration.cardBox.x + calibration.cardBox.width) * 100, 6, 98);
-        const finalLeft = Math.min(detectedLeft, detectedRight - 5);
-        const finalRight = Math.max(detectedRight, detectedLeft + 5);
-        const finalBottom = clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 10, 88);
-        const top = clamp(calibration.cardBox.y * 100, 3, finalBottom - 5);
+        const detectedBottom = clamp((calibration.cardBox.y + calibration.cardBox.height) * 100, 10, 88);
+        const detectedTop = clamp(calibration.cardBox.y * 100, 3, detectedBottom - 5);
+
+        // AUTO-SNAP FISICO DAS 3 LINHAS DO CARTAO.
+        // O detector so aproxima o retangulo. A escala de 85,60 mm passa a usar
+        // as bordas fisicas refinadas no proprio frame vencedor da rajada.
+        const refineCardEdges = () => {
+          const context=canvas.getContext("2d",{willReadFrequently:true});
+          if(!context) return null;
+          const imageData=context.getImageData(0,0,canvas.width,canvas.height);
+          const data=imageData.data;
+          const gray=(x:number,y:number)=>{
+            const ix=Math.max(0,Math.min(canvas.width-1,Math.round(x)));
+            const iy=Math.max(0,Math.min(canvas.height-1,Math.round(y)));
+            const o=(iy*canvas.width+ix)*4;
+            return data[o]*0.299+data[o+1]*0.587+data[o+2]*0.114;
+          };
+          const robustMean=(values:number[])=>{
+            if(!values.length) return 0;
+            const ordered=[...values].sort((a,b)=>a-b);
+            const trim=Math.floor(ordered.length*0.18);
+            const kept=ordered.slice(trim,Math.max(trim+1,ordered.length-trim));
+            return kept.reduce((sum,value)=>sum+value,0)/kept.length;
+          };
+
+          const left0=detectedLeft/100*canvas.width;
+          const right0=detectedRight/100*canvas.width;
+          const top0=detectedTop/100*canvas.height;
+          const bottom0=detectedBottom/100*canvas.height;
+          const cardW=Math.max(40,right0-left0);
+          const cardH=Math.max(30,bottom0-top0);
+
+          const bestVertical=(expectedX:number)=>{
+            let bestX=expectedX;
+            let bestScore=-Infinity;
+            for(let dx=-14;dx<=14;dx+=1){
+              const x=expectedX+dx;
+              const contrasts:number[]=[];
+              for(let y=top0+cardH*0.16;y<=bottom0-cardH*0.16;y+=Math.max(4,cardH/22)){
+                contrasts.push(Math.abs(gray(x-3,y)-gray(x+3,y)));
+              }
+              const edge=robustMean(contrasts);
+              const score=edge-Math.abs(dx)*0.24;
+              if(score>bestScore){bestScore=score;bestX=x;}
+            }
+            return {x:bestX,score:bestScore,shift:bestX-expectedX};
+          };
+
+          const leftEdge=bestVertical(left0);
+          const rightEdge=bestVertical(right0);
+          const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
+          const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
+
+          const bestHorizontal=(expectedY:number)=>{
+            let bestY=expectedY;
+            let bestScore=-Infinity;
+            for(let dy=-14;dy<=14;dy+=1){
+              const y=expectedY+dy;
+              const contrasts:number[]=[];
+              for(let x=refinedLeft+cardW*0.10;x<=refinedRight-cardW*0.10;x+=Math.max(4,cardW/28)){
+                contrasts.push(Math.abs(gray(x,y-3)-gray(x,y+3)));
+              }
+              const edge=robustMean(contrasts);
+              const score=edge-Math.abs(dy)*0.20;
+              if(score>bestScore){bestScore=score;bestY=y;}
+            }
+            return {y:bestY,score:bestScore,shift:bestY-expectedY};
+          };
+
+          const bottomEdge=bestHorizontal(bottom0);
+
+          // So aceitamos o refinamento se as 3 bordas possuem contraste real.
+          // Caso contrario, mantemos o retangulo inicial como fallback.
+          if(
+            leftEdge.score<7 ||
+            rightEdge.score<7 ||
+            bottomEdge.score<7 ||
+            refinedRight-refinedLeft<cardW*0.92 ||
+            refinedRight-refinedLeft>cardW*1.08
+          ){
+            return null;
+          }
+
+          return {
+            left:clamp(refinedLeft/canvas.width*100,2,94),
+            right:clamp(refinedRight/canvas.width*100,6,98),
+            bottom:clamp(bottomEdge.y/canvas.height*100,10,88),
+            leftShiftPx:leftEdge.shift,
+            rightShiftPx:rightEdge.shift,
+            bottomShiftPx:bottomEdge.shift,
+          };
+        };
+
+        const refined=refineCardEdges();
+        const finalLeft = refined
+          ? Math.min(refined.left, refined.right - 5)
+          : Math.min(detectedLeft, detectedRight - 5);
+        const finalRight = refined
+          ? Math.max(refined.right, refined.left + 5)
+          : Math.max(detectedRight, detectedLeft + 5);
+        const finalBottom = refined?.bottom ?? detectedBottom;
+        const top = clamp(detectedTop, 3, finalBottom - 5);
         const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
 
         const detectedLeftLine:Line={
@@ -4404,6 +4502,7 @@ export default function AppV2() {
                   <span>Gate da captura: {captureQualityGate.accepted ? "ACEITA" : "DESCARTADA"}{!captureQualityGate.accepted ? ` · ${captureQualityGate.reasons.join(" · ")}` : ""}</span>
                   <span>Comparação geométrica: homografia direta {widthAnalysis.homographyMm?.toFixed(2) ?? "n/d"} mm · escala local {widthAnalysis.localScaleMm?.toFixed(2) ?? "n/d"} mm · escala normalizada {widthAnalysis.normalizedScaleMm?.toFixed(2) ?? "n/d"} mm</span>
                   <span>Fonte ativa: CALIBRAÇÃO 85,60 MM POR INTERSEÇÕES</span>
+                  <span>Cartão automático: detector aproximado + auto-snap físico das laterais/base antes da escala.</span>
                   <span>Homografia: somente diagnóstico/validação de perspectiva · não altera a medida</span>
                   <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm · somente diagnóstico</span>
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
