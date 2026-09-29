@@ -2797,6 +2797,37 @@ export default function AppV2() {
     photo,
   ]);
 
+  const physicalSnapRegionReady = useMemo(() => {
+    if(measurementMode!=="finger" || diameterPhotoTestMode) return false;
+
+    const plausibleMin=cardBottom+3;
+    const plausibleMax=cardBottom+30;
+
+    return (
+      photoPixelsReady &&
+      leftLocked &&
+      rightLocked &&
+      liveWidthMm!==null &&
+      Number.isFinite(liveWidthMm) &&
+      liveWidthMm>0 &&
+      preFormulaQuality.edgeScore>=90 &&
+      calibrationConfidence>=MIN_CARD_CALIBRATION_CONFIDENCE &&
+      ringGuideY>=plausibleMin &&
+      ringGuideY<=plausibleMax
+    );
+  },[
+    measurementMode,
+    diameterPhotoTestMode,
+    photoPixelsReady,
+    leftLocked,
+    rightLocked,
+    liveWidthMm,
+    preFormulaQuality.edgeScore,
+    calibrationConfidence,
+    cardBottom,
+    ringGuideY,
+  ]);
+
   const anatomicalRegionReady = useMemo(() => {
     if(measurementMode!=="finger" || diameterPhotoTestMode) return true;
 
@@ -2821,7 +2852,7 @@ export default function AppV2() {
       contourAnatomy.ringRegionY>=anatomicalWindow.minY &&
       contourAnatomy.ringRegionY<=anatomicalWindow.maxY;
 
-    return landmarkReady || contourReady;
+    return landmarkReady || contourReady || physicalSnapRegionReady;
   },[
     measurementMode,
     diameterPhotoTestMode,
@@ -2832,6 +2863,7 @@ export default function AppV2() {
     contourAnatomy?.ringRegionY,
     anatomicalWindow.minY,
     anatomicalWindow.maxY,
+    physicalSnapRegionReady,
   ]);
 
   const anatomicalRegionSource =
@@ -2846,7 +2878,9 @@ export default function AppV2() {
           contourAnatomy.score>=70 &&
           contourAnatomy.ringRegionY!==null
           ? "CONTORNO"
-          : "BLOQUEADO · SEM REGIÃO ANATÔMICA";
+          : physicalSnapRegionReady
+            ? "SNAPS FÍSICOS VALIDADOS"
+            : "BLOQUEADO · SEM REGIÃO ANATÔMICA";
 
   const captureQualityGate = useMemo(() => {
     const reasons:string[]=[];
@@ -4519,7 +4553,7 @@ export default function AppV2() {
           {phase==="finger" && measurementMode==="finger" && liveWidthMm!==null && !anatomicalRegionReady && (
             <div className="analysis-result" role="alert">
               <strong>Região do anel não detectada</strong>
-              <span>O aro foi bloqueado porque o sistema não encontrou uma região anatômica confiável nesta foto. Refaça a captura; o modo manual/fallback não entra mais na fórmula.</span>
+              <span>O aro foi bloqueado porque nem a anatomia nem os snaps físicos atingiram confiança suficiente nesta foto. Refaça a captura.</span>
             </div>
           )}
           {phase==="finger" && singlePhotoTestMode && liveWidthMm!==null && !captureQualityGate.accepted && anatomicalRegionReady && (
