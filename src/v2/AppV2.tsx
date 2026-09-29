@@ -18,7 +18,7 @@ import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks
 import { analyzeFingerContourAnatomy } from "./fingerContourAnatomy";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
-import LightCardDetectorTest from "./LightCardDetectorTest";
+import LightCardDetectorTest, { type LightCardDetectionPayload } from "./LightCardDetectorTest";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
@@ -542,6 +542,51 @@ export default function AppV2() {
       left,
     ];
     return {left,right,widthPx,bottomY,quadPercent};
+  };
+
+  const applyLightCardDetection = (payload:LightCardDetectionPayload) => {
+    if(payload.confidence<90){
+      camera.setError("Detecção automática abaixo de 90% de confiança. Ajuste manualmente.");
+      return;
+    }
+
+    const {x,y,width,height}=payload.cardBox;
+    const leftX=clamp(x*100,1,99);
+    const rightX=clamp((x+width)*100,1,99);
+    const topY=clamp(y*100,1,99);
+    const bottomY=clamp((y+height)*100,1,99);
+
+    if(rightX-leftX<12 || bottomY-topY<8){
+      camera.setError("Detecção automática inválida. Ajuste o cartão manualmente.");
+      return;
+    }
+
+    const left:Line={a:{x:leftX,y:topY},b:{x:leftX,y:bottomY}};
+    const right:Line={a:{x:rightX,y:topY},b:{x:rightX,y:bottomY}};
+    const bottom:Line={a:{x:leftX,y:bottomY},b:{x:rightX,y:bottomY}};
+
+    // Pré-calibração automática: somente posiciona as três guias.
+    // A escala oficial continua sendo calculada depois pelas interseções
+    // A-B da base, equivalentes a 85,60 mm.
+    setCardLines((current)=>({
+      ...current,
+      left,
+      right,
+      bottom,
+    }));
+    setCardSnapLines({left,right,bottom});
+    setCardLineLocked((current)=>({
+      ...current,
+      left:true,
+      right:true,
+      bottom:true,
+    }));
+    setSelectedCardLine(null);
+    setPerspectiveReady(false);
+    setCardLeft(leftX);
+    setCardRight(rightX);
+    setCardBottom(bottomY);
+    camera.setError("Cartão detectado automaticamente. Confira as 3 linhas e ajuste se necessário.");
   };
 
   const confirmPerspective = () => {
@@ -3090,7 +3135,7 @@ export default function AppV2() {
 
           {debugMode && phase === "card" && measurementMode === "finger" && photo && (
             <>
-              <LightCardDetectorTest photo={photo} />
+              <LightCardDetectorTest photo={photo} onApply={applyLightCardDetection} />
               <OpenCvCardTest photo={photo} />
             </>
           )}
