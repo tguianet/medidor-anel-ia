@@ -22,46 +22,77 @@ declare global {
 const OPENCV_URL="https://docs.opencv.org/4.x/opencv.js";
 const CARD_RATIO=85.6/53.98;
 
+const withTimeout=<T,>(promise:Promise<T>,ms:number,message:string)=>
+  new Promise<T>((resolve,reject)=>{
+    const timer=window.setTimeout(()=>reject(new Error(message)),ms);
+    promise.then(
+      value=>{ window.clearTimeout(timer); resolve(value); },
+      error=>{ window.clearTimeout(timer); reject(error); },
+    );
+  });
+
+const waitForOpenCvRuntime=async()=>{
+  const started=Date.now();
+
+  while(Date.now()-started<18000){
+    const current=window.cv;
+
+    if(current?.Mat) return current;
+
+    if(current && typeof current.then==="function"){
+      const ready=await withTimeout(
+        Promise.resolve(current),
+        15000,
+        "OpenCV carregou o script, mas o runtime não iniciou.",
+      );
+      if(ready?.Mat) return ready;
+    }
+
+    await new Promise(resolve=>window.setTimeout(resolve,100));
+  }
+
+  throw new Error("OpenCV não iniciou em até 18 segundos. Toque em tentar novamente.");
+};
+
 const loadOpenCv=async()=>{
   if(window.cv?.Mat) return window.cv;
   if(window.__opencvCardPromise) return window.__opencvCardPromise;
 
-  window.__opencvCardPromise=new Promise((resolve,reject)=>{
-    const finish=async()=>{
-      const started=Date.now();
-      const wait=()=>{
-        const cv=window.cv;
-        if(cv?.Mat) return resolve(cv);
-        if(cv && typeof cv.then==="function"){
-          void cv.then((ready:any)=>resolve(ready)).catch(reject);
-          return;
-        }
-        if(Date.now()-started>15000) return reject(new Error("OpenCV demorou para iniciar."));
-        window.setTimeout(wait,80);
-      };
-      wait();
-    };
+  window.__opencvCardPromise=(async()=>{
+    let script=document.querySelector<HTMLScriptElement>('script[data-opencv-card-test="1"]');
 
-    const existing=document.querySelector<HTMLScriptElement>('script[data-opencv-card-test="1"]');
-    if(existing){
-      if(window.cv) void finish();
-      else{
-        existing.addEventListener("load",()=>void finish(),{once:true});
-        existing.addEventListener("error",()=>reject(new Error("Falha ao carregar OpenCV.js.")),{once:true});
-      }
-      return;
+    if(!script){
+      script=document.createElement("script");
+      script.src=OPENCV_URL;
+      script.async=true;
+      script.dataset.opencvCardTest="1";
+
+      const loaded=new Promise<void>((resolve,reject)=>{
+        script!.addEventListener("load",()=>resolve(),{once:true});
+        script!.addEventListener("error",()=>reject(new Error("Falha ao baixar OpenCV.js.")),{once:true});
+      });
+
+      document.head.appendChild(script);
+
+      // Não dependemos só do evento load. Em alguns celulares o runtime WASM
+      // termina depois do script; em outros o script pode estar em cache.
+      await withTimeout(loaded,12000,"OpenCV.js demorou para baixar.");
     }
 
-    const script=document.createElement("script");
-    script.src=OPENCV_URL;
-    script.async=true;
-    script.dataset.opencvCardTest="1";
-    script.onload=()=>void finish();
-    script.onerror=()=>reject(new Error("Falha ao carregar OpenCV.js."));
-    document.head.appendChild(script);
-  });
+    // Se o script já existia, o evento load pode ter acontecido antes deste
+    // clique. Por isso SEMPRE verificamos diretamente o runtime aqui.
+    return waitForOpenCvRuntime();
+  })();
 
-  return window.__opencvCardPromise;
+  try{
+    return await window.__opencvCardPromise;
+  }catch(error){
+    // Permite uma nova tentativa limpa depois de qualquer falha.
+    window.__opencvCardPromise=undefined;
+    const stale=document.querySelector<HTMLScriptElement>('script[data-opencv-card-test="1"]');
+    if(stale && !window.cv?.Mat) stale.remove();
+    throw error;
+  }
 };
 
 const imageFromSrc=(src:string)=>new Promise<HTMLImageElement>((resolve,reject)=>{
@@ -196,17 +227,26 @@ const detectCard=async(photo:string):Promise<DetectionResult>=>{
 
 export default function OpenCvCardTest({photo}:{photo:string}){
   const [loading,setLoading]=useState(false);
+  const [status,setStatus]=useState("");
   const [result,setResult]=useState<DetectionResult|null>(null);
   const [error,setError]=useState("");
 
   const run=async()=>{
     if(!photo) return;
     setLoading(true);
+    setStatus("Carregando OpenCV...");
     setError("");
     setResult(null);
     try{
-      setResult(await detectCard(photo));
+      const detected=await withTimeout(
+        detectCard(photo),
+        25000,
+        "A análise excedeu 25 segundos e foi cancelada.",
+      );
+      setStatus("Análise concluída.");
+      setResult(detected);
     }catch(err){
+      setStatus("");
       setError(err instanceof Error?err.message:"Falha na detecção OpenCV.");
     }finally{
       setLoading(false);
@@ -234,7 +274,15 @@ export default function OpenCvCardTest({photo}:{photo:string}){
         {loading?"Analisando cartão...":"Detectar cartão com OpenCV"}
       </button>
 
-      {error && <span style={{color:"#ffb0a8"}}>{error}</span>}
+      {loading && <span style={{opacity:.76,fontSize:13}}>{status || "Processando imagem..."}</span>}
+      {error && (
+        <div style={{display:"grid",gap:8}}>
+          <span style={{color:"#ffb0a8"}}>{error}</span>
+          <button className="secondary" type="button" onClick={()=>void run()}>
+            Tentar novamente
+          </button>
+        </div>
+      )}
 
       {result && (
         <>
