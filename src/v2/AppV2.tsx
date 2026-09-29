@@ -387,6 +387,7 @@ export default function AppV2() {
       photo:string;
       canvas:HTMLCanvasElement;
       score:number;
+      consistencyScore:number;
       guide:ReturnType<typeof analyzeLiveCardGuide>;
     };
 
@@ -451,26 +452,63 @@ export default function AppV2() {
           photo:canvas.toDataURL("image/jpeg",0.94),
           guide,
           score:scoreGuide(guide),
+          consistencyScore:0,
         });
         if(index<7){
           await new Promise<void>((resolve)=>window.setTimeout(resolve,65));
         }
       }
 
-      // Primeiro usamos a geometria ao vivo para separar os melhores.
-      // Entre os 3 melhores, a confianca real do detector do cartao decide.
-      const finalists=[...candidates].sort((a,b)=>b.score-a.score).slice(0,3);
+      // Consistencia geométrica da própria rajada:
+      // calculamos a mediana da razão dedo/cartão e penalizamos frames
+      // que fazem o dedo parecer artificialmente maior ou menor.
+      const validRatios=candidates
+        .map(candidate=>candidate.guide.fingerCardRatio)
+        .filter((value):value is number=>value!==null && Number.isFinite(value) && value>0)
+        .sort((x,y)=>x-y);
+
+      const medianRatio=validRatios.length
+        ? (
+            validRatios.length%2
+              ? validRatios[Math.floor(validRatios.length/2)]
+              : (validRatios[validRatios.length/2-1]+validRatios[validRatios.length/2])/2
+          )
+        : null;
+
+      for(const candidate of candidates){
+        const ratio=candidate.guide.fingerCardRatio;
+        if(medianRatio!==null && ratio!==null && ratio>0){
+          const relativeDelta=Math.abs(ratio-medianRatio)/medianRatio;
+          // Até ~1% recebe praticamente a pontuação máxima.
+          // A partir de 3,5% o bônus zera, evitando extremos de paralaxe.
+          candidate.consistencyScore=25*Math.max(0,1-relativeDelta/0.035);
+        }else{
+          candidate.consistencyScore=4;
+        }
+      }
+
+      // A consistência dedo/cartão pesa mais que pequenas diferenças visuais.
+      // Depois, a confiança real do detector do cartão desempata os finalistas.
+      const finalists=[...candidates]
+        .sort((x,y)=>(y.score+y.consistencyScore)-(x.score+x.consistencyScore))
+        .slice(0,4);
+
       let best:BurstCandidate|null=null;
       let bestCalibrationConfidence=-1;
+      let bestCombined=-Infinity;
 
       for(const candidate of finalists){
         try{
           const calibration=await calibratePhoto(candidate.photo);
-          const combined=candidate.score+calibration.confidence*0.35;
-          const bestCombined=best ? best.score+bestCalibrationConfidence*0.35 : -Infinity;
+          const combined=
+            candidate.score +
+            candidate.consistencyScore +
+            calibration.confidence*0.35;
+
           if(combined>bestCombined){
-            best={...candidate,score:candidate.score};
+            best={...candidate};
             bestCalibrationConfidence=calibration.confidence;
+            bestCombined=combined;
           }
         }catch{
           // Um frame ruim nao invalida a rajada inteira.
@@ -484,7 +522,11 @@ export default function AppV2() {
 
       selectedCanvas=best.canvas;
       capturedPhoto=best.photo;
-      camera.setError("");
+      const ratioText=best.guide.fingerCardRatio===null
+        ? "n/d"
+        : best.guide.fingerCardRatio.toFixed(4);
+      camera.setError(`Quadro escolhido · razão dedo/cartão ${ratioText}`);
+      window.setTimeout(()=>camera.setError(""),900);
     }else{
       selectedCanvas=drawCurrentFrame();
       capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
