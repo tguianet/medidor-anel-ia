@@ -676,9 +676,24 @@ export default function AppV2() {
       !diameterPhotoTestMode &&
       fingerCardCalibrationStep!=="done";
 
-    const leftMeasureLine = useSnap ? (cardSnapLines.left ?? cardLines.left) : cardLines.left;
-    const rightMeasureLine = useSnap ? (cardSnapLines.right ?? cardLines.right) : cardLines.right;
-    const bottomMeasureLine = useSnap ? (cardSnapLines.bottom ?? cardLines.bottom) : cardLines.bottom;
+    // A linha visual pode ser alongada, encurtada ou inclinada livremente.
+    // O comprimento desenhado NUNCA entra na calibracao. O que vale e somente
+    // a distancia euclidiana entre:
+    //   A = intersecao(base, lateral esquerda)
+    //   B = intersecao(base, lateral direita)
+    // A-B representa fisicamente 85,60 mm.
+    //
+    // Um snap so pode participar enquanto aquela mesma borda continuar
+    // explicitamente travada. Se o usuario voltar a mover a guia, usamos
+    // imediatamente a geometria visual atual e descartamos o snap antigo.
+    const lineForCalibration = (edge:"left"|"right"|"bottom"):Line => {
+      const snapped=cardSnapLines[edge];
+      return useSnap && cardLineLocked[edge] && snapped ? snapped : cardLines[edge];
+    };
+
+    const leftMeasureLine=lineForCalibration("left");
+    const rightMeasureLine=lineForCalibration("right");
+    const bottomMeasureLine=lineForCalibration("bottom");
 
     const leftPx=lineIntersection(toPx(leftMeasureLine),toPx(bottomMeasureLine));
     const rightPx=lineIntersection(toPx(rightMeasureLine),toPx(bottomMeasureLine));
@@ -932,6 +947,15 @@ export default function AppV2() {
         setSelectedCardLine(edge);
         setPerspectiveReady(false);
         setCardLineLocked((current)=>({...current,[edge]:false}));
+        // Ao mover uma guia, invalida imediatamente qualquer snap anterior
+        // dessa mesma borda. Assim a escala nunca usa uma geometria velha
+        // enquanto a linha visual ja foi reposicionada pelo usuario.
+        setCardSnapLines((current)=>{
+          if(!current[edge]) return current;
+          const next={...current};
+          delete next[edge];
+          return next;
+        });
         if(endpoint){
           setCardLines((current)=>({...current,[edge]:{...current[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}}}));
         } else {
