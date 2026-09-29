@@ -315,6 +315,121 @@ const findCardByEdges = (pixels: Uint8ClampedArray, width: number, height: numbe
   return best;
 };
 
+const refineCardBoxByKnownRatio = (
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  seed: Box,
+): Box => {
+  const gray=new Uint8Array(width*height);
+  for(let i=0;i<width*height;i++){
+    const o=i*4;
+    gray[i]=Math.round(pixels[o]*0.299+pixels[o+1]*0.587+pixels[o+2]*0.114);
+  }
+
+  const grayAt=(x:number,y:number)=>{
+    const xx=Math.max(0,Math.min(width-1,Math.round(x)));
+    const yy=Math.max(0,Math.min(height-1,Math.round(y)));
+    return gray[yy*width+xx];
+  };
+
+  const seedW=Math.max(20,seed.maxX-seed.minX+1);
+  const seedH=Math.max(12,seed.maxY-seed.minY+1);
+
+  const verticalScore=(x:number,y0:number,y1:number)=>{
+    let total=0, strong=0, count=0;
+    const step=Math.max(1,Math.round((y1-y0)/70));
+    for(let y=y0;y<=y1;y+=step){
+      const d=Math.abs(grayAt(x-2,y)-grayAt(x+2,y));
+      total+=d;
+      if(d>=16) strong++;
+      count++;
+    }
+    const avg=total/Math.max(1,count);
+    const coverage=strong/Math.max(1,count);
+    return avg*(0.45+coverage*0.55);
+  };
+
+  const horizontalScore=(y:number,x0:number,x1:number)=>{
+    let total=0, strong=0, count=0;
+    const step=Math.max(1,Math.round((x1-x0)/90));
+    for(let x=x0;x<=x1;x+=step){
+      const d=Math.abs(grayAt(x,y-2)-grayAt(x,y+2));
+      total+=d;
+      if(d>=16) strong++;
+      count++;
+    }
+    const avg=total/Math.max(1,count);
+    const coverage=strong/Math.max(1,count);
+    return avg*(0.40+coverage*0.60);
+  };
+
+  // 1) Refina as laterais em torno da caixa candidata.
+  const sideSearch=Math.max(5,Math.round(seedW*0.055));
+  const y0=Math.max(2,Math.round(seed.minY+seedH*0.16));
+  const y1=Math.min(height-3,Math.round(seed.maxY-seedH*0.10));
+
+  let leftX=seed.minX, leftBest=-Infinity;
+  for(let x=Math.max(2,seed.minX-sideSearch);x<=Math.min(width-3,seed.minX+sideSearch);x++){
+    const score=verticalScore(x,y0,y1)-Math.abs(x-seed.minX)*0.22;
+    if(score>leftBest){leftBest=score;leftX=x;}
+  }
+
+  let rightX=seed.maxX, rightBest=-Infinity;
+  for(let x=Math.max(2,seed.maxX-sideSearch);x<=Math.min(width-3,seed.maxX+sideSearch);x++){
+    const score=verticalScore(x,y0,y1)-Math.abs(x-seed.maxX)*0.22;
+    if(score>rightBest){rightBest=score;rightX=x;}
+  }
+
+  if(rightX-leftX<width*0.35){
+    leftX=seed.minX;
+    rightX=seed.maxX;
+  }
+
+  const cardW=Math.max(20,rightX-leftX+1);
+
+  // 2) Refina a base real.
+  const bottomSearch=Math.max(5,Math.round(seedH*0.10));
+  const x0=Math.max(2,Math.round(leftX+cardW*0.08));
+  const x1=Math.min(width-3,Math.round(rightX-cardW*0.08));
+
+  let bottomY=seed.maxY, bottomBest=-Infinity;
+  for(let y=Math.max(2,seed.maxY-bottomSearch);y<=Math.min(height-3,seed.maxY+bottomSearch);y++){
+    const score=horizontalScore(y,x0,x1)-Math.abs(y-seed.maxY)*0.12;
+    if(score>bottomBest){bottomBest=score;bottomY=y;}
+  }
+
+  // 3) A proporção física do cartão define onde o topo DEVERIA estar.
+  // Isso evita que uma régua, anelímetro ou outro objeto conectado acima
+  // aumente artificialmente a caixa.
+  const expectedH=cardW/1.586;
+  const expectedTop=bottomY-expectedH;
+  const topSearch=Math.max(6,Math.round(expectedH*0.14));
+
+  let topY=Math.round(expectedTop), topBest=-Infinity;
+  for(let y=Math.max(2,Math.round(expectedTop-topSearch));y<=Math.min(height-3,Math.round(expectedTop+topSearch));y++){
+    const edge=horizontalScore(y,x0,x1);
+    const distancePenalty=Math.abs(y-expectedTop)*0.18;
+    const score=edge-distancePenalty;
+    if(score>topBest){topBest=score;topY=y;}
+  }
+
+  // Se o topo encontrado deixar uma proporção absurda, volta ao topo previsto.
+  const refinedH=Math.max(1,bottomY-topY+1);
+  const refinedRatio=cardW/refinedH;
+  if(refinedRatio<1.40 || refinedRatio>1.78){
+    topY=Math.max(0,Math.round(expectedTop));
+  }
+
+  return {
+    minX:Math.max(0,leftX),
+    maxX:Math.min(width-1,rightX),
+    minY:Math.max(0,topY),
+    maxY:Math.min(height-1,bottomY),
+    count:seed.count,
+  };
+};
+
 // A câmera já pede que o cartão ocupe quase toda a largura da guia. Portanto,
 // um trecho curto de texto, logotipo ou brilho nunca pode virar a base.
 export const scoreCardShape = (box: Box, imageWidth: number, imageHeight: number) => {
@@ -385,8 +500,20 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   // Isso impede que um trecho de logotipo, texto ou reflexo seja usado como
   // se fosse a base de 85,60 mm.
   const edgeCandidate = findCardByEdges(pixels, work.width, work.height);
-  const candidates = [edgeCandidate, runCandidate, colorCandidate].filter((candidate): candidate is Box => candidate !== null);
-  const best = candidates.sort((a, b) => scoreCardShape(b, work.width, work.height) - scoreCardShape(a, work.width, work.height))[0];
+
+  // Cada candidato bruto passa por um refinamento baseado nas quatro bordas
+  // e na proporção física real 85,60 x 53,98 mm. Assim elementos conectados
+  // acima/abaixo do cartão não entram na caixa final.
+  const rawCandidates = [edgeCandidate, runCandidate, colorCandidate]
+    .filter((candidate): candidate is Box => candidate !== null);
+
+  const candidates = rawCandidates.map(candidate =>
+    refineCardBoxByKnownRatio(pixels,work.width,work.height,candidate)
+  );
+
+  const best = candidates.sort(
+    (a,b)=>scoreCardShape(b,work.width,work.height)-scoreCardShape(a,work.width,work.height)
+  )[0];
   const bestWidthShare = best ? (best.maxX - best.minX + 1) / work.width : 0;
   if (!best || bestWidthShare < 0.42) throw new Error("Não encontrei a base inteira do cartão. Deixe os dois cantos inferiores visíveis e alinhe o cartão na guia.");
 
