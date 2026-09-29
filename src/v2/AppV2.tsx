@@ -2953,6 +2953,234 @@ export default function AppV2() {
     };
   })();
 
+  const contourConstantTest = (() => {
+    if(
+      measurementMode!=="finger" ||
+      phase!=="finger" ||
+      !leftLocked ||
+      !rightLocked ||
+      !photoPixelsRef.current ||
+      !pixelsPerMm ||
+      pixelsPerMm<=0
+    ){
+      return null;
+    }
+
+    // A linha amarela e as laterais manuais apenas definem a REGIAO inicial.
+    // A medida experimental varre uma faixa maior e cada ponto procura de novo
+    // a fronteira fisica pele <-> fundo de forma independente.
+    const samples=fingerBandSamplesPx(ringGuideY,8);
+    if(!samples || samples.length<20) return null;
+
+    const source=photoPixelsRef.current;
+    const gray=(x:number,y:number)=>{
+      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
+      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
+      const o=(iy*source.width+ix)*4;
+      return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
+    };
+    const mean=(values:number[])=>values.length
+      ? values.reduce((sum,value)=>sum+value,0)/values.length
+      : 0;
+    const median=(values:number[])=>{
+      if(!values.length) return 0;
+      const ordered=[...values].sort((a,b)=>a-b);
+      const mid=Math.floor(ordered.length/2);
+      return ordered.length%2
+        ? ordered[mid]
+        : (ordered[mid-1]+ordered[mid])/2;
+    };
+    const std=(values:number[])=>{
+      if(values.length<2) return 0;
+      const m=mean(values);
+      return Math.sqrt(values.reduce((sum,value)=>sum+(value-m)**2,0)/values.length);
+    };
+
+    type SnapResult={
+      valid:boolean;
+      x:number;
+      offsetPx:number;
+      transition:number;
+      contrast:number;
+    };
+
+    const snapPhysicalEdge=(side:"left"|"right",trackedX:number,y:number):SnapResult=>{
+      // Busca deliberadamente mais larga que o teste anterior. A linha manual
+      // e o rastreador sao somente sementes; o ponto final precisa provar
+      // que existe pele de um lado e fundo do outro.
+      const offsets=Array.from({length:25},(_,index)=>index-12);
+      let best:{
+        offset:number;
+        score:number;
+        transition:number;
+        contrast:number;
+        innerStd:number;
+        outerStd:number;
+      }|null=null;
+
+      for(const offset of offsets){
+        const x=trackedX+offset;
+        const leftLocal=[-3,-2,-1].map(d=>gray(x+d,y));
+        const rightLocal=[1,2,3].map(d=>gray(x+d,y));
+        const transition=Math.abs(mean(rightLocal)-mean(leftLocal));
+
+        const inner:number[]=[];
+        const outer:number[]=[];
+        for(let d=4;d<=9;d++){
+          inner.push(gray(x+(side==="left"?d:-d),y));
+          outer.push(gray(x+(side==="left"?-d:d),y));
+        }
+
+        const innerMean=mean(inner);
+        const outerMean=mean(outer);
+        const contrast=Math.abs(innerMean-outerMean);
+        const innerStd=std(inner);
+        const outerStd=std(outer);
+
+        // Premia transicao forte e duas regioes consistentes; penaliza sair
+        // demais do contorno rastreado para evitar saltos para outra textura.
+        const uniformityPenalty=(innerStd+outerStd)*0.28;
+        const distancePenalty=Math.abs(offset)*0.55;
+        const score=transition*0.62+contrast*0.72-uniformityPenalty-distancePenalty;
+
+        if(!best || score>best.score){
+          best={offset,score,transition,contrast,innerStd,outerStd};
+        }
+      }
+
+      if(!best){
+        return {valid:false,x:trackedX,offsetPx:0,transition:0,contrast:0};
+      }
+
+      const valid=
+        Math.abs(best.offset)<=8 &&
+        best.transition>=8 &&
+        best.contrast>=7 &&
+        best.innerStd<=Math.max(14,best.transition*0.85) &&
+        best.outerStd<=Math.max(14,best.transition*0.85);
+
+      return {
+        valid,
+        x:trackedX+best.offset,
+        offsetPx:best.offset,
+        transition:best.transition,
+        contrast:best.contrast,
+      };
+    };
+
+    const ordered=[...samples].sort((a,b)=>a.yPercent-b.yPercent);
+    const snapped=ordered.map((sample,index)=>{
+      const left=snapPhysicalEdge("left",sample.left,sample.y);
+      const right=snapPhysicalEdge("right",sample.right,sample.rightY);
+      const valid=left.valid&&right.valid&&right.x>left.x;
+      const widthPx=valid
+        ? Math.hypot(right.x-left.x,sample.rightY-sample.y)
+        : null;
+      const widthMm=widthPx!==null ? widthPx/pixelsPerMm : null;
+
+      // Converte o deslocamento em pixels da imagem para percentual da tela.
+      // O fator zoom mantem o ponto visual grudado no mesmo pixel corrigido.
+      const dxToScreenPercent=(dx:number)=>dx/source.width*100*zoom;
+
+      return {
+        index,
+        valid,
+        yPercent:sample.yPercent,
+        rightYPercent:sample.rightYPercent,
+        leftPercent:sample.leftPercent+dxToScreenPercent(left.x-sample.left),
+        rightPercent:sample.rightPercent+dxToScreenPercent(right.x-sample.right),
+        widthPx,
+        widthMm,
+        leftOffsetPx:left.offsetPx,
+        rightOffsetPx:right.offsetPx,
+        transition:(left.transition+right.transition)/2,
+      };
+    });
+
+    // Procura uma CONSTANTE: 7 cortes consecutivos, todos fisicamente
+    // validados, com pouca variacao. Entre os platoes validos vence o mais
+    // largo, porque o anel precisa passar pela maior secao consistente.
+    const windowSize=7;
+    let best:{
+      start:number;
+      end:number;
+      values:number[];
+      medianMm:number;
+      spreadPercent:number;
+    }|null=null;
+
+    for(let start=0;start<=snapped.length-windowSize;start++){
+      const window=snapped.slice(start,start+windowSize);
+      if(window.some(item=>!item.valid || item.widthMm===null)) continue;
+      const values=window.map(item=>item.widthMm as number);
+      const med=median(values);
+      const min=Math.min(...values);
+      const max=Math.max(...values);
+      const spreadPercent=med>0 ? (max-min)/med*100 : 999;
+
+      if(spreadPercent>1.35) continue;
+
+      if(
+        !best ||
+        med>best.medianMm ||
+        (Math.abs(med-best.medianMm)<0.03 && spreadPercent<best.spreadPercent)
+      ){
+        best={
+          start,
+          end:start+windowSize-1,
+          values,
+          medianMm:med,
+          spreadPercent,
+        };
+      }
+    }
+
+    // Fallback apenas diagnostico: se nao houver constante <=1,35%,
+    // encontra a janela valida de menor variacao para mostrar o problema.
+    if(!best){
+      for(let start=0;start<=snapped.length-windowSize;start++){
+        const window=snapped.slice(start,start+windowSize);
+        if(window.some(item=>!item.valid || item.widthMm===null)) continue;
+        const values=window.map(item=>item.widthMm as number);
+        const med=median(values);
+        const min=Math.min(...values);
+        const max=Math.max(...values);
+        const spreadPercent=med>0 ? (max-min)/med*100 : 999;
+        if(!best || spreadPercent<best.spreadPercent){
+          best={start,end:start+windowSize-1,values,medianMm:med,spreadPercent};
+        }
+      }
+    }
+
+    const validCount=snapped.filter(item=>item.valid).length;
+    const supportPercent=Math.round(validCount/snapped.length*100);
+    const plateauIndexes=new Set<number>();
+    if(best){
+      for(let i=best.start;i<=best.end;i++) plateauIndexes.add(i);
+    }
+
+    const classification=best
+      ? classifyFingerWidthMmExperimentalHigh(best.medianMm)
+      : null;
+
+    return {
+      points:snapped.map((item,index)=>({
+        ...item,
+        inPlateau:plateauIndexes.has(index),
+      })),
+      totalCount:snapped.length,
+      validCount,
+      supportPercent,
+      plateauStart:best?.start ?? -1,
+      plateauEnd:best?.end ?? -1,
+      plateauValuesMm:best?.values ?? [],
+      widthMm:best?.medianMm ?? null,
+      spreadPercent:best?.spreadPercent ?? null,
+      historicalRing:classification?.exactRingSize ?? null,
+      stable:!!best && best.spreadPercent<=1.35 && supportPercent>=80,
+    };
+  })();
+
   const methodComparisonTest = (() => {
     if(
       measurementMode!=="finger" ||
@@ -3552,6 +3780,44 @@ export default function AppV2() {
                       strokeWidth="0.48"
                       vectorEffect="non-scaling-stroke"
                     />
+                    {debugMode && contourConstantTest && (
+                      <>
+                        {contourConstantTest.points.filter(point=>point.valid).map((point,index)=>(
+                          <g key={`constant-snap-${index}`}>
+                            <circle
+                              cx={point.leftPercent}
+                              cy={point.yPercent}
+                              r={point.inPlateau ? "0.78" : "0.52"}
+                              fill={point.inPlateau ? "#ffd86b" : "#7ec4ff"}
+                              stroke="rgba(0,0,0,.55)"
+                              strokeWidth="0.18"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <circle
+                              cx={point.rightPercent}
+                              cy={point.rightYPercent}
+                              r={point.inPlateau ? "0.78" : "0.52"}
+                              fill={point.inPlateau ? "#ffd86b" : "#7ec4ff"}
+                              stroke="rgba(0,0,0,.55)"
+                              strokeWidth="0.18"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            {point.inPlateau && (
+                              <line
+                                x1={point.leftPercent}
+                                y1={point.yPercent}
+                                x2={point.rightPercent}
+                                y2={point.rightYPercent}
+                                stroke="#ffd86b"
+                                strokeWidth="0.55"
+                                opacity="0.72"
+                                vectorEffect="non-scaling-stroke"
+                              />
+                            )}
+                          </g>
+                        ))}
+                      </>
+                    )}
                     {debugMode && robustFingerLineTest && (
                       <>
                         <line
@@ -3856,6 +4122,27 @@ export default function AppV2() {
                       <span>Teste de perfil transversal · não altera o aro comercial.</span>
                     </>
                   )}
+                  {contourConstantTest && (
+                    <div
+                      style={{
+                        marginTop:10,
+                        padding:"12px",
+                        border:`2px solid ${contourConstantTest.stable?"rgba(255,216,107,.68)":"rgba(255,154,102,.62)"}`,
+                        borderRadius:10,
+                        display:"grid",
+                        gap:6,
+                        background:"rgba(31,25,16,.62)"
+                      }}
+                    >
+                      <strong>TESTE · CONTORNO MULTIPONTO + CONSTANTE</strong>
+                      <span>Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
+                      <span>Constante encontrada: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · {contourConstantTest.stable ? "PLATÔ ESTÁVEL" : "SEM PLATÔ FORTE"}</span>
+                      {contourConstantTest.plateauStart>=0 && <span>Platô: pontos {contourConstantTest.plateauStart+1}–{contourConstantTest.plateauEnd+1} · variação {contourConstantTest.spreadPercent?.toFixed(2)}%</span>}
+                      {!!contourConstantTest.plateauValuesMm.length && <span>Medidas do platô: {contourConstantTest.plateauValuesMm.map(value=>value.toFixed(2)).join(" / ")} mm</span>}
+                      <span>Curva histórica: {contourConstantTest.historicalRing===null ? "n/d" : "aro "+contourConstantTest.historicalRing}</span>
+                      <small>Azul = snap físico válido · dourado = pontos da constante escolhida. Teste apenas diagnóstico.</small>
+                    </div>
+                  )}
                   {methodComparisonTest && (
                     <div
                       style={{
@@ -4062,7 +4349,7 @@ export default function AppV2() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Posicione a linha amarela onde o anel vai ficar e aproxime as duas linhas verdes das bordas. Depois, 50 cortes automáticos refinam os pixels exatos do contorno sem sair da região indicada por você.</span>
+              <span>Posicione as linhas verdes aproximadamente na parte mais grossa do dedo. No diagnóstico privado, os snaps multiponto percorrem a faixa ao redor, grudam no contorno físico de cada lado e procuram a maior largura que forme uma constante estável.</span>
             </div>
           )}
 
