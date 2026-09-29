@@ -1459,7 +1459,7 @@ export default function AppV2() {
     setFingerLoupe(null);
   };
 
-  const fingerBandSamplesPx = (guideYPercent = ringGuideY) => {
+  const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10) => {
     const stage=measureRef.current;
     const source=photoPixelsRef.current;
     if(!stage||!source||!leftLocked||!rightLocked) return null;
@@ -1500,7 +1500,8 @@ export default function AppV2() {
     // As linhas verdes sao o gabarito; cada corte apenas refina alguns pixels
     // para encontrar a borda real do dedo.
     const rawYPercents=Array.from({length:50},(_,index)=>{
-      const off=-10+(index*(20/49));
+      const span=Math.max(6,Math.min(30,scanHalfSpan));
+      const off=-span+(index*((span*2)/49));
       return clamp(guideYPercent+off,6,94);
     });
     const yPercents=rawYPercents.filter((value,index,array)=>
@@ -1938,7 +1939,12 @@ export default function AppV2() {
 
   const contourAnatomy = useMemo(() => {
     if(!photo || !leftLocked || !rightLocked) return null;
-    const samples=fingerBandSamplesPx(ringGuideY);
+
+    // Varredura anatomica ampla e fixa. Ela NAO acompanha a linha amarela.
+    // Assim a mesma foto encontra sempre a mesma regiao do anel, mesmo que
+    // o usuario tente mover a guia para cima ou para baixo.
+    const anatomySearchCenterY=60;
+    const samples=fingerBandSamplesPx(anatomySearchCenterY,28);
     if(!samples?.length) return null;
     return analyzeFingerContourAnatomy(
       samples.map(sample=>({
@@ -1946,11 +1952,51 @@ export default function AppV2() {
         width:sample.width,
         confidence:sample.confidence,
       })),
-      ringGuideY,
+      anatomySearchCenterY,
     );
   },[
-    photo,leftLocked,rightLocked,leftLine,rightLine,ringGuideY,zoom,panX,panY,
+    photo,leftLocked,rightLocked,leftLine,rightLine,zoom,panX,panY,
     measurementCardHomography
+  ]);
+
+  // Ima anatomico da linha amarela.
+  // 1) landmarks confiaveis continuam tendo prioridade;
+  // 2) se landmarks nao estiverem disponiveis, usa o plato do contorno;
+  // 3) depois de detectado, a linha se reposiciona sozinha e permanece
+  //    no mesmo ponto anatomico para esta foto.
+  useEffect(() => {
+    if(!photo || phase!=="finger" || !leftLocked || !rightLocked) return;
+
+    const landmark=handLandmarkAnalysis?.measuredFinger;
+    const landmarkY=
+      VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
+      landmark &&
+      landmark.confidence>=60 &&
+      landmark.ringRegionY!==null
+        ? clamp(landmark.ringRegionY*100,28,84)
+        : null;
+
+    const contourY=
+      contourAnatomy?.detected &&
+      contourAnatomy.score>=70 &&
+      contourAnatomy.ringRegionY!==null
+        ? clamp(contourAnatomy.ringRegionY,28,84)
+        : null;
+
+    const targetY=landmarkY ?? contourY;
+    if(targetY===null) return;
+
+    // Pequena zona morta evita oscilacao subpixel/visual.
+    if(Math.abs(ringGuideY-targetY)<0.35 && Math.abs(measureY-targetY)<0.35) return;
+
+    setRingGuideY(targetY);
+    setMeasureY(targetY);
+  },[
+    photo,phase,leftLocked,rightLocked,
+    handLandmarkAnalysis?.measuredFinger?.confidence,
+    handLandmarkAnalysis?.measuredFinger?.ringRegionY,
+    contourAnatomy?.detected,contourAnatomy?.score,contourAnatomy?.ringRegionY,
+    ringGuideY,measureY
   ]);
 
   const anatomicalRegionFusion = useMemo(() => {
