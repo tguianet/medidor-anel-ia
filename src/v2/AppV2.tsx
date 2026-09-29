@@ -818,11 +818,10 @@ export default function AppV2() {
           );
           activeQuad=actualQuad;
 
-          const averageWidthPx=quadAverageWidthPx(actualQuad);
-          if(Number.isFinite(averageWidthPx)&&averageWidthPx>0){
-            pxPerMm=averageWidthPx/CARD_WIDTH_MM;
-            setMeasurementCardLengthPx(averageWidthPx);
-          }
+          // IMPORTANTE: a homografia serve apenas para diagnostico e validacao
+          // de perspectiva. Ela NAO pode substituir a escala fisica oficial.
+          // A escala continua sendo definida exclusivamente pelo segmento A-B
+          // entre as intersecoes da base com as duas laterais: A-B = 85,60 mm.
         }catch{
           // Fallback seguro: mantém a calibração antiga por 85,60 mm.
           activeHomography=null;
@@ -1987,7 +1986,7 @@ export default function AppV2() {
       perspectiveScaleFactor:1,
       baseMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
       normalizedMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
-      measurementSource:"local-scale" as const,
+      measurementSource:"intersection-85.60" as const,
     };
     if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
 
@@ -2110,33 +2109,25 @@ export default function AppV2() {
       ? sortedFactors[Math.floor(sortedFactors.length/2)]
       : 1;
 
-    const useNormalizedScale=
-      VISION_FEATURE_FLAGS.ENABLE_CARD_SCALE_PERSPECTIVE_NORMALIZATION &&
-      normalizedValues.length>=35;
-
     const directHomographyValue=homographyRobust ?? homographyStable;
     const normalizedValue=normalizedRobust ?? normalizedStable;
     const localValue=localRobust ?? localStable;
 
-    // Correção conservadora:
-    // - nunca aumenta a largura acima da homografia direta quando os métodos divergem;
-    // - mantém a escala local normalizada quando ela já está coerente.
-    // Isso atua somente antes da fórmula de aro.
+    // Fonte oficial e deterministica da medida:
+    // escala local derivada SOMENTE das intersecoes A-B da base do cartao,
+    // onde A-B representa fisicamente 85,60 mm.
+    //
+    // Homografia e normalizacao continuam calculadas abaixo exclusivamente
+    // para diagnostico/qualidade; nunca podem substituir a medida enviada
+    // para a formula do aro.
     const geometryDisagreementMm=
       directHomographyValue!==null && localValue!==null
         ? Math.abs(localValue-directHomographyValue)
         : 0;
 
-    const preferDirectHomography=
-      useNormalizedScale &&
-      directHomographyValue!==null &&
-      normalizedValue!==null &&
-      geometryDisagreementMm>0.15 &&
-      normalizedValue>directHomographyValue;
-
-    const activeStats=preferDirectHomography ? homographyStats : (useNormalizedScale ? normalizedStats : localStats);
-    const activeStable=preferDirectHomography ? homographyStable : (useNormalizedScale ? normalizedStable : localStable);
-    const activeRobust=preferDirectHomography ? homographyRobust : (useNormalizedScale ? normalizedRobust : localRobust);
+    const activeStats=localStats;
+    const activeStable=localStable;
+    const activeRobust=localRobust;
 
     return {
       oldMm:activeStable,
@@ -2149,11 +2140,7 @@ export default function AppV2() {
       perspectiveScaleFactor,
       baseMmPerPx,
       normalizedMmPerPx:baseMmPerPx*perspectiveScaleFactor,
-      measurementSource:preferDirectHomography
-        ? "homography-guard" as const
-        : useNormalizedScale
-          ? "normalized-local-scale" as const
-          : "local-scale" as const,
+      measurementSource:"intersection-85.60" as const,
     };
   },[
     pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,
@@ -2488,18 +2475,11 @@ export default function AppV2() {
     const widestRun=selectWidestStableRun(rawWidthsPx);
     if(widestRun.used===null) return null;
 
-    const physicalWidthsMm=fingerMagnetSamples.map((sample)=>{
-      if(measurementCardHomography){
-        try{
-          const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
-          const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
-          return Math.hypot(right.x-left.x,right.y-left.y);
-        }catch{
-          return NaN;
-        }
-      }
-      return pixelsPerMm>0 ? sample.width/pixelsPerMm : NaN;
-    }).filter(Number.isFinite);
+    const physicalWidthsMm=fingerMagnetSamples.map((sample)=>
+      // Auditoria segue a mesma fonte oficial da formula:
+      // escala das intersecoes A-B do cartao, sem correcao por homografia.
+      pixelsPerMm>0 ? sample.width/pixelsPerMm : NaN
+    ).filter(Number.isFinite);
 
     const widestPhysical=selectWidestStableRun(physicalWidthsMm);
     const activeRobust=widthAnalysis.stats;
@@ -2533,18 +2513,9 @@ export default function AppV2() {
     };
   })();
 
-  const fourMagnetWidthsMm = fingerMagnetSamples?.map((sample)=>{
-    if(measurementCardHomography){
-      try{
-        const left=projectPoint(measurementCardHomography,{x:sample.left,y:sample.y});
-        const right=projectPoint(measurementCardHomography,{x:sample.right,y:sample.rightY});
-        return Number(Math.hypot(right.x-left.x,right.y-left.y).toFixed(2));
-      }catch{
-        return NaN;
-      }
-    }
-    return pixelsPerMm>0 ? Number((sample.width/pixelsPerMm).toFixed(2)) : NaN;
-  }).filter(Number.isFinite) ?? [];
+  const fourMagnetWidthsMm = fingerMagnetSamples?.map((sample)=>
+    pixelsPerMm>0 ? Number((sample.width/pixelsPerMm).toFixed(2)) : NaN
+  ).filter(Number.isFinite) ?? [];
 
   const singleFingerWidthMm = liveWidthMm !== null ? Number(liveWidthMm.toFixed(2)) : null;
 
@@ -3162,8 +3133,9 @@ export default function AppV2() {
                   <span>Confidence final: {measurementAudit.finalConfidence}/100 · {measurementAudit.finalConfidenceLabel}</span>
                   <span>Gate da captura: {captureQualityGate.accepted ? "ACEITA" : "DESCARTADA"}{!captureQualityGate.accepted ? ` · ${captureQualityGate.reasons.join(" · ")}` : ""}</span>
                   <span>Comparação geométrica: homografia direta {widthAnalysis.homographyMm?.toFixed(2) ?? "n/d"} mm · escala local {widthAnalysis.localScaleMm?.toFixed(2) ?? "n/d"} mm · escala normalizada {widthAnalysis.normalizedScaleMm?.toFixed(2) ?? "n/d"} mm</span>
-                  <span>Fonte ativa: {widthAnalysis.measurementSource==="homography-guard" ? "HOMOGRAFIA DIRETA · PROTEÇÃO CONTRA SUPERDIMENSIONAMENTO" : widthAnalysis.measurementSource==="normalized-local-scale" ? "ESCALA LOCAL + NORMALIZAÇÃO DE PERSPECTIVA" : "ESCALA LOCAL"}</span>
-                  <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm{widthAnalysis.measurementSource==="homography-guard" ? " · proteção ativa" : ""}</span>
+                  <span>Fonte ativa: CALIBRAÇÃO 85,60 MM POR INTERSEÇÕES</span>
+                  <span>Homografia: somente diagnóstico/validação de perspectiva · não altera a medida</span>
+                  <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm · somente diagnóstico</span>
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
                   {handLandmarkAnalysis?.error && <span>Landmark erro: {handLandmarkAnalysis.error}</span>}
