@@ -8,6 +8,8 @@ type Props = {
   cardReady: boolean;
   calibrationStep: "reference" | "measurement" | "done";
   cameraAngleGuide: "forward" | "backward" | "aligned" | "unknown";
+  liveFingerTiltDeg?: number | null;
+  liveFingerTiltConfidence?: number;
   cameraOpening: boolean;
   error: string;
   referenceCardWidthPercent?: number | null;
@@ -19,7 +21,9 @@ type Props = {
 };
 
 export default function CameraScreen({
-  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide, cameraOpening, error,
+  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide,
+  liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
+  cameraOpening, error,
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
   onClose, onCapture, onRetry,
 }: Props) {
@@ -64,8 +68,26 @@ export default function CameraScreen({
             <span className="angle-arrow backward">↓</span>
           </div>
 
-          <div className="live-finger-axis">
-            <span>ALINHE O DEDO</span>
+          <div
+            className="live-finger-axis"
+            style={{
+              borderColor:
+                liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
+                  ? "#52e0a3"
+                  : undefined,
+              color:
+                liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
+                  ? "#52e0a3"
+                  : undefined,
+            }}
+          >
+            <span>
+              {liveFingerTiltDeg===null || liveFingerTiltConfidence<45
+                ? "ALINHE O DEDO"
+                : Math.abs(liveFingerTiltDeg)<=1.5
+                  ? `✓ DEDO RETO · ${Math.abs(liveFingerTiltDeg).toFixed(1)}°`
+                  : `DEDO ${Math.abs(liveFingerTiltDeg).toFixed(1)}° · AJUSTE ATÉ 0°`}
+            </span>
           </div>
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
