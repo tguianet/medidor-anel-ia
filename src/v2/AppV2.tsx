@@ -2310,6 +2310,46 @@ export default function AppV2() {
     photo,
   ]);
 
+  const anatomicalRegionReady = useMemo(() => {
+    if(measurementMode!=="finger" || diameterPhotoTestMode) return true;
+
+    const landmark=handLandmarkAnalysis?.measuredFinger;
+    const landmarkReady=
+      VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
+      !!landmark &&
+      landmark.confidence>=60 &&
+      landmark.ringRegionY!==null;
+
+    const contourReady=
+      !!contourAnatomy?.detected &&
+      contourAnatomy.score>=70 &&
+      contourAnatomy.ringRegionY!==null;
+
+    return landmarkReady || contourReady;
+  },[
+    measurementMode,
+    diameterPhotoTestMode,
+    handLandmarkAnalysis?.measuredFinger?.confidence,
+    handLandmarkAnalysis?.measuredFinger?.ringRegionY,
+    contourAnatomy?.detected,
+    contourAnatomy?.score,
+    contourAnatomy?.ringRegionY,
+  ]);
+
+  const anatomicalRegionSource =
+    measurementMode!=="finger" || diameterPhotoTestMode
+      ? "não aplicável"
+      : VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
+        handLandmarkAnalysis?.measuredFinger &&
+        handLandmarkAnalysis.measuredFinger.confidence>=60 &&
+        handLandmarkAnalysis.measuredFinger.ringRegionY!==null
+        ? "LANDMARKS"
+        : contourAnatomy?.detected &&
+          contourAnatomy.score>=70 &&
+          contourAnatomy.ringRegionY!==null
+          ? "CONTORNO"
+          : "BLOQUEADO · SEM REGIÃO ANATÔMICA";
+
   const captureQualityGate = useMemo(() => {
     const reasons:string[]=[];
     const stability=captureDeviceQuality?.stabilityScore ?? null;
@@ -2331,6 +2371,9 @@ export default function AppV2() {
     if(calibrationConfidence<MIN_CARD_CALIBRATION_CONFIDENCE){
       reasons.push(`calibração ${calibrationConfidence} < ${MIN_CARD_CALIBRATION_CONFIDENCE}`);
     }
+    if(measurementMode==="finger" && !diameterPhotoTestMode && !anatomicalRegionReady){
+      reasons.push("região anatômica do anel não detectada");
+    }
 
     return {
       accepted:reasons.length===0,
@@ -2344,6 +2387,9 @@ export default function AppV2() {
     preFormulaQuality.edgeScore,
     captureDeviceQuality?.stabilityScore,
     calibrationConfidence,
+    measurementMode,
+    diameterPhotoTestMode,
+    anatomicalRegionReady,
   ]);
 
   useEffect(() => {
@@ -2357,7 +2403,8 @@ export default function AppV2() {
       !leftLocked ||
       !rightLocked ||
       liveWidthMm===null ||
-      !captureQualityGate.accepted
+      !captureQualityGate.accepted ||
+      !anatomicalRegionReady
     ) return;
 
     // Aguarda a medição parar de mudar antes de registrar a captura.
@@ -2406,7 +2453,7 @@ export default function AppV2() {
     };
   },[
     photo,leftLocked,rightLocked,liveWidthMm,
-    captureQualityGate.accepted,
+    captureQualityGate.accepted,anatomicalRegionReady,
     handLandmarkAnalysis?.measuredFinger?.confidence,
     handLandmarkAnalysis?.measuredFinger?.ringRegionY,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,ringGuideY
@@ -2466,7 +2513,7 @@ export default function AppV2() {
   // Nenhum valor anterior pode participar do resultado atual.
   // Foto reprovada pelo gate nunca chega a formula.
   const widthSentToFormulaMm =
-    captureQualityGate.accepted
+    captureQualityGate.accepted && anatomicalRegionReady
       ? liveWidthMm
       : null;
 
@@ -3211,7 +3258,13 @@ export default function AppV2() {
             </div>
           )}
 
-          {phase==="finger" && singlePhotoTestMode && liveWidthMm!==null && !captureQualityGate.accepted && (
+          {phase==="finger" && measurementMode==="finger" && liveWidthMm!==null && !anatomicalRegionReady && (
+            <div className="analysis-result" role="alert">
+              <strong>Região do anel não detectada</strong>
+              <span>O aro foi bloqueado porque o sistema não encontrou uma região anatômica confiável nesta foto. Refaça a captura; o modo manual/fallback não entra mais na fórmula.</span>
+            </div>
+          )}
+          {phase==="finger" && singlePhotoTestMode && liveWidthMm!==null && !captureQualityGate.accepted && anatomicalRegionReady && (
             <div className="analysis-result">
               <strong>Captura descartada</strong>
               <span>Esta foto não passou na validação: {captureQualityGate.reasons.join(" · ")}. Refaça a captura; a nova foto começa do zero e não será combinada com esta.</span>
@@ -3265,7 +3318,7 @@ export default function AppV2() {
                   <span>Contorno anatômico: {contourAnatomy?.detected ? "detectado" : "não detectado"}{contourAnatomy ? ` · score ${contourAnatomy.score} · ${contourAnatomy.reason}` : ""}</span>
                   {contourAnatomy?.ringRegionY!==null && contourAnatomy?.ringRegionY!==undefined && <span>Contour ringRegionY: {contourAnatomy.ringRegionY.toFixed(1)}% · jointRegionY {contourAnatomy.jointRegionY===null?"n/d":contourAnatomy.jointRegionY.toFixed(1)+"%"} · CV {contourAnatomy.widthCvPercent===null?"n/d":contourAnatomy.widthCvPercent.toFixed(2)+"%"}</span>}
                   <span>Região anatômica: somente a foto atual · sem fusão entre capturas</span>
-                  <span>Região anatômica aplicada: {anatomicalRegionFusion.active ? "FUSÃO" : handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "LANDMARKS" : contourAnatomy?.detected && contourAnatomy.ringRegionY!==null ? "CONTORNO" : "MANUAL/FALLBACK"} · Y {auditGuideY.toFixed(1)}%</span>
+                  <span>Região anatômica aplicada: {anatomicalRegionSource}{anatomicalRegionReady ? ` · Y ${auditGuideY.toFixed(1)}%` : ""}</span>
                   {handLandmarkAnalysis?.measuredFinger && <span>Eixo anatômico por landmarks: {handLandmarkAnalysis.measuredFinger.axisAngleDeg.toFixed(2)}°</span>}
                   <span>Modo de captura: FOTO ÚNICA AUTÔNOMA</span>
                   <span>Histórico entre fotos: DESATIVADO · nenhuma média ou fusão entre capturas</span>
