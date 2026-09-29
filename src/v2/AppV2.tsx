@@ -18,7 +18,7 @@ import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks
 import { analyzeFingerContourAnatomy } from "./fingerContourAnatomy";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
-import LightCardDetectorTest, { type LightCardDetectionPayload } from "./LightCardDetectorTest";
+import type { LightCardDetectionPayload } from "./LightCardDetectorTest";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
@@ -401,15 +401,62 @@ export default function AppV2() {
         const top = clamp(calibration.cardBox.y * 100, 3, finalBottom - 5);
         const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
 
+        const detectedLeftLine:Line={
+          a:{x:finalLeft,y:clamp(top-padY,1,99)},
+          b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)},
+        };
+        const detectedRightLine:Line={
+          a:{x:finalRight,y:clamp(top-padY,1,99)},
+          b:{x:finalRight,y:clamp(finalBottom+padY,1,99)},
+        };
+        const detectedBottomLine:Line={
+          a:{x:finalLeft,y:finalBottom},
+          b:{x:finalRight,y:finalBottom},
+        };
+        const detectedQuad:[Point,Point,Point,Point]=[
+          {x:finalLeft,y:top},
+          {x:finalRight,y:top},
+          {x:finalRight,y:finalBottom},
+          {x:finalLeft,y:finalBottom},
+        ];
+
         setCardLeft(finalLeft);
         setCardRight(finalRight);
         setCardBottom(finalBottom);
         setCardLines({
           top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
-          right:{a:{x:finalRight,y:clamp(top-padY,1,99)},b:{x:finalRight,y:clamp(finalBottom+padY,1,99)}},
-          bottom:{a:{x:finalLeft,y:finalBottom},b:{x:finalRight,y:finalBottom}},
-          left:{a:{x:finalLeft,y:clamp(top-padY,1,99)},b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)}},
+          right:detectedRightLine,
+          bottom:detectedBottomLine,
+          left:detectedLeftLine,
         });
+
+        // Fluxo comercial de 1 foto: o detector leve ja confirmou o cartao.
+        // Aplicamos automaticamente esquerda, direita e base e seguimos
+        // direto para a medicao do dedo. Ajuste manual permanece como fallback.
+        if(singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE){
+          setCardSnapLines({
+            left:detectedLeftLine,
+            right:detectedRightLine,
+            bottom:detectedBottomLine,
+          });
+          setCardLineLocked({top:false,right:true,bottom:true,left:true});
+          setCardQuad(detectedQuad);
+          setPerspectiveReady(true);
+          setCalibrationConfidence(calibration.confidence);
+          setMeasurementCardLengthPx(calibration.pixelsPerMm*CARD_WIDTH_MM);
+          setFingerCardCalibrationStep("done");
+          setAnalyzingCard(false);
+          activateFingerMeasurement(
+            finalLeft,
+            finalRight,
+            finalBottom,
+            calibration.confidence,
+            detectedQuad,
+            calibration.pixelsPerMm,
+          );
+          camera.setError("");
+          return;
+        }
       } catch {
         setCardLeft(15);
         setCardRight(85);
@@ -2631,21 +2678,23 @@ export default function AppV2() {
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(widthSentToFormulaMm, calibrationConfidence);
 
     if (measurementMode === "finger") {
-      const v2 = classifyFingerWidthMm(widthSentToFormulaMm);
+      // CURVA PRINCIPAL: historica validada nos testes de dedo.
+      // A curva anterior continua disponivel somente no diagnostico para comparacao.
+      const primary = classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
       return {
         rawWidthMm: widthSentToFormulaMm,
         widthMm: widthSentToFormulaMm,
         measurementCorrectionMm: 0,
         equivalentDiameterMm: widthSentToFormulaMm,
         fingerEquivalentMabMm: null,
-        ringSize: v2.exactRingSize,
+        ringSize: primary.exactRingSize,
         calculationMode: "formula" as const,
         appliedRuleOffset: null,
         continuousRing: null,
         nearBoundary: false,
         boundaryDistanceMm: Math.min(
-          Math.abs(widthSentToFormulaMm - v2.lowerBoundaryMm),
-          Math.abs(v2.upperBoundaryMm - widthSentToFormulaMm),
+          Math.abs(widthSentToFormulaMm - primary.lowerBoundaryMm),
+          Math.abs(primary.upperBoundaryMm - widthSentToFormulaMm),
         ),
       };
     }
@@ -2655,7 +2704,8 @@ export default function AppV2() {
 
   const experimentalHighRingResult = useMemo(() => {
     if(measurementMode!=="finger" || widthSentToFormulaMm===null) return null;
-    return classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
+    // Comparacao privada: curva anterior que era usada como principal.
+    return classifyFingerWidthMm(widthSentToFormulaMm);
   },[measurementMode,widthSentToFormulaMm]);
 
   const resetPhoto = () => {
@@ -3453,9 +3503,9 @@ export default function AppV2() {
           : 1;
 
   const guideTitle = singlePhotoTestMode
-    ? (guidedStep === 1 ? "1. Calibre o cartão sobre o dedo" :
-       guidedStep === 2 ? "2. Ajuste as linhas na parte mais grossa" :
-       "3. Confira os três números")
+    ? (guidedStep === 1 ? "1. Fotografe cartão e dedo" :
+       guidedStep === 2 ? "2. Ajuste a região mais grossa" :
+       "3. Confira o resultado")
     : guidedStep === 1 ? "1. Calibre o cartão em uma base plana" :
       guidedStep === 2 ? "2. Fotografe o cartão sobre o dedo" :
       guidedStep === 3 ? "3. Ajuste as duas linhas na parte mais grossa" :
@@ -3463,7 +3513,7 @@ export default function AppV2() {
 
   const guideText = singlePhotoTestMode
     ? (guidedStep === 1
-        ? "Ajuste as duas laterais e a linha da base do cartão na mesma foto do dedo. Essa própria foto define a escala de 85,60 mm."
+        ? "Fotografe o cartão sobre o dedo. O detector aplica automaticamente as 3 linhas e calibra os 85,60 mm antes de abrir a medição."
         : guidedStep === 2
           ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos ficam concentrados nessa mesma altura."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
@@ -4010,7 +4060,10 @@ export default function AppV2() {
 
           {debugMode && phase === "card" && measurementMode === "finger" && photo && (
             <>
-              <LightCardDetectorTest photo={photo} onApply={applyLightCardDetection} />
+              <div className="analysis-result">
+                <strong>DETECTOR LEVE AUTOMÁTICO</strong>
+                <span>Executado automaticamente após a foto. Se a confiança for suficiente, as 3 linhas são aplicadas e o fluxo segue direto para o dedo.</span>
+              </div>
               <OpenCvCardTest photo={photo} />
             </>
           )}
@@ -4234,21 +4287,21 @@ export default function AppV2() {
                           : "rgba(42,18,18,.58)"
                       }}
                     >
-                      <strong>TESTE OPERACIONAL · CURVA HISTÓRICA 29–33</strong>
+                      <strong>VALIDAÇÃO · CURVA PRINCIPAL HISTÓRICA</strong>
                       <span>Gate geométrico: {experimentalOperationalTest.accepted ? "✓ ACEITA" : "✕ BLOQUEIA"}</span>
                       <span>Medida usada: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                       <span>Validação física: {experimentalOperationalTest.physicalMm===null?"n/d":experimentalOperationalTest.physicalMm.toFixed(2)+" mm"} · suporte {experimentalOperationalTest.physicalSupport}% · diferença {experimentalOperationalTest.physicalDeltaMm===null?"n/d":experimentalOperationalTest.physicalDeltaMm.toFixed(2)+" mm"}</span>
                       <span>Curva oficial: aro {experimentalOperationalTest.officialRing} · curva histórica: aro {experimentalOperationalTest.historicalRing}</span>
                       <span>RESULTADO EXPERIMENTAL: {experimentalOperationalTest.accepted ? "ARO "+experimentalOperationalTest.proposedRing : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
                       {!experimentalOperationalTest.accepted && <span>Motivos: {experimentalOperationalTest.reasons.join(" · ")}</span>}
-                      <small>Modo de teste apenas · não altera o resultado comercial atual.</small>
+                      <small>Validação privada da curva principal e da qualidade da captura.</small>
                     </div>
                   )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
                     <>
-                      <span>CLASSIFICADOR OFICIAL: aro {result?.ringSize ?? "n/d"}</span>
-                      <span>TESTE HISTÓRICO +0,440 mm (29–33): aro {experimentalHighRingResult.exactRingSize} · alvo {experimentalHighRingResult.targetWidthMm.toFixed(3)} mm · faixa {Number.isFinite(experimentalHighRingResult.lowerBoundaryMm)?experimentalHighRingResult.lowerBoundaryMm.toFixed(3):"-∞"}–{Number.isFinite(experimentalHighRingResult.upperBoundaryMm)?experimentalHighRingResult.upperBoundaryMm.toFixed(3):"+∞"} mm</span>
-                      <span>Teste apenas diagnóstico · não altera o aro comercial exibido.</span>
+                      <span>CLASSIFICADOR PRINCIPAL · HISTÓRICO: aro {result?.ringSize ?? "n/d"}</span>
+                      <span>COMPARAÇÃO · CURVA ANTERIOR: aro {experimentalHighRingResult.exactRingSize} · alvo {experimentalHighRingResult.targetWidthMm.toFixed(3)} mm · faixa {Number.isFinite(experimentalHighRingResult.lowerBoundaryMm)?experimentalHighRingResult.lowerBoundaryMm.toFixed(3):"-∞"}–{Number.isFinite(experimentalHighRingResult.upperBoundaryMm)?experimentalHighRingResult.upperBoundaryMm.toFixed(3):"+∞"} mm</span>
+                      <span>A curva anterior é apenas diagnóstico e não altera o aro comercial exibido.</span>
                     </>
                   )}
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
