@@ -3035,6 +3035,75 @@ export default function AppV2() {
     };
   })();
 
+  const experimentalOperationalTest = (() => {
+    if(
+      measurementMode!=="finger" ||
+      widthSentToFormulaMm===null ||
+      !geometricStabilityTest
+    ){
+      return null;
+    }
+
+    const reasons:string[]=[];
+    const physicalMm=physicalEdgeProfileTest?.widthMm ?? null;
+    const physicalSupport=physicalEdgeProfileTest?.validPairPercent ?? 0;
+    const physicalStrong=physicalEdgeProfileTest?.status==="forte";
+    const physicalDeltaMm=
+      physicalMm!==null
+        ? Math.abs(physicalMm-widthSentToFormulaMm)
+        : null;
+
+    // Gate experimental deliberadamente mais rigoroso que o comercial.
+    // Todos os critérios abaixo descrevem qualidade/geometria da captura;
+    // nenhum depende do tamanho real do dedo.
+    if(!physicalStrong) reasons.push("borda física não forte");
+    if(physicalSupport<90) reasons.push(`suporte da borda ${physicalSupport}% < 90%`);
+    if(physicalDeltaMm===null || physicalDeltaMm>0.25){
+      reasons.push(`divergência borda física ${physicalDeltaMm===null?"n/d":physicalDeltaMm.toFixed(2)+" mm"} > 0,25 mm`);
+    }
+    if(geometricStabilityTest.stability!==null && geometricStabilityTest.stability<90){
+      reasons.push(`stability ${geometricStabilityTest.stability} < 90`);
+    }
+    if(geometricStabilityTest.perspectiveScore<93){
+      reasons.push(`perspective ${geometricStabilityTest.perspectiveScore} < 93`);
+    }
+    if(geometricStabilityTest.pitch!==null && Math.abs(geometricStabilityTest.pitch)>6){
+      reasons.push(`pitch ${geometricStabilityTest.pitch.toFixed(1)}° > 6°`);
+    }
+    if(geometricStabilityTest.roll!==null && Math.abs(geometricStabilityTest.roll)>3){
+      reasons.push(`roll ${geometricStabilityTest.roll.toFixed(1)}° > 3°`);
+    }
+    if(geometricStabilityTest.fingerAngleDeg!==null && Math.abs(geometricStabilityTest.fingerAngleDeg)>5){
+      reasons.push(`ângulo do dedo ${geometricStabilityTest.fingerAngleDeg.toFixed(1)}° > 5°`);
+    }
+
+    const historical=classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
+    const official=classifyFingerWidthMm(widthSentToFormulaMm);
+
+    // A curva histórica é experimental apenas na faixa alta. Abaixo de 29,
+    // preservamos o classificador oficial para não contaminar a faixa baixa.
+    const useHistoricalHigh=
+      official.exactRingSize>=29 ||
+      historical.exactRingSize>=29;
+
+    const proposedRing=
+      useHistoricalHigh
+        ? historical.exactRingSize
+        : official.exactRingSize;
+
+    return {
+      accepted:reasons.length===0,
+      reasons,
+      proposedRing,
+      officialRing:official.exactRingSize,
+      historicalRing:historical.exactRingSize,
+      useHistoricalHigh,
+      physicalMm,
+      physicalSupport,
+      physicalDeltaMm,
+    };
+  })();
+
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
 
@@ -3799,6 +3868,30 @@ export default function AppV2() {
                       <span>Celular: pitch {geometricStabilityTest.pitch===null ? "n/d" : geometricStabilityTest.pitch.toFixed(1)+"°"} · roll {geometricStabilityTest.roll===null ? "n/d" : geometricStabilityTest.roll.toFixed(1)+"°"} · movimento {geometricStabilityTest.motion===null ? "n/d" : geometricStabilityTest.motion.toFixed(2)}</span>
                       <span>Stability {geometricStabilityTest.stability===null ? "n/d" : geometricStabilityTest.stability} · perspective {geometricStabilityTest.perspectiveScore}</span>
                       <small>Diagnóstico somente · este quadro ainda não bloqueia nem corrige o resultado.</small>
+                    </div>
+                  )}
+                  {experimentalOperationalTest && (
+                    <div
+                      style={{
+                        marginTop:10,
+                        padding:"12px",
+                        border:`2px solid ${experimentalOperationalTest.accepted?"rgba(82,224,163,.65)":"rgba(255,126,126,.65)"}`,
+                        borderRadius:10,
+                        display:"grid",
+                        gap:6,
+                        background:experimentalOperationalTest.accepted
+                          ? "rgba(14,36,28,.58)"
+                          : "rgba(42,18,18,.58)"
+                      }}
+                    >
+                      <strong>TESTE OPERACIONAL · CURVA HISTÓRICA 29–33</strong>
+                      <span>Gate geométrico: {experimentalOperationalTest.accepted ? "✓ ACEITA" : "✕ BLOQUEIA"}</span>
+                      <span>Medida usada: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
+                      <span>Validação física: {experimentalOperationalTest.physicalMm===null?"n/d":experimentalOperationalTest.physicalMm.toFixed(2)+" mm"} · suporte {experimentalOperationalTest.physicalSupport}% · diferença {experimentalOperationalTest.physicalDeltaMm===null?"n/d":experimentalOperationalTest.physicalDeltaMm.toFixed(2)+" mm"}</span>
+                      <span>Curva oficial: aro {experimentalOperationalTest.officialRing} · curva histórica: aro {experimentalOperationalTest.historicalRing}</span>
+                      <span>RESULTADO EXPERIMENTAL: {experimentalOperationalTest.accepted ? "ARO "+experimentalOperationalTest.proposedRing : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
+                      {!experimentalOperationalTest.accepted && <span>Motivos: {experimentalOperationalTest.reasons.join(" · ")}</span>}
+                      <small>Modo de teste apenas · não altera o resultado comercial atual.</small>
                     </div>
                   )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
