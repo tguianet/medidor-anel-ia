@@ -443,7 +443,22 @@ export default function AppV2() {
           setCardQuad(detectedQuad);
           setPerspectiveReady(true);
           setCalibrationConfidence(calibration.confidence);
-          setMeasurementCardLengthPx(calibration.pixelsPerMm*CARD_WIDTH_MM);
+          // IMPORTANTE: o detector leve apenas posiciona as 3 linhas.
+          // A escala oficial NAO usa calibration.pixelsPerMm.
+          // Voltamos à regra congelada: a distância entre as interseções
+          // esquerda×base e direita×base representa exatamente 85,60 mm.
+          const source=photoPixelsRef.current;
+          const intersectionWidthPx=source
+            ? Math.hypot(
+                (finalRight-finalLeft)/100*source.width,
+                0,
+              )
+            : null;
+
+          if(intersectionWidthPx && Number.isFinite(intersectionWidthPx) && intersectionWidthPx>0){
+            setMeasurementCardLengthPx(intersectionWidthPx);
+          }
+
           setFingerCardCalibrationStep("done");
           setAnalyzingCard(false);
           activateFingerMeasurement(
@@ -452,7 +467,6 @@ export default function AppV2() {
             finalBottom,
             calibration.confidence,
             detectedQuad,
-            calibration.pixelsPerMm,
           );
           camera.setError("");
           return;
