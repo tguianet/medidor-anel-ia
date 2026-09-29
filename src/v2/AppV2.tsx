@@ -603,9 +603,9 @@ export default function AppV2() {
         b:{x:anchoredRight,y:clamp(nextMeasureY+20,4,96)},
       },
     });
-    setZoom(1);
-    setPanX(0);
-    setPanY(0);
+    // Mantem exatamente o zoom e o enquadramento usados na calibracao.
+    // As linhas continuam ancoradas na base do cartao, mas a transicao para
+    // a medicao do dedo nao pode mudar a ampliacao escolhida pelo usuario.
     camera.setError("");
     setPhase("finger");
 
