@@ -1576,6 +1576,7 @@ export default function AppV2() {
     const findEdge=(
       side:"left"|"right",
       centerX:number,
+      fingerCenterX:number,
       y:number,
       previousX:number|null,
       radius:number,
@@ -1627,12 +1628,31 @@ export default function AppV2() {
         else last.push(item);
       }
 
-      // Na semente ainda preferimos a transicao externa. Durante o tracking,
-      // como a busca ja esta centrada na borda anterior, escolhemos o grupo
-      // mais proximo dessa borda para impedir saltos para outra textura.
+      // Semente: procura do CENTRO DO DEDO para fora.
+      // Assim pegamos a primeira transicao pele -> fundo e evitamos sombras
+      // ou texturas externas que ficam alguns pixels alem da borda real.
+      //
+      // Tracking: depois da primeira borda correta, continua priorizando o
+      // grupo mais proximo da borda anterior para manter continuidade.
       let chosenGroup:{x:number;strength:number;score:number}[]|undefined;
       if(previousX===null){
-        chosenGroup=side==="left" ? groups[0] : groups[groups.length-1];
+        const eligible=groups.filter(group=>{
+          const groupCenter=group.reduce((sum,item)=>sum+item.x,0)/group.length;
+          return side==="left"
+            ? groupCenter<fingerCenterX
+            : groupCenter>fingerCenterX;
+        });
+
+        if(eligible.length){
+          chosenGroup=eligible.reduce((best,group)=>{
+            const center=group.reduce((sum,item)=>sum+item.x,0)/group.length;
+            const bestCenter=best.reduce((sum,item)=>sum+item.x,0)/best.length;
+            // Mais perto do centro = primeira borda encontrada ao sair do dedo.
+            return Math.abs(center-fingerCenterX)<Math.abs(bestCenter-fingerCenterX)
+              ? group
+              : best;
+          },eligible[0]);
+        }
       }else{
         chosenGroup=groups.reduce((best,group)=>{
           const center=group.reduce((sum,item)=>sum+item.x,0)/group.length;
@@ -1665,9 +1685,18 @@ export default function AppV2() {
       const y=toImageY(yPercent);
       if(y<6||y>=source.height-6) return null;
 
-      const le=findEdge("left",leftCenter,y,previousLeft,radius);
-      const re=findEdge("right",rightCenter,y,previousRight,radius);
+      const fingerCenterX=(leftCenter+rightCenter)/2;
+      const le=findEdge("left",leftCenter,fingerCenterX,y,previousLeft,radius);
+      const re=findEdge("right",rightCenter,fingerCenterX,y,previousRight,radius);
       if(le.score<6||re.score<6||re.x<=le.x) return null;
+
+      const guideSpan=Math.abs(rightCenter-leftCenter);
+      const detectedSpan=re.x-le.x;
+      // A primeira borda nao pode abrir muito alem do gabarito visual.
+      // Isto corta sombras externas sem impedir a curvatura normal do dedo.
+      if(previousLeft===null && previousRight===null){
+        if(detectedSpan>guideSpan*1.08 || detectedSpan<guideSpan*0.72) return null;
+      }
 
       return {
         left:{x:le.x,y,yPercent,score:le.score},
