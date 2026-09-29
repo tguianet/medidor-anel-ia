@@ -2794,6 +2794,141 @@ export default function AppV2() {
     };
   })();
 
+  const physicalEdgeProfileTest = (() => {
+    if(!fingerMagnetSamples?.length || fingerMagnetSamples.length<20 || !photoPixelsRef.current || !pixelsPerMm || pixelsPerMm<=0){
+      return null;
+    }
+
+    const source=photoPixelsRef.current;
+    const gray=(x:number,y:number)=>{
+      const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
+      const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
+      const o=(iy*source.width+ix)*4;
+      return source.data[o]*0.299+source.data[o+1]*0.587+source.data[o+2]*0.114;
+    };
+    const mean=(values:number[])=>values.length?values.reduce((s,v)=>s+v,0)/values.length:0;
+    const median=(values:number[])=>{
+      if(!values.length) return 0;
+      const a=[...values].sort((x,y)=>x-y);
+      const m=Math.floor(a.length/2);
+      return a.length%2?a[m]:(a[m-1]+a[m])/2;
+    };
+
+    type EdgeValidation={
+      valid:boolean;
+      correctedX:number;
+      offsetPx:number;
+      transition:number;
+      contrast:number;
+      innerStd:number;
+      outerStd:number;
+    };
+
+    const std=(values:number[])=>{
+      if(values.length<2) return 0;
+      const m=mean(values);
+      return Math.sqrt(values.reduce((s,v)=>s+(v-m)*(v-m),0)/values.length);
+    };
+
+    const validateEdge=(side:"left"|"right",x:number,y:number):EdgeValidation=>{
+      // Perfil transversal de 19 px centrado na borda candidata.
+      // Procuramos o maior salto local e depois verificamos se os dois lados
+      // do salto sao regioes relativamente uniformes (pele de um lado,
+      // fundo do outro), em vez de uma ruga/sombra estreita.
+      const offsets=Array.from({length:19},(_,i)=>i-9);
+      const values=offsets.map(off=>gray(x+off,y));
+      let bestIndex=1;
+      let bestTransition=-Infinity;
+
+      for(let i=1;i<values.length-1;i++){
+        const leftMean=mean(values.slice(Math.max(0,i-2),i+1));
+        const rightMean=mean(values.slice(i+1,Math.min(values.length,i+4)));
+        const jump=Math.abs(rightMean-leftMean);
+        if(jump>bestTransition){
+          bestTransition=jump;
+          bestIndex=i;
+        }
+      }
+
+      const bestOffset=offsets[bestIndex];
+      const correctedX=x+bestOffset;
+
+      // Para a lateral esquerda, "dentro" fica à direita da borda.
+      // Para a direita, "dentro" fica à esquerda.
+      const innerValues:number[]=[];
+      const outerValues:number[]=[];
+      for(let d=3;d<=7;d++){
+        innerValues.push(gray(correctedX+(side==="left"?d:-d),y));
+        outerValues.push(gray(correctedX+(side==="left"?-d:d),y));
+      }
+
+      const innerMean=mean(innerValues);
+      const outerMean=mean(outerValues);
+      const contrast=Math.abs(innerMean-outerMean);
+      const innerStd=std(innerValues);
+      const outerStd=std(outerValues);
+
+      // A borda fisica precisa:
+      // 1) ter transicao perceptivel;
+      // 2) estar proxima da borda rastreada;
+      // 3) separar duas regioes mais uniformes do que o proprio salto.
+      const nearTrackedEdge=Math.abs(bestOffset)<=4;
+      const stableSides=innerStd<=Math.max(12,bestTransition*0.75) &&
+        outerStd<=Math.max(12,bestTransition*0.75);
+      const valid=
+        bestTransition>=8 &&
+        contrast>=6 &&
+        nearTrackedEdge &&
+        stableSides;
+
+      return {
+        valid,
+        correctedX,
+        offsetPx:bestOffset,
+        transition:bestTransition,
+        contrast,
+        innerStd,
+        outerStd,
+      };
+    };
+
+    const validated=fingerMagnetSamples.map(sample=>{
+      const left=validateEdge("left",sample.left,sample.y);
+      const right=validateEdge("right",sample.right,sample.rightY);
+      return {sample,left,right,valid:left.valid&&right.valid};
+    });
+
+    const validPairs=validated.filter(item=>item.valid);
+    if(validPairs.length<8){
+      return {
+        validPairPercent:Math.round(validPairs.length/validated.length*100),
+        widthPx:null as number|null,
+        widthMm:null as number|null,
+        medianLeftOffsetPx:median(validated.map(v=>v.left.offsetPx)),
+        medianRightOffsetPx:median(validated.map(v=>v.right.offsetPx)),
+        medianTransition:median(validated.flatMap(v=>[v.left.transition,v.right.transition])),
+        status:"insuficiente" as const,
+      };
+    }
+
+    const correctedWidths=validPairs
+      .map(({left,right})=>right.correctedX-left.correctedX)
+      .filter(v=>Number.isFinite(v)&&v>0);
+    const widthPx=median(correctedWidths);
+    const widthMm=widthPx/pixelsPerMm;
+    const validPairPercent=Math.round(validPairs.length/validated.length*100);
+
+    return {
+      validPairPercent,
+      widthPx,
+      widthMm,
+      medianLeftOffsetPx:median(validated.map(v=>v.left.offsetPx)),
+      medianRightOffsetPx:median(validated.map(v=>v.right.offsetPx)),
+      medianTransition:median(validated.flatMap(v=>[v.left.transition,v.right.transition])),
+      status:validPairPercent>=80 ? "forte" as const : "parcial" as const,
+    };
+  })();
+
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
 
@@ -3508,6 +3643,15 @@ export default function AppV2() {
                       <span>Pontos aceitos nas retas: {robustFingerLineTest.inlierPercent}% · resíduo médio {robustFingerLineTest.averageResidualPx.toFixed(2)} px</span>
                       <span>Diferença retas→oficial: {widthSentToFormulaMm===null ? "n/d" : `${robustFingerLineTest.widthMm-widthSentToFormulaMm>=0?"+":""}${(robustFingerLineTest.widthMm-widthSentToFormulaMm).toFixed(2)} mm`}</span>
                       <span>Linhas amarelas finas = laterais estruturais robustas · teste somente diagnóstico.</span>
+                    </>
+                  )}
+                  {physicalEdgeProfileTest && (
+                    <>
+                      <span>BORDA FÍSICA VALIDADA: {physicalEdgeProfileTest.widthMm===null ? "n/d" : physicalEdgeProfileTest.widthMm.toFixed(2)+" mm"} · suporte {physicalEdgeProfileTest.validPairPercent}% · {physicalEdgeProfileTest.status}</span>
+                      <span>Offset mediano da borda: E {physicalEdgeProfileTest.medianLeftOffsetPx>=0?"+":""}{physicalEdgeProfileTest.medianLeftOffsetPx.toFixed(1)} px · D {physicalEdgeProfileTest.medianRightOffsetPx>=0?"+":""}{physicalEdgeProfileTest.medianRightOffsetPx.toFixed(1)} px</span>
+                      <span>Transição física mediana: {physicalEdgeProfileTest.medianTransition.toFixed(1)} níveis de cinza</span>
+                      <span>Diferença borda física→oficial: {physicalEdgeProfileTest.widthMm===null || widthSentToFormulaMm===null ? "n/d" : `${physicalEdgeProfileTest.widthMm-widthSentToFormulaMm>=0?"+":""}${(physicalEdgeProfileTest.widthMm-widthSentToFormulaMm).toFixed(2)} mm`}</span>
+                      <span>Teste de perfil transversal · não altera o aro comercial.</span>
                     </>
                   )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
