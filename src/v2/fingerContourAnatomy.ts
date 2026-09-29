@@ -89,8 +89,23 @@ export const analyzeFingerContourAnatomy = (
     };
   }
 
-  runs.sort((a,b)=>b.score-a.score);
-  const best=runs[0];
+  // Dentro da janela anatomica ja limitada pela base do cartao,
+  // escolhemos o PRIMEIRO plato estavel de cima para baixo.
+  //
+  // Antes escolhíamos o maior score global. Como a parte inferior do dedo
+  // tende a ser mais larga e muito estável, ela podia vencer mesmo estando
+  // mais abaixo do ponto real onde o anel assenta.
+  //
+  // Um plato entra como candidato quando tem confiança suficiente e baixa
+  // variacao interna. Entre os candidatos validos, vence o menor centerY.
+  const stableCandidates=runs
+    .filter(run=>run.score>=60 && run.cv<=2.2)
+    .sort((a,b)=>
+      a.centerY-b.centerY ||
+      b.score-a.score
+    );
+
+  const best=stableCandidates[0] ?? [...runs].sort((a,b)=>b.score-a.score)[0];
   const ringRegionY=best.centerY;
 
   // Junta é apenas diagnóstica: procura um máximo local acima da região do anel
@@ -111,6 +126,8 @@ export const analyzeFingerContourAnatomy = (
     stableRunStart:best.start,
     stableRunEnd:best.end,
     widthCvPercent:best.cv,
-    reason:score>=60 ? "platô estável do contorno" : "confiança baixa",
+    reason:score>=60
+      ? (stableCandidates.length ? "primeiro platô estável do contorno" : "platô estável do contorno")
+      : "confiança baixa",
   };
 };
