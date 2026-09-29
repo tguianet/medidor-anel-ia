@@ -124,6 +124,7 @@ export default function AppV2() {
   } | null>(null);
   const [handLandmarkAnalysis, setHandLandmarkAnalysis] = useState<HandLandmarkAnalysis | null>(null);
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
+  const [photoPixelsReady, setPhotoPixelsReady] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
   const [phase, setPhase] = useState<MeasurePhase>("card");
@@ -215,7 +216,11 @@ export default function AppV2() {
   }, []);
 
   useEffect(() => {
-    if (!photo) { photoPixelsRef.current = null; return; }
+    setPhotoPixelsReady(false);
+    if (!photo) {
+      photoPixelsRef.current = null;
+      return;
+    }
     const image = new Image();
     image.onload = () => {
       const canvas = document.createElement("canvas");
@@ -224,7 +229,10 @@ export default function AppV2() {
       const context = canvas.getContext("2d", { willReadFrequently: true });
       context?.drawImage(image, 0, 0);
       const imageData = context?.getImageData(0, 0, canvas.width, canvas.height);
-      if (imageData) photoPixelsRef.current = { data: imageData.data, width: canvas.width, height: canvas.height };
+      if (imageData) {
+        photoPixelsRef.current = { data: imageData.data, width: canvas.width, height: canvas.height };
+        setPhotoPixelsReady(true);
+      }
     };
     image.src = photo;
   }, [photo]);
@@ -447,17 +455,20 @@ export default function AppV2() {
           // A escala oficial NAO usa calibration.pixelsPerMm.
           // Voltamos à regra congelada: a distância entre as interseções
           // esquerda×base e direita×base representa exatamente 85,60 mm.
-          const source=photoPixelsRef.current;
-          const intersectionWidthPx=source
-            ? Math.hypot(
-                (finalRight-finalLeft)/100*source.width,
-                0,
-              )
-            : null;
+          // A foto acabou de ser capturada em canvas 900x1200.
+          // Nao esperamos photoPixelsRef carregar para definir a escala,
+          // porque isso criava uma corrida assíncrona e podia cair no fallback
+          // pixelsPerMm=1 antes do buffer da foto ficar pronto.
+          //
+          // A escala continua vindo SOMENTE das interseções das 3 linhas:
+          // A = esquerda x base, B = direita x base, |A-B| = 85,60 mm.
+          const intersectionWidthPx=Math.hypot(
+            (finalRight-finalLeft)/100*canvas.width,
+            0,
+          );
+          const intersectionPixelsPerMm=intersectionWidthPx/CARD_WIDTH_MM;
 
-          if(intersectionWidthPx && Number.isFinite(intersectionWidthPx) && intersectionWidthPx>0){
-            setMeasurementCardLengthPx(intersectionWidthPx);
-          }
+          setMeasurementCardLengthPx(intersectionWidthPx);
 
           setFingerCardCalibrationStep("done");
           setAnalyzingCard(false);
@@ -467,6 +478,7 @@ export default function AppV2() {
             finalBottom,
             calibration.confidence,
             detectedQuad,
+            intersectionPixelsPerMm,
           );
           camera.setError("");
           return;
@@ -2144,7 +2156,7 @@ export default function AppV2() {
     photo,leftLocked,rightLocked,leftLine,rightLine,zoom,panX,panY,
     measurementCardHomography,
     anatomicalWindow.minY,anatomicalWindow.maxY,
-    anatomicalWindow.centerY,anatomicalWindow.halfSpan
+    anatomicalWindow.centerY,anatomicalWindow.halfSpan,photoPixelsReady
   ]);
 
   // Ima anatomico da linha amarela.
@@ -2397,7 +2409,8 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.ringRegionY,
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
-    anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY
+    anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY,
+    photoPixelsReady
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
