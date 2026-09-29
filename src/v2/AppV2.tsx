@@ -241,7 +241,7 @@ export default function AppV2() {
       } finally { running = false; }
     };
     checkAlignment();
-    const interval = window.setInterval(checkAlignment, 450);
+    const interval = window.setInterval(checkAlignment, 120);
     return () => window.clearInterval(interval);
   }, [stage, camera.cameraOpening]);
 
@@ -251,12 +251,16 @@ export default function AppV2() {
       !camera.cameraOpening &&
       !camera.error &&
       cardReady &&
-      (!VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION || deviceQuality.stabilityScore === null || deviceQuality.stabilityScore >= 75) &&
+      (!VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION || deviceQuality.stabilityScore === null || deviceQuality.stabilityScore >= 90) &&
       measurementMode === "finger" &&
       !diameterPhotoTestMode &&
-      // Foto 1 pode ser automatica. Na Foto 2 o usuario precisa casar o
-      // cartao com o calibrador fantasma salvo da Foto 1 antes de capturar.
-      fingerCardCalibrationStep === "reference";
+      (
+        // Fluxo principal: uma unica foto. Assim que o cartao fica verde e
+        // estavel, o disparo acontece automaticamente.
+        (singlePhotoTestMode && fingerCardCalibrationStep === "measurement") ||
+        // Mantem compatibilidade com o fluxo legado privado de referencia.
+        (!singlePhotoTestMode && fingerCardCalibrationStep === "reference")
+      );
 
     if (!shouldAutoCapture) {
       if (autoCaptureTimerRef.current !== null) {
@@ -268,7 +272,8 @@ export default function AppV2() {
 
     if (autoCaptureLockedRef.current || autoCaptureTimerRef.current !== null) return;
 
-    // Exige verde estavel por 800 ms para evitar capturas em um unico frame.
+    // Verde precisa permanecer valido por 250 ms: rapido para o usuario,
+    // mas longo o bastante para evitar um falso positivo de um unico frame.
     autoCaptureTimerRef.current = window.setTimeout(() => {
       autoCaptureTimerRef.current = null;
       if (
@@ -281,7 +286,7 @@ export default function AppV2() {
 
       autoCaptureLockedRef.current = true;
       void capture();
-    }, 800);
+    }, 250);
 
     return () => {
       if (autoCaptureTimerRef.current !== null) {
@@ -297,6 +302,7 @@ export default function AppV2() {
     deviceQuality.stabilityScore,
     measurementMode,
     diameterPhotoTestMode,
+    singlePhotoTestMode,
     fingerCardCalibrationStep,
   ]);
 
