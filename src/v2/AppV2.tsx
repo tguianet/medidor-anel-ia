@@ -89,6 +89,9 @@ export default function AppV2() {
   const cardLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const recordedMeasurementPhotoRef = useRef<string>("");
   const autoAnatomyAppliedPhotoRef = useRef<string>("");
+  // Depois que o usuario move ALTURA DO ANEL, a escolha manual tem prioridade
+  // ate a proxima foto. O contorno multiponto usa essa altura apenas como semente.
+  const ringGuideManualRef = useRef(false);
   const measurementHistoryTimerRef = useRef<number | null>(null);
   type StableCapture = { mm:number; regionOffsetY:number; photoKey:string; ts:number };
   const [stableCaptures, setStableCaptures] = useState<StableCapture[]>([]);
@@ -108,6 +111,7 @@ export default function AppV2() {
     }
     recordedMeasurementPhotoRef.current="";
     autoAnatomyAppliedPhotoRef.current="";
+    ringGuideManualRef.current=false;
     setStableCaptures([]);
     setMeasurementAttemptCount(0);
     setHandLandmarkAnalysis(null);
@@ -1117,6 +1121,11 @@ export default function AppV2() {
 
   const startDrag = (target: DragTarget, event: React.PointerEvent) => {
     event.stopPropagation();
+    if(target==="height"){
+      // A partir deste toque, nenhuma rotina anatomica pode devolver a linha
+      // para o ponto automatico desta foto.
+      ringGuideManualRef.current=true;
+    }
     // Pontos do dedo são 100% manuais; nunca há snap magnético.
     fingerRefineDragRef.current =
       target === "left" ? "left" :
@@ -1990,6 +1999,7 @@ export default function AppV2() {
   useEffect(() => {
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     if(
+      ringGuideManualRef.current ||
       !VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS ||
       !photo ||
       !anatomy ||
@@ -2083,6 +2093,9 @@ export default function AppV2() {
   //    no mesmo ponto anatomico para esta foto.
   useEffect(() => {
     if(!photo || phase!=="finger" || !leftLocked || !rightLocked) return;
+    // Auto-posicionamento serve somente como sugestao inicial.
+    // Se o usuario moveu a linha, sua escolha manual prevalece nesta foto.
+    if(ringGuideManualRef.current) return;
 
     const landmark=handLandmarkAnalysis?.measuredFinger;
     const landmarkCandidate=
