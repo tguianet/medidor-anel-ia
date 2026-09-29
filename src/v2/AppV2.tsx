@@ -332,55 +332,9 @@ export default function AppV2() {
   };
 
   const capture = async () => {
-    // No modo comercial de 1 foto, rejeitamos a geometria ruim ANTES de
-    // congelar a imagem. Isso evita que uma foto claramente inclinada gere
-    // um aro plausível porém errado.
-    if(singlePhotoTestMode && measurementMode==="finger" && !diameterPhotoTestMode){
-      if(
-        VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
-        deviceQuality.devicePitch !== null &&
-        Math.abs(deviceQuality.devicePitch) > 5
-      ){
-        camera.setError(`Inclinação do celular muito alta (${deviceQuality.devicePitch.toFixed(1)}°). Ajuste até ficar entre -5° e +5° antes de capturar.`);
-        return;
-      }
-
-      if(
-        VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
-        deviceQuality.deviceRoll !== null &&
-        Math.abs(deviceQuality.deviceRoll) > 3
-      ){
-        camera.setError(`Celular girado demais (${deviceQuality.deviceRoll.toFixed(1)}°). Deixe o aparelho mais reto, dentro de ±3°.`);
-        return;
-      }
-
-      if(
-        liveFingerTiltDeg !== null &&
-        liveFingerTiltConfidence >= 45 &&
-        Math.abs(liveFingerTiltDeg) > 2
-      ){
-        camera.setError(`Dedo inclinado ${Math.abs(liveFingerTiltDeg).toFixed(1)}°. Alinhe o dedo até ficar próximo de 0°.`);
-        return;
-      }
-
-      if(
-        liveOpticalCenterConfidence >= 45 &&
-        liveOpticalCenterOffsetPx !== null &&
-        Math.abs(liveOpticalCenterOffsetPx) > 6
-      ){
-        camera.setError("Centralize o celular sobre o dedo antes de capturar.");
-        return;
-      }
-
-      if(
-        liveOpticalCenterConfidence >= 45 &&
-        liveCardFingerOffsetPx !== null &&
-        Math.abs(liveCardFingerOffsetPx) > 5
-      ){
-        camera.setError("Centralize o cartão sobre o dedo antes de capturar.");
-        return;
-      }
-    }
+    // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
+    // dedo e centro optico fiquem perfeitos no mesmo instante.
+    // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
     if(
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
@@ -410,21 +364,134 @@ export default function AppV2() {
     if (!video?.videoWidth) {
       return;
     }
-    const canvas = document.createElement("canvas");
-    canvas.width = 900;
-    canvas.height = 1200;
-    const targetRatio = canvas.width / canvas.height;
-    const sourceRatio = video.videoWidth / video.videoHeight;
-    let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
-    if (sourceRatio > targetRatio) {
-      sw = video.videoHeight * targetRatio;
-      sx = (video.videoWidth - sw) / 2;
-    } else {
-      sh = video.videoWidth / targetRatio;
-      sy = (video.videoHeight - sh) / 2;
+
+    const drawCurrentFrame = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 900;
+      canvas.height = 1200;
+      const targetRatio = canvas.width / canvas.height;
+      const sourceRatio = video.videoWidth / video.videoHeight;
+      let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+      if (sourceRatio > targetRatio) {
+        sw = video.videoHeight * targetRatio;
+        sx = (video.videoWidth - sw) / 2;
+      } else {
+        sh = video.videoWidth / targetRatio;
+        sy = (video.videoHeight - sh) / 2;
+      }
+      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    };
+
+    type BurstCandidate={
+      photo:string;
+      canvas:HTMLCanvasElement;
+      score:number;
+      guide:ReturnType<typeof analyzeLiveCardGuide>;
+    };
+
+    const scoreGuide = (guide:ReturnType<typeof analyzeLiveCardGuide>) => {
+      let score=0;
+
+      // Cartao/enquadramento.
+      score += guide.frameAligned ? 24 : 8;
+      score += guide.angle==="aligned" ? 16 : guide.angle==="unknown" ? 5 : 9;
+      score += Math.max(0,8-Math.abs(guide.skew)*120);
+
+      // Dedo: preferimos reto, mas nao transformamos isso em trava.
+      if(guide.fingerTiltDeg!==null && guide.fingerTiltConfidence>=45){
+        score += 14*Math.max(0,1-Math.abs(guide.fingerTiltDeg)/6);
+      }else{
+        score += 5;
+      }
+
+      // Centralizacao optica e cartao sobre o dedo.
+      if(guide.opticalCenterOffsetPx!==null && guide.opticalCenterConfidence>=45){
+        score += 14*Math.max(0,1-Math.abs(guide.opticalCenterOffsetPx)/18);
+      }else{
+        score += 5;
+      }
+      if(guide.cardFingerOffsetPx!==null && guide.opticalCenterConfidence>=45){
+        score += 10*Math.max(0,1-Math.abs(guide.cardFingerOffsetPx)/16);
+      }else{
+        score += 4;
+      }
+
+      // Orientacao do aparelho entra como peso, nunca como sincronizacao obrigatoria.
+      if(deviceQuality.stabilityScore!==null){
+        score += 8*Math.max(0,Math.min(1,(deviceQuality.stabilityScore-65)/35));
+      }
+      if(deviceQuality.devicePitch!==null){
+        score += 4*Math.max(0,1-Math.abs(deviceQuality.devicePitch)/12);
+      }
+      if(deviceQuality.deviceRoll!==null){
+        score += 4*Math.max(0,1-Math.abs(deviceQuality.deviceRoll)/8);
+      }
+
+      return score;
+    };
+
+    const useBurst =
+      singlePhotoTestMode &&
+      measurementMode==="finger" &&
+      !diameterPhotoTestMode;
+
+    let selectedCanvas:HTMLCanvasElement;
+    let capturedPhoto:string;
+
+    if(useBurst){
+      camera.setError("Selecionando automaticamente o melhor quadro...");
+      const candidates:BurstCandidate[]=[];
+
+      for(let index=0;index<8;index++){
+        const canvas=drawCurrentFrame();
+        const guide=analyzeLiveCardGuide(video);
+        candidates.push({
+          canvas,
+          photo:canvas.toDataURL("image/jpeg",0.94),
+          guide,
+          score:scoreGuide(guide),
+        });
+        if(index<7){
+          await new Promise<void>((resolve)=>window.setTimeout(resolve,65));
+        }
+      }
+
+      // Primeiro usamos a geometria ao vivo para separar os melhores.
+      // Entre os 3 melhores, a confianca real do detector do cartao decide.
+      const finalists=[...candidates].sort((a,b)=>b.score-a.score).slice(0,3);
+      let best:BurstCandidate|null=null;
+      let bestCalibrationConfidence=-1;
+
+      for(const candidate of finalists){
+        try{
+          const calibration=await calibratePhoto(candidate.photo);
+          const combined=candidate.score+calibration.confidence*0.35;
+          const bestCombined=best ? best.score+bestCalibrationConfidence*0.35 : -Infinity;
+          if(combined>bestCombined){
+            best={...candidate,score:candidate.score};
+            bestCalibrationConfidence=calibration.confidence;
+          }
+        }catch{
+          // Um frame ruim nao invalida a rajada inteira.
+        }
+      }
+
+      if(!best){
+        camera.setError("Não encontrei um quadro confiável nesta rajada. Mantenha cartão e dedo no enquadramento e tente novamente.");
+        return;
+      }
+
+      selectedCanvas=best.canvas;
+      capturedPhoto=best.photo;
+      camera.setError("");
+    }else{
+      selectedCanvas=drawCurrentFrame();
+      capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
     }
-    canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    const capturedPhoto = canvas.toDataURL("image/jpeg", 0.94);
+
+    // Alias mantido para o restante do fluxo existente.
+    const canvas=selectedCanvas;
     setPhoto(capturedPhoto);
 
     // Modo dedo em duas fotos:
@@ -2577,20 +2644,8 @@ export default function AppV2() {
     if(stability!==null && stability<75){
       reasons.push(`estabilidade ${stability} < 75`);
     }
-    if(
-      captureDeviceQuality?.devicePitch!==null &&
-      captureDeviceQuality?.devicePitch!==undefined &&
-      Math.abs(captureDeviceQuality.devicePitch)>5
-    ){
-      reasons.push(`pitch ${captureDeviceQuality.devicePitch.toFixed(1)}° > 5°`);
-    }
-    if(
-      captureDeviceQuality?.deviceRoll!==null &&
-      captureDeviceQuality?.deviceRoll!==undefined &&
-      Math.abs(captureDeviceQuality.deviceRoll)>3
-    ){
-      reasons.push(`roll ${captureDeviceQuality.deviceRoll.toFixed(1)}° > 3°`);
-    }
+    // Pitch e roll continuam no diagnostico e no score da rajada.
+    // Nao bloqueiam mais sozinhos o resultado comercial.
     if(preFormulaQuality.edgeScore<70){
       reasons.push(`bordas ${preFormulaQuality.edgeScore} < 70`);
     }
