@@ -3265,6 +3265,77 @@ export default function AppV2() {
     };
   })();
 
+  const commercialRingResolution = (() => {
+    const baseRing=result?.ringSize ?? null;
+    if(
+      measurementMode!=="finger" ||
+      baseRing===null ||
+      !contourConstantTest ||
+      widthSentToFormulaMm===null
+    ){
+      return {
+        ringSize:baseRing,
+        adjusted:false,
+        reason:"sem desempate",
+      };
+    }
+
+    const plateauRing=contourConstantTest.historicalRing;
+    const meanRing=contourConstantTest.overallMeanHistoricalRing;
+    const medianRing=contourConstantTest.overallMedianHistoricalRing;
+    const plateauMm=contourConstantTest.widthMm;
+    const deltaMm=plateauMm===null ? null : plateauMm-widthSentToFormulaMm;
+
+    const strongPlateau=
+      contourConstantTest.stable &&
+      contourConstantTest.supportPercent>=95 &&
+      (contourConstantTest.spreadPercent ?? 999)<=0.80 &&
+      deltaMm!==null &&
+      deltaMm>=0 &&
+      deltaMm<=0.20;
+
+    // Transicao 24 -> 25:
+    // nos testes reais, o dedo 25 pode cair ligeiramente abaixo na medida
+    // robusta enquanto o maior plato fisico continua classificado como 25.
+    // A promocao so ocorre com plato muito forte e proximo da medida principal.
+    if(
+      baseRing===24 &&
+      plateauRing===25 &&
+      strongPlateau
+    ){
+      return {
+        ringSize:25,
+        adjusted:true,
+        reason:`desempate 24→25 por platô físico estável (${plateauMm?.toFixed(2)} mm; Δ ${deltaMm?.toFixed(2)} mm)`,
+      };
+    }
+
+    // Transicao 29 -> 30:
+    // nao promove apenas pelo maior plato. Nos testes do dedo 29, o plato
+    // pode tocar 30 enquanto media e mediana permanecem 29.
+    if(
+      baseRing===29 &&
+      plateauRing===30 &&
+      strongPlateau &&
+      meanRing===30 &&
+      medianRing===30
+    ){
+      return {
+        ringSize:30,
+        adjusted:true,
+        reason:`desempate 29→30 confirmado por platô + média + mediana`,
+      };
+    }
+
+    return {
+      ringSize:baseRing,
+      adjusted:false,
+      reason:"curva histórica principal mantida",
+    };
+  })();
+
+  const commercialRingSize=commercialRingResolution.ringSize;
+
   const methodComparisonTest = (() => {
     if(
       measurementMode!=="finger" ||
@@ -4034,12 +4105,12 @@ export default function AppV2() {
                 </button>
               </>
             )}
-            {phase === "finger" && result && leftLocked && rightLocked && !tryOn && (
+            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
-                <span>JUSTO: {clamp(result.ringSize - 1, 1, 40)}</span>
+                <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
-                <strong>{result.ringSize}</strong>
-                <small>Conforto: {clamp(result.ringSize + 1, 1, 40)} · recomendado com folga</small>
+                <strong>{commercialRingSize}</strong>
+                <small>Conforto: {clamp(commercialRingSize + 1, 1, 40)} · recomendado com folga</small>
               </div>
             )}
             {phase === "finger" && pixelsPerMm && tryOn && (
@@ -4159,11 +4230,11 @@ export default function AppV2() {
               <span>Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais.</span>
             </div>
           )}
-          {phase === "finger" && result && leftLocked && rightLocked && (
+          {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
-              <span><strong>Número justo: {clamp(result.ringSize - 1, 1, 40)}</strong></span>
-              <strong>Número exato: {result.ringSize}</strong>
-              <span><strong>Número de conforto: {clamp(result.ringSize + 1, 1, 40)}</strong></span>
+              <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
+              <strong>Número exato: {commercialRingSize}</strong>
+              <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
             </div>
           )}
@@ -4292,7 +4363,7 @@ export default function AppV2() {
                       <span>Medida usada: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                       <span>Validação física: {experimentalOperationalTest.physicalMm===null?"n/d":experimentalOperationalTest.physicalMm.toFixed(2)+" mm"} · suporte {experimentalOperationalTest.physicalSupport}% · diferença {experimentalOperationalTest.physicalDeltaMm===null?"n/d":experimentalOperationalTest.physicalDeltaMm.toFixed(2)+" mm"}</span>
                       <span>Curva oficial: aro {experimentalOperationalTest.officialRing} · curva histórica: aro {experimentalOperationalTest.historicalRing}</span>
-                      <span>RESULTADO EXPERIMENTAL: {experimentalOperationalTest.accepted ? "ARO "+experimentalOperationalTest.proposedRing : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
+                      <span>RESULTADO DA VALIDAÇÃO: {experimentalOperationalTest.accepted ? "ARO "+(commercialRingSize ?? experimentalOperationalTest.proposedRing) : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
                       {!experimentalOperationalTest.accepted && <span>Motivos: {experimentalOperationalTest.reasons.join(" · ")}</span>}
                       <small>Validação privada da curva principal e da qualidade da captura.</small>
                     </div>
@@ -4300,6 +4371,8 @@ export default function AppV2() {
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
                     <>
                       <span>CLASSIFICADOR PRINCIPAL · HISTÓRICO: aro {result?.ringSize ?? "n/d"}</span>
+                      <span>ARO COMERCIAL APÓS DESEMPATE: {commercialRingSize ?? "n/d"}{commercialRingResolution.adjusted ? " · AJUSTADO" : ""}</span>
+                      <span>Regra de desempate: {commercialRingResolution.reason}</span>
                       <span>COMPARAÇÃO · CURVA ANTERIOR: aro {experimentalHighRingResult.exactRingSize} · alvo {experimentalHighRingResult.targetWidthMm.toFixed(3)} mm · faixa {Number.isFinite(experimentalHighRingResult.lowerBoundaryMm)?experimentalHighRingResult.lowerBoundaryMm.toFixed(3):"-∞"}–{Number.isFinite(experimentalHighRingResult.upperBoundaryMm)?experimentalHighRingResult.upperBoundaryMm.toFixed(3):"+∞"} mm</span>
                       <span>A curva anterior é apenas diagnóstico e não altera o aro comercial exibido.</span>
                     </>
@@ -4415,7 +4488,7 @@ export default function AppV2() {
                 {result && Number.isFinite(result.ringSize) && Number.isFinite(result.widthMm) && (
                   <g>
                     <circle
-                      cx={comparisonChart.x(clamp(result.ringSize,17,33))}
+                      cx={comparisonChart.x(clamp(commercialRingSize ?? result.ringSize,17,33))}
                       cy={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))}
                       r="5.2"
                       fill="none"
@@ -4423,7 +4496,7 @@ export default function AppV2() {
                       strokeWidth="1.8"
                     />
                     <text
-                      x={comparisonChart.x(clamp(result.ringSize,17,33))}
+                      x={comparisonChart.x(clamp(commercialRingSize ?? result.ringSize,17,33))}
                       y={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))-8}
                       textAnchor="middle"
                       fill="#ffffff"
@@ -4451,9 +4524,9 @@ export default function AppV2() {
             </span>
           </div>}
 
-          {tryOn && result && (
+          {tryOn && result && commercialRingSize!==null && (
             <TryOnPanel
-              ringSize={result.ringSize}
+              ringSize={commercialRingSize}
               ringMetal={ringMetal}
               ringBandWidth={ringBandWidth}
               ringStyle={ringStyle}
