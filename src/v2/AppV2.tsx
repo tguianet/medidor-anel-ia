@@ -10,7 +10,7 @@ import CameraScreen from "../components/CameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
-import { classifyFingerWidthMm } from "./ringClassifier";
+import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
@@ -2600,6 +2600,11 @@ export default function AppV2() {
     return computeRingResult(widthSentToFormulaMm, calibrationRules, true, calibrationConfidence);
   }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, captureQualityGate.accepted]);
 
+  const experimentalHighRingResult = useMemo(() => {
+    if(measurementMode!=="finger" || widthSentToFormulaMm===null) return null;
+    return classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
+  },[measurementMode,widthSentToFormulaMm]);
+
   const resetPhoto = () => {
     // Nova foto = nova medicao. Nao herda largura, regiao ou historico anterior.
     resetMeasurementSession();
@@ -3346,6 +3351,13 @@ export default function AppV2() {
                   <span>Homografia: somente diagnóstico/validação de perspectiva · não altera a medida</span>
                   <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm · somente diagnóstico</span>
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
+                  {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
+                    <>
+                      <span>CLASSIFICADOR OFICIAL: aro {result?.ringSize ?? "n/d"}</span>
+                      <span>TESTE HISTÓRICO +0,440 mm (29–33): aro {experimentalHighRingResult.exactRingSize} · alvo {experimentalHighRingResult.targetWidthMm.toFixed(3)} mm · faixa {Number.isFinite(experimentalHighRingResult.lowerBoundaryMm)?experimentalHighRingResult.lowerBoundaryMm.toFixed(3):"-∞"}–{Number.isFinite(experimentalHighRingResult.upperBoundaryMm)?experimentalHighRingResult.upperBoundaryMm.toFixed(3):"+∞"} mm</span>
+                      <span>Teste apenas diagnóstico · não altera o aro comercial exibido.</span>
+                    </>
+                  )}
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
                   {handLandmarkAnalysis?.error && <span>Landmark erro: {handLandmarkAnalysis.error}</span>}
                   {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · visíveis {handLandmarkAnalysis.measuredFinger.visibleLandmarks}/4 · {handLandmarkAnalysis.measuredFinger.partial ? "parcial" : "completo"} · cartão ocultando {handLandmarkAnalysis.measuredFinger.occludedByCard ? "sim" : "não"}</span>}
