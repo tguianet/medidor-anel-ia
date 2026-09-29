@@ -2678,9 +2678,9 @@ export default function AppV2() {
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(widthSentToFormulaMm, calibrationConfidence);
 
     if (measurementMode === "finger") {
-      // CURVA PRINCIPAL: historica validada nos testes de dedo.
-      // A curva anterior continua disponivel somente no diagnostico para comparacao.
-      const primary = classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
+      // CURVA PRINCIPAL: curva anterior/original.
+      // A curva historica fica apenas como comparacao ate nova validacao.
+      const primary = classifyFingerWidthMm(widthSentToFormulaMm);
       return {
         rawWidthMm: widthSentToFormulaMm,
         widthMm: widthSentToFormulaMm,
@@ -2704,8 +2704,8 @@ export default function AppV2() {
 
   const experimentalHighRingResult = useMemo(() => {
     if(measurementMode!=="finger" || widthSentToFormulaMm===null) return null;
-    // Comparacao privada: curva anterior que era usada como principal.
-    return classifyFingerWidthMm(widthSentToFormulaMm);
+    // Comparacao privada: curva historica.
+    return classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
   },[measurementMode,widthSentToFormulaMm]);
 
   const resetPhoto = () => {
@@ -3265,75 +3265,14 @@ export default function AppV2() {
     };
   })();
 
-  const commercialRingResolution = (() => {
-    const baseRing=result?.ringSize ?? null;
-    if(
-      measurementMode!=="finger" ||
-      baseRing===null ||
-      !contourConstantTest ||
-      widthSentToFormulaMm===null
-    ){
-      return {
-        ringSize:baseRing,
-        adjusted:false,
-        reason:"sem desempate",
-      };
-    }
-
-    const plateauRing=contourConstantTest.historicalRing;
-    const meanRing=contourConstantTest.overallMeanHistoricalRing;
-    const medianRing=contourConstantTest.overallMedianHistoricalRing;
-    const plateauMm=contourConstantTest.widthMm;
-    const deltaMm=plateauMm===null ? null : plateauMm-widthSentToFormulaMm;
-
-    const strongPlateau=
-      contourConstantTest.stable &&
-      contourConstantTest.supportPercent>=95 &&
-      (contourConstantTest.spreadPercent ?? 999)<=0.80 &&
-      deltaMm!==null &&
-      deltaMm>=0 &&
-      deltaMm<=0.20;
-
-    // Transicao 24 -> 25:
-    // nos testes reais, o dedo 25 pode cair ligeiramente abaixo na medida
-    // robusta enquanto o maior plato fisico continua classificado como 25.
-    // A promocao so ocorre com plato muito forte e proximo da medida principal.
-    if(
-      baseRing===24 &&
-      plateauRing===25 &&
-      strongPlateau
-    ){
-      return {
-        ringSize:25,
-        adjusted:true,
-        reason:`desempate 24→25 por platô físico estável (${plateauMm?.toFixed(2)} mm; Δ ${deltaMm?.toFixed(2)} mm)`,
-      };
-    }
-
-    // Transicao 29 -> 30:
-    // nao promove apenas pelo maior plato. Nos testes do dedo 29, o plato
-    // pode tocar 30 enquanto media e mediana permanecem 29.
-    if(
-      baseRing===29 &&
-      plateauRing===30 &&
-      strongPlateau &&
-      meanRing===30 &&
-      medianRing===30
-    ){
-      return {
-        ringSize:30,
-        adjusted:true,
-        reason:`desempate 29→30 confirmado por platô + média + mediana`,
-      };
-    }
-
-    return {
-      ringSize:baseRing,
-      adjusted:false,
-      reason:"curva histórica principal mantida",
-    };
-  })();
-
+  // Desempates experimentais desativados.
+  // O aro comercial deve refletir somente a curva principal enquanto
+  // comparamos a curva historica em diagnostico.
+  const commercialRingResolution = {
+    ringSize:result?.ringSize ?? null,
+    adjusted:false,
+    reason:"desempate desativado · curva principal direta",
+  };
   const commercialRingSize=commercialRingResolution.ringSize;
 
   const methodComparisonTest = (() => {
@@ -4358,11 +4297,11 @@ export default function AppV2() {
                           : "rgba(42,18,18,.58)"
                       }}
                     >
-                      <strong>VALIDAÇÃO · CURVA PRINCIPAL HISTÓRICA</strong>
+                      <strong>VALIDAÇÃO · CURVA PRINCIPAL</strong>
                       <span>Gate geométrico: {experimentalOperationalTest.accepted ? "✓ ACEITA" : "✕ BLOQUEIA"}</span>
                       <span>Medida usada: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                       <span>Validação física: {experimentalOperationalTest.physicalMm===null?"n/d":experimentalOperationalTest.physicalMm.toFixed(2)+" mm"} · suporte {experimentalOperationalTest.physicalSupport}% · diferença {experimentalOperationalTest.physicalDeltaMm===null?"n/d":experimentalOperationalTest.physicalDeltaMm.toFixed(2)+" mm"}</span>
-                      <span>Curva oficial: aro {experimentalOperationalTest.officialRing} · curva histórica: aro {experimentalOperationalTest.historicalRing}</span>
+                      <span>Curva principal: aro {experimentalOperationalTest.officialRing} · comparação histórica: aro {experimentalOperationalTest.historicalRing}</span>
                       <span>RESULTADO DA VALIDAÇÃO: {experimentalOperationalTest.accepted ? "ARO "+(commercialRingSize ?? experimentalOperationalTest.proposedRing) : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
                       {!experimentalOperationalTest.accepted && <span>Motivos: {experimentalOperationalTest.reasons.join(" · ")}</span>}
                       <small>Validação privada da curva principal e da qualidade da captura.</small>
@@ -4370,11 +4309,11 @@ export default function AppV2() {
                   )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
                     <>
-                      <span>CLASSIFICADOR PRINCIPAL · HISTÓRICO: aro {result?.ringSize ?? "n/d"}</span>
-                      <span>ARO COMERCIAL APÓS DESEMPATE: {commercialRingSize ?? "n/d"}{commercialRingResolution.adjusted ? " · AJUSTADO" : ""}</span>
-                      <span>Regra de desempate: {commercialRingResolution.reason}</span>
-                      <span>COMPARAÇÃO · CURVA ANTERIOR: aro {experimentalHighRingResult.exactRingSize} · alvo {experimentalHighRingResult.targetWidthMm.toFixed(3)} mm · faixa {Number.isFinite(experimentalHighRingResult.lowerBoundaryMm)?experimentalHighRingResult.lowerBoundaryMm.toFixed(3):"-∞"}–{Number.isFinite(experimentalHighRingResult.upperBoundaryMm)?experimentalHighRingResult.upperBoundaryMm.toFixed(3):"+∞"} mm</span>
-                      <span>A curva anterior é apenas diagnóstico e não altera o aro comercial exibido.</span>
+                      <span>CLASSIFICADOR PRINCIPAL · CURVA ANTERIOR: aro {result?.ringSize ?? "n/d"}</span>
+                      <span>ARO COMERCIAL: {commercialRingSize ?? "n/d"}</span>
+                      <span>Desempate: DESATIVADO</span>
+                      <span>COMPARAÇÃO · CURVA HISTÓRICA: aro {experimentalHighRingResult.exactRingSize} · alvo {experimentalHighRingResult.targetWidthMm.toFixed(3)} mm · faixa {Number.isFinite(experimentalHighRingResult.lowerBoundaryMm)?experimentalHighRingResult.lowerBoundaryMm.toFixed(3):"-∞"}–{Number.isFinite(experimentalHighRingResult.upperBoundaryMm)?experimentalHighRingResult.upperBoundaryMm.toFixed(3):"+∞"} mm</span>
+                      <span>A curva histórica é apenas diagnóstico e não altera o aro comercial exibido.</span>
                     </>
                   )}
                   <span>Landmarks da mão: {handLandmarkAnalysis?.detected ? "detectados" : handLandmarkAnalysis?.available===false ? "indisponíveis" : "aguardando"}{handLandmarkAnalysis?.detected ? ` · score ${handLandmarkAnalysis.score}` : ""}</span>
