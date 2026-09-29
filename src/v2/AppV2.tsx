@@ -18,6 +18,7 @@ import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks
 import { analyzeFingerContourAnatomy } from "./fingerContourAnatomy";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
+import LightCardDetectorTest from "./LightCardDetectorTest";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
@@ -3088,7 +3089,10 @@ export default function AppV2() {
           </div>
 
           {debugMode && phase === "card" && measurementMode === "finger" && photo && (
-            <OpenCvCardTest photo={photo} />
+            <>
+              <LightCardDetectorTest photo={photo} />
+              <OpenCvCardTest photo={photo} />
+            </>
           )}
 
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
