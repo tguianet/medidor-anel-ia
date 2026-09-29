@@ -2929,6 +2929,66 @@ export default function AppV2() {
     };
   })();
 
+  const methodComparisonTest = (() => {
+    if(
+      measurementMode!=="finger" ||
+      widthSentToFormulaMm===null ||
+      !pixelsPerMm ||
+      pixelsPerMm<=0
+    ){
+      return null;
+    }
+
+    const classifyBoth=(mm:number)=>{
+      const official=classifyFingerWidthMm(mm);
+      const historical=classifyFingerWidthMmExperimentalHigh(mm);
+      return {
+        officialRing:official.exactRingSize,
+        historicalRing:historical.exactRingSize,
+      };
+    };
+
+    // Método A: exatamente a medida que hoje vai para a fórmula.
+    const currentMm=widthSentToFormulaMm;
+    const currentPx=currentMm*pixelsPerMm;
+    const currentClass=classifyBoth(currentMm);
+
+    // Método B: reproduz o antigo refino de 2,5 px para dentro em cada lado.
+    // Total removido da largura = 5 px, usando a MESMA foto e a MESMA escala.
+    const insetPx=Math.max(0,currentPx-5);
+    const insetMm=insetPx/pixelsPerMm;
+    const insetClass=classifyBoth(insetMm);
+
+    // Método C: perfil pele <-> fundo validado.
+    const physicalPx=physicalEdgeProfileTest?.widthPx ?? null;
+    const physicalMm=physicalEdgeProfileTest?.widthMm ?? null;
+    const physicalClass=
+      physicalMm!==null && Number.isFinite(physicalMm) && physicalMm>0
+        ? classifyBoth(physicalMm)
+        : null;
+
+    return {
+      current:{
+        px:currentPx,
+        mm:currentMm,
+        ...currentClass,
+      },
+      inset:{
+        px:insetPx,
+        mm:insetMm,
+        ...insetClass,
+      },
+      physical:physicalPx!==null && physicalMm!==null && physicalClass
+        ? {
+            px:physicalPx,
+            mm:physicalMm,
+            ...physicalClass,
+            support:physicalEdgeProfileTest?.validPairPercent ?? 0,
+          }
+        : null,
+    };
+  })();
+
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
 
@@ -3653,6 +3713,25 @@ export default function AppV2() {
                       <span>Diferença borda física→oficial: {physicalEdgeProfileTest.widthMm===null || widthSentToFormulaMm===null ? "n/d" : `${physicalEdgeProfileTest.widthMm-widthSentToFormulaMm>=0?"+":""}${(physicalEdgeProfileTest.widthMm-widthSentToFormulaMm).toFixed(2)} mm`}</span>
                       <span>Teste de perfil transversal · não altera o aro comercial.</span>
                     </>
+                  )}
+                  {methodComparisonTest && (
+                    <div
+                      style={{
+                        marginTop:10,
+                        padding:"10px 12px",
+                        border:"1px solid rgba(255,216,107,.45)",
+                        borderRadius:10,
+                        display:"grid",
+                        gap:6,
+                        background:"rgba(20,20,20,.55)"
+                      }}
+                    >
+                      <strong>COMPARAÇÃO DE MÉTODOS · MESMA FOTO</strong>
+                      <span>ATUAL: {methodComparisonTest.current.px.toFixed(1)} px · {methodComparisonTest.current.mm.toFixed(2)} mm · curva atual aro {methodComparisonTest.current.officialRing} · histórica aro {methodComparisonTest.current.historicalRing}</span>
+                      <span>INSET 2,5 px/lado: {methodComparisonTest.inset.px.toFixed(1)} px · {methodComparisonTest.inset.mm.toFixed(2)} mm · curva atual aro {methodComparisonTest.inset.officialRing} · histórica aro {methodComparisonTest.inset.historicalRing}</span>
+                      <span>BORDA FÍSICA: {methodComparisonTest.physical ? `${methodComparisonTest.physical.px.toFixed(1)} px · ${methodComparisonTest.physical.mm.toFixed(2)} mm · curva atual aro ${methodComparisonTest.physical.officialRing} · histórica aro ${methodComparisonTest.physical.historicalRing} · suporte ${methodComparisonTest.physical.support}%` : "n/d"}</span>
+                      <small>Diagnóstico somente · nenhum destes testes altera o aro comercial.</small>
+                    </div>
                   )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
                     <>
