@@ -166,6 +166,8 @@ export default function AppV2() {
   });
   const [cardReady, setCardReady] = useState(false);
   const [cameraAngleGuide, setCameraAngleGuide] = useState<"forward" | "backward" | "aligned" | "unknown">("unknown");
+  const [liveFingerTiltDeg, setLiveFingerTiltDeg] = useState<number | null>(null);
+  const [liveFingerTiltConfidence, setLiveFingerTiltConfidence] = useState(0);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
@@ -228,6 +230,8 @@ export default function AppV2() {
     if (stage !== "camera" || camera.cameraOpening) {
       setCardReady(false);
       setCameraAngleGuide("unknown");
+      setLiveFingerTiltDeg(null);
+      setLiveFingerTiltConfidence(0);
       return;
     }
     let running = false;
@@ -238,6 +242,16 @@ export default function AppV2() {
         const liveGuide = analyzeLiveCardGuide(camera.videoRef.current);
         setCardReady(liveGuide.ready);
         setCameraAngleGuide(liveGuide.angle);
+        setLiveFingerTiltConfidence(liveGuide.fingerTiltConfidence);
+        if(liveGuide.fingerTiltDeg===null){
+          setLiveFingerTiltDeg(null);
+        }else{
+          setLiveFingerTiltDeg(current=>
+            current===null
+              ? liveGuide.fingerTiltDeg
+              : current*0.65+liveGuide.fingerTiltDeg!*0.35
+          );
+        }
       } finally { running = false; }
     };
     checkAlignment();
@@ -270,6 +284,8 @@ export default function AppV2() {
     setRightManualRefined(false);
     setCardReady(false);
     setCameraAngleGuide("unknown");
+    setLiveFingerTiltDeg(null);
+    setLiveFingerTiltConfidence(0);
     setStage("camera");
     await camera.startCameraStream();
   };
@@ -2983,6 +2999,8 @@ export default function AppV2() {
           cardReady={cardReady}
           calibrationStep={fingerCardCalibrationStep}
           cameraAngleGuide={cameraAngleGuide}
+          liveFingerTiltDeg={measurementMode==="finger" ? liveFingerTiltDeg : null}
+          liveFingerTiltConfidence={measurementMode==="finger" ? liveFingerTiltConfidence : 0}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
