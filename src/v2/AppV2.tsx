@@ -2667,6 +2667,117 @@ export default function AppV2() {
           : ringGuideY;
   const fingerMagnetSamples = phase==="finger" && leftLocked && rightLocked ? fingerBandSamplesPx(auditGuideY,2.5) : null;
 
+  const robustFingerLineTest = (() => {
+    if(!fingerMagnetSamples?.length || fingerMagnetSamples.length<12 || !photoPixelsRef.current || !pixelsPerMm || pixelsPerMm<=0){
+      return null;
+    }
+
+    type FitPoint={x:number;y:number};
+    type RobustFit={
+      slope:number;
+      intercept:number;
+      inliers:FitPoint[];
+      residualMad:number;
+    };
+
+    const medianNumber=(values:number[])=>{
+      if(!values.length) return 0;
+      const sorted=[...values].sort((a,b)=>a-b);
+      const mid=Math.floor(sorted.length/2);
+      return sorted.length%2 ? sorted[mid] : (sorted[mid-1]+sorted[mid])/2;
+    };
+
+    const fitTheilSen=(points:FitPoint[]):RobustFit|null=>{
+      if(points.length<6) return null;
+      const slopes:number[]=[];
+      for(let i=0;i<points.length;i++){
+        for(let j=i+1;j<points.length;j++){
+          const dy=points[j].y-points[i].y;
+          if(Math.abs(dy)<1e-6) continue;
+          const slope=(points[j].x-points[i].x)/dy;
+          if(Number.isFinite(slope)) slopes.push(slope);
+        }
+      }
+      if(!slopes.length) return null;
+
+      const slope=medianNumber(slopes);
+      const intercept=medianNumber(points.map(p=>p.x-slope*p.y));
+      const residuals=points.map(p=>Math.abs(p.x-(slope*p.y+intercept)));
+      const residualMad=medianNumber(residuals);
+      const threshold=Math.max(1.25,residualMad*3.0);
+      const inliers=points.filter((p,index)=>residuals[index]<=threshold);
+
+      if(inliers.length<5) return null;
+
+      // Segundo passe: refaz o Theil-Sen apenas com os pontos coerentes.
+      const refinedSlopes:number[]=[];
+      for(let i=0;i<inliers.length;i++){
+        for(let j=i+1;j<inliers.length;j++){
+          const dy=inliers[j].y-inliers[i].y;
+          if(Math.abs(dy)<1e-6) continue;
+          refinedSlopes.push((inliers[j].x-inliers[i].x)/dy);
+        }
+      }
+      const refinedSlope=refinedSlopes.length ? medianNumber(refinedSlopes) : slope;
+      const refinedIntercept=medianNumber(inliers.map(p=>p.x-refinedSlope*p.y));
+      const refinedResiduals=inliers.map(p=>Math.abs(p.x-(refinedSlope*p.y+refinedIntercept)));
+
+      return {
+        slope:refinedSlope,
+        intercept:refinedIntercept,
+        inliers,
+        residualMad:medianNumber(refinedResiduals),
+      };
+    };
+
+    const leftPoints:FitPoint[]=fingerMagnetSamples.map(sample=>({x:sample.left,y:sample.y}));
+    const rightPoints:FitPoint[]=fingerMagnetSamples.map(sample=>({x:sample.right,y:sample.rightY}));
+    const leftFit=fitTheilSen(leftPoints);
+    const rightFit=fitTheilSen(rightPoints);
+    if(!leftFit || !rightFit) return null;
+
+    const source=photoPixelsRef.current;
+    const yValues=[
+      ...leftFit.inliers.map(p=>p.y),
+      ...rightFit.inliers.map(p=>p.y),
+    ];
+    const yMin=Math.max(0,Math.min(...yValues));
+    const yMax=Math.min(source.height,Math.max(...yValues));
+    const yCenter=medianNumber(yValues);
+
+    const xLeft=leftFit.slope*yCenter+leftFit.intercept;
+    const xRight=rightFit.slope*yCenter+rightFit.intercept;
+    if(!Number.isFinite(xLeft)||!Number.isFinite(xRight)||xRight<=xLeft) return null;
+
+    // As duas laterais representam o formato estrutural local do dedo.
+    // Usamos a direção média das retas para medir a separação perpendicular.
+    const averageSlope=(leftFit.slope+rightFit.slope)/2;
+    const widthPx=Math.abs(xRight-xLeft)/Math.sqrt(1+averageSlope*averageSlope);
+    const widthMm=widthPx/pixelsPerMm;
+
+    const leftAt=(y:number)=>leftFit.slope*y+leftFit.intercept;
+    const rightAt=(y:number)=>rightFit.slope*y+rightFit.intercept;
+
+    return {
+      widthPx,
+      widthMm,
+      leftFit,
+      rightFit,
+      yMin,
+      yMax,
+      leftTopPercent:leftAt(yMin)/source.width*100,
+      leftBottomPercent:leftAt(yMax)/source.width*100,
+      rightTopPercent:rightAt(yMin)/source.width*100,
+      rightBottomPercent:rightAt(yMax)/source.width*100,
+      yTopPercent:yMin/source.height*100,
+      yBottomPercent:yMax/source.height*100,
+      inlierPercent:Math.round(
+        ((leftFit.inliers.length+rightFit.inliers.length)/(leftPoints.length+rightPoints.length))*100
+      ),
+      averageResidualPx:(leftFit.residualMad+rightFit.residualMad)/2,
+    };
+  })();
+
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
 
@@ -3086,6 +3197,28 @@ export default function AppV2() {
                       strokeWidth="0.48"
                       vectorEffect="non-scaling-stroke"
                     />
+                    {debugMode && robustFingerLineTest && (
+                      <>
+                        <line
+                          x1={robustFingerLineTest.leftTopPercent}
+                          y1={robustFingerLineTest.yTopPercent}
+                          x2={robustFingerLineTest.leftBottomPercent}
+                          y2={robustFingerLineTest.yBottomPercent}
+                          stroke="#ffd86b"
+                          strokeWidth="1.05"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={robustFingerLineTest.rightTopPercent}
+                          y1={robustFingerLineTest.yTopPercent}
+                          x2={robustFingerLineTest.rightBottomPercent}
+                          y2={robustFingerLineTest.yBottomPercent}
+                          stroke="#ffd86b"
+                          strokeWidth="1.05"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </>
+                    )}
                   </svg>
                 )}
                 <button
@@ -3351,6 +3484,14 @@ export default function AppV2() {
                   <span>Homografia: somente diagnóstico/validação de perspectiva · não altera a medida</span>
                   <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm · somente diagnóstico</span>
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
+                  {robustFingerLineTest && (
+                    <>
+                      <span>TESTE RETAS ROBUSTAS: {robustFingerLineTest.widthMm.toFixed(2)} mm · {robustFingerLineTest.widthPx.toFixed(1)} px</span>
+                      <span>Pontos aceitos nas retas: {robustFingerLineTest.inlierPercent}% · resíduo médio {robustFingerLineTest.averageResidualPx.toFixed(2)} px</span>
+                      <span>Diferença retas→oficial: {widthSentToFormulaMm===null ? "n/d" : `${robustFingerLineTest.widthMm-widthSentToFormulaMm>=0?"+":""}${(robustFingerLineTest.widthMm-widthSentToFormulaMm).toFixed(2)} mm`}</span>
+                      <span>Linhas amarelas finas = laterais estruturais robustas · teste somente diagnóstico.</span>
+                    </>
+                  )}
                   {measurementMode==="finger" && widthSentToFormulaMm!==null && experimentalHighRingResult && (
                     <>
                       <span>CLASSIFICADOR OFICIAL: aro {result?.ringSize ?? "n/d"}</span>
