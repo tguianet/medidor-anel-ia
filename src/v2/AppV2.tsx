@@ -3152,15 +3152,32 @@ export default function AppV2() {
       }
     }
 
-    const validCount=snapped.filter(item=>item.valid).length;
+    const validWidthsMm=snapped
+      .filter(item=>item.valid && item.widthMm!==null)
+      .map(item=>item.widthMm as number);
+
+    const validCount=validWidthsMm.length;
     const supportPercent=Math.round(validCount/snapped.length*100);
     const plateauIndexes=new Set<number>();
     if(best){
       for(let i=best.start;i<=best.end;i++) plateauIndexes.add(i);
     }
 
-    const classification=best
+    const overallMeanMm=validWidthsMm.length
+      ? validWidthsMm.reduce((sum,value)=>sum+value,0)/validWidthsMm.length
+      : null;
+    const overallMedianMm=validWidthsMm.length
+      ? median(validWidthsMm)
+      : null;
+
+    const plateauClassification=best
       ? classifyFingerWidthMmExperimentalHigh(best.medianMm)
+      : null;
+    const meanClassification=overallMeanMm!==null
+      ? classifyFingerWidthMmExperimentalHigh(overallMeanMm)
+      : null;
+    const medianClassification=overallMedianMm!==null
+      ? classifyFingerWidthMmExperimentalHigh(overallMedianMm)
       : null;
 
     return {
@@ -3176,7 +3193,11 @@ export default function AppV2() {
       plateauValuesMm:best?.values ?? [],
       widthMm:best?.medianMm ?? null,
       spreadPercent:best?.spreadPercent ?? null,
-      historicalRing:classification?.exactRingSize ?? null,
+      historicalRing:plateauClassification?.exactRingSize ?? null,
+      overallMeanMm,
+      overallMedianMm,
+      overallMeanHistoricalRing:meanClassification?.exactRingSize ?? null,
+      overallMedianHistoricalRing:medianClassification?.exactRingSize ?? null,
       stable:!!best && best.spreadPercent<=1.35 && supportPercent>=80,
     };
   })();
@@ -4139,7 +4160,9 @@ export default function AppV2() {
                       <span>Constante encontrada: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · {contourConstantTest.stable ? "PLATÔ ESTÁVEL" : "SEM PLATÔ FORTE"}</span>
                       {contourConstantTest.plateauStart>=0 && <span>Platô: pontos {contourConstantTest.plateauStart+1}–{contourConstantTest.plateauEnd+1} · variação {contourConstantTest.spreadPercent?.toFixed(2)}%</span>}
                       {!!contourConstantTest.plateauValuesMm.length && <span>Medidas do platô: {contourConstantTest.plateauValuesMm.map(value=>value.toFixed(2)).join(" / ")} mm</span>}
-                      <span>Curva histórica: {contourConstantTest.historicalRing===null ? "n/d" : "aro "+contourConstantTest.historicalRing}</span>
+                      <span>PLATÔ MÁXIMO: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · histórica {contourConstantTest.historicalRing===null ? "n/d" : "aro "+contourConstantTest.historicalRing}</span>
+                      <span>MÉDIA DOS SNAPS: {contourConstantTest.overallMeanMm===null ? "n/d" : contourConstantTest.overallMeanMm.toFixed(2)+" mm"} · histórica {contourConstantTest.overallMeanHistoricalRing===null ? "n/d" : "aro "+contourConstantTest.overallMeanHistoricalRing}</span>
+                      <span>MEDIANA DOS SNAPS: {contourConstantTest.overallMedianMm===null ? "n/d" : contourConstantTest.overallMedianMm.toFixed(2)+" mm"} · histórica {contourConstantTest.overallMedianHistoricalRing===null ? "n/d" : "aro "+contourConstantTest.overallMedianHistoricalRing}</span>
                       <small>Azul = snap físico válido · dourado = pontos da constante escolhida. Teste apenas diagnóstico.</small>
                     </div>
                   )}
