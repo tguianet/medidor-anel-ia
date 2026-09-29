@@ -168,6 +168,9 @@ export default function AppV2() {
   const [cameraAngleGuide, setCameraAngleGuide] = useState<"forward" | "backward" | "aligned" | "unknown">("unknown");
   const [liveFingerTiltDeg, setLiveFingerTiltDeg] = useState<number | null>(null);
   const [liveFingerTiltConfidence, setLiveFingerTiltConfidence] = useState(0);
+  const [liveOpticalCenterOffsetPx, setLiveOpticalCenterOffsetPx] = useState<number | null>(null);
+  const [liveCardFingerOffsetPx, setLiveCardFingerOffsetPx] = useState<number | null>(null);
+  const [liveOpticalCenterConfidence, setLiveOpticalCenterConfidence] = useState(0);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
@@ -232,6 +235,9 @@ export default function AppV2() {
       setCameraAngleGuide("unknown");
       setLiveFingerTiltDeg(null);
       setLiveFingerTiltConfidence(0);
+      setLiveOpticalCenterOffsetPx(null);
+      setLiveCardFingerOffsetPx(null);
+      setLiveOpticalCenterConfidence(0);
       return;
     }
     let running = false;
@@ -243,6 +249,21 @@ export default function AppV2() {
         setCardReady(liveGuide.ready);
         setCameraAngleGuide(liveGuide.angle);
         setLiveFingerTiltConfidence(liveGuide.fingerTiltConfidence);
+        setLiveOpticalCenterConfidence(liveGuide.opticalCenterConfidence);
+        setLiveOpticalCenterOffsetPx(current=>
+          liveGuide.opticalCenterOffsetPx===null
+            ? null
+            : current===null
+              ? liveGuide.opticalCenterOffsetPx
+              : current*0.65+liveGuide.opticalCenterOffsetPx*0.35
+        );
+        setLiveCardFingerOffsetPx(current=>
+          liveGuide.cardFingerOffsetPx===null
+            ? null
+            : current===null
+              ? liveGuide.cardFingerOffsetPx
+              : current*0.65+liveGuide.cardFingerOffsetPx*0.35
+        );
         if(liveGuide.fingerTiltDeg===null){
           setLiveFingerTiltDeg(null);
         }else{
@@ -286,6 +307,9 @@ export default function AppV2() {
     setCameraAngleGuide("unknown");
     setLiveFingerTiltDeg(null);
     setLiveFingerTiltConfidence(0);
+    setLiveOpticalCenterOffsetPx(null);
+    setLiveCardFingerOffsetPx(null);
+    setLiveOpticalCenterConfidence(0);
     setStage("camera");
     await camera.startCameraStream();
   };
@@ -3311,6 +3335,9 @@ export default function AppV2() {
           cameraAngleGuide={cameraAngleGuide}
           liveFingerTiltDeg={measurementMode==="finger" ? liveFingerTiltDeg : null}
           liveFingerTiltConfidence={measurementMode==="finger" ? liveFingerTiltConfidence : 0}
+          liveOpticalCenterOffsetPx={measurementMode==="finger" ? liveOpticalCenterOffsetPx : null}
+          liveCardFingerOffsetPx={measurementMode==="finger" ? liveCardFingerOffsetPx : null}
+          liveOpticalCenterConfidence={measurementMode==="finger" ? liveOpticalCenterConfidence : 0}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
