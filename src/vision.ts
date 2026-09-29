@@ -388,37 +388,70 @@ const refineCardBoxByKnownRatio = (
 
   const cardW=Math.max(20,rightX-leftX+1);
 
-  // 2) Refina a base real.
-  const bottomSearch=Math.max(5,Math.round(seedH*0.10));
-  const x0=Math.max(2,Math.round(leftX+cardW*0.08));
-  const x1=Math.min(width-3,Math.round(rightX-cardW*0.08));
-
-  let bottomY=seed.maxY, bottomBest=-Infinity;
-  for(let y=Math.max(2,seed.maxY-bottomSearch);y<=Math.min(height-3,seed.maxY+bottomSearch);y++){
-    const score=horizontalScore(y,x0,x1)-Math.abs(y-seed.maxY)*0.12;
-    if(score>bottomBest){bottomBest=score;bottomY=y;}
-  }
-
-  // 3) A proporção física do cartão define onde o topo DEVERIA estar.
-  // Isso evita que uma régua, anelímetro ou outro objeto conectado acima
-  // aumente artificialmente a caixa.
+  // 2) Procura TOPO + BASE como um par físico.
+  // Não usamos mais seed.maxY como âncora, porque dedos, régua ou outros
+  // objetos podem estar conectados ao componente de borda e puxar a caixa.
+  const x0=Math.max(2,Math.round(leftX+cardW*0.07));
+  const x1=Math.min(width-3,Math.round(rightX-cardW*0.07));
   const expectedH=cardW/1.586;
-  const expectedTop=bottomY-expectedH;
-  const topSearch=Math.max(6,Math.round(expectedH*0.14));
 
-  let topY=Math.round(expectedTop), topBest=-Infinity;
-  for(let y=Math.max(2,Math.round(expectedTop-topSearch));y<=Math.min(height-3,Math.round(expectedTop+topSearch));y++){
-    const edge=horizontalScore(y,x0,x1);
-    const distancePenalty=Math.abs(y-expectedTop)*0.18;
-    const score=edge-distancePenalty;
-    if(score>topBest){topBest=score;topY=y;}
+  let topY=Math.max(2,Math.round(seed.minY));
+  let bottomY=Math.min(height-3,Math.round(topY+expectedH));
+  let pairBest=-Infinity;
+
+  // Permite pequena perspectiva vertical: altura aparente entre 92% e 108%
+  // do valor previsto pela proporção física do cartão.
+  for(let factor=0.92;factor<=1.081;factor+=0.02){
+    const candidateH=expectedH*factor;
+    const maxTop=Math.min(height-3-Math.round(candidateH),Math.round(height*0.78));
+
+    for(let yTop=2;yTop<=maxTop;yTop+=1){
+      const yBottom=Math.round(yTop+candidateH);
+      if(yBottom>=height-2) continue;
+
+      const topEdge=horizontalScore(yTop,x0,x1);
+      const bottomEdge=horizontalScore(yBottom,x0,x1);
+
+      // As laterais também precisam existir ENTRE o topo e a base candidatos.
+      // Isso derruba linhas internas de texto, juntas dos dedos e objetos
+      // estreitos que não formam um cartão completo.
+      const leftSide=verticalScore(leftX,yTop+3,yBottom-3);
+      const rightSide=verticalScore(rightX,yTop+3,yBottom-3);
+
+      const edgeMin=Math.min(topEdge,bottomEdge);
+      const sideMin=Math.min(leftSide,rightSide);
+
+      // Prefere pares com quatro bordas contínuas e com centro próximo da
+      // região do candidato original, mas a proximidade tem peso pequeno.
+      const candidateCenter=(yTop+yBottom)/2;
+      const seedCenter=(seed.minY+seed.maxY)/2;
+      const centerPenalty=Math.abs(candidateCenter-seedCenter)*0.025;
+
+      const score=
+        topEdge*0.30+
+        bottomEdge*0.30+
+        leftSide*0.20+
+        rightSide*0.20+
+        edgeMin*0.18+
+        sideMin*0.12-
+        centerPenalty;
+
+      if(score>pairBest){
+        pairBest=score;
+        topY=yTop;
+        bottomY=yBottom;
+      }
+    }
   }
 
-  // Se o topo encontrado deixar uma proporção absurda, volta ao topo previsto.
+  // Segurança final: o par aceito precisa continuar compatível com o formato
+  // físico do cartão. Se algo extremo escapar, força a altura teórica.
   const refinedH=Math.max(1,bottomY-topY+1);
   const refinedRatio=cardW/refinedH;
-  if(refinedRatio<1.40 || refinedRatio>1.78){
-    topY=Math.max(0,Math.round(expectedTop));
+  if(refinedRatio<1.42 || refinedRatio>1.76){
+    const center=(topY+bottomY)/2;
+    topY=Math.max(0,Math.round(center-expectedH/2));
+    bottomY=Math.min(height-1,Math.round(center+expectedH/2));
   }
 
   return {
