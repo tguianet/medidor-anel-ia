@@ -18,6 +18,9 @@ export type LiveCardGuideAnalysis = {
   opticalCenterOffsetPx: number | null;
   cardFingerOffsetPx: number | null;
   opticalCenterConfidence: number;
+  cardWidthPx: number | null;
+  fingerWidthPx: number | null;
+  fingerCardRatio: number | null;
 };
 
 export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnalysis => {
@@ -31,6 +34,9 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     opticalCenterOffsetPx: null,
     cardFingerOffsetPx: null,
     opticalCenterConfidence: 0,
+    cardWidthPx: null,
+    fingerWidthPx: null,
+    fingerCardRatio: null,
   };
   if (!video.videoWidth || !video.videoHeight) return fallback;
 
@@ -140,12 +146,14 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
   const edgeReliable = Math.min(lt.score, rt.score, lb.score, rb.score) >= 7;
   let angle: LiveCardAngleGuide = "unknown";
   let skew = 0;
+  let cardWidthPx:number|null=null;
 
   if (edgeReliable) {
     const topWidth = rt.x - lt.x;
     const bottomWidth = rb.x - lb.x;
     const averageWidth = (topWidth + bottomWidth) / 2;
     if (averageWidth > 80) {
+      cardWidthPx=averageWidth;
       skew = (topWidth - bottomWidth) / averageWidth;
 
       // 2,2% de diferença entre topo/base já é visível na calibração final.
@@ -159,7 +167,7 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
   // Guia leve de inclinacao do dedo em tempo real.
   // Usa a regiao logo abaixo da base do cartao e acompanha o centro do dedo
   // em varios cortes. Isto serve apenas para orientar o usuario ANTES da foto.
-  const fingerCenters:{x:number;y:number;score:number}[]=[];
+  const fingerCenters:{x:number;y:number;score:number;width:number}[]=[];
   const fingerCenterX=canvas.width/2;
   const fingerTop=Math.min(canvas.height-40,bottom+10);
   const fingerBottom=Math.min(canvas.height-18,bottom+canvas.height*0.30);
@@ -202,6 +210,7 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
         x:(bestPair.left+bestPair.right)/2,
         y,
         score:bestPair.score,
+        width:bestPair.right-bestPair.left,
       });
     }
   }
@@ -211,6 +220,8 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
   let opticalCenterOffsetPx:number|null=null;
   let cardFingerOffsetPx:number|null=null;
   let opticalCenterConfidence=0;
+  let fingerWidthPx:number|null=null;
+  let fingerCardRatio:number|null=null;
 
   if(fingerCenters.length>=6){
     const meanY=fingerCenters.reduce((s,p)=>s+p.y,0)/fingerCenters.length;
@@ -230,6 +241,18 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     const coverage=Math.min(1,fingerCenters.length/11);
     const residualQuality=Math.max(0,1-meanResidual/8);
     fingerTiltConfidence=Math.round(100*(coverage*0.55+residualQuality*0.45));
+
+    // Largura robusta do dedo no frame ao vivo. Usamos a mediana dos
+    // cortes válidos para reduzir textura/sombra local. A razão dedo/cartão
+    // permite comparar frames da mesma rajada sem depender da distância.
+    const widths=fingerCenters.map(p=>p.width).sort((a,b)=>a-b);
+    const mid=Math.floor(widths.length/2);
+    fingerWidthPx=widths.length%2
+      ? widths[mid]
+      : (widths[mid-1]+widths[mid])/2;
+    if(cardWidthPx!==null && cardWidthPx>0){
+      fingerCardRatio=fingerWidthPx/cardWidthPx;
+    }
 
     // TESTE DE CENTRALIZACAO OPTICA:
     // 1) centro do dedo deve coincidir com o centro optico da imagem;
@@ -269,6 +292,9 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     opticalCenterOffsetPx,
     cardFingerOffsetPx,
     opticalCenterConfidence,
+    cardWidthPx,
+    fingerWidthPx,
+    fingerCardRatio,
   };
 };
 
