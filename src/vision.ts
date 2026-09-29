@@ -15,6 +15,9 @@ export type LiveCardGuideAnalysis = {
   ready: boolean;
   fingerTiltDeg: number | null;
   fingerTiltConfidence: number;
+  opticalCenterOffsetPx: number | null;
+  cardFingerOffsetPx: number | null;
+  opticalCenterConfidence: number;
 };
 
 export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnalysis => {
@@ -25,6 +28,9 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     ready: false,
     fingerTiltDeg: null,
     fingerTiltConfidence: 0,
+    opticalCenterOffsetPx: null,
+    cardFingerOffsetPx: null,
+    opticalCenterConfidence: 0,
   };
   if (!video.videoWidth || !video.videoHeight) return fallback;
 
@@ -202,6 +208,9 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
 
   let fingerTiltDeg:number|null=null;
   let fingerTiltConfidence=0;
+  let opticalCenterOffsetPx:number|null=null;
+  let cardFingerOffsetPx:number|null=null;
+  let opticalCenterConfidence=0;
 
   if(fingerCenters.length>=6){
     const meanY=fingerCenters.reduce((s,p)=>s+p.y,0)/fingerCenters.length;
@@ -222,9 +231,31 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     const residualQuality=Math.max(0,1-meanResidual/8);
     fingerTiltConfidence=Math.round(100*(coverage*0.55+residualQuality*0.45));
 
+    // TESTE DE CENTRALIZACAO OPTICA:
+    // 1) centro do dedo deve coincidir com o centro optico da imagem;
+    // 2) centro do dedo e centro do cartao devem coincidir para reduzir
+    //    paralaxe lateral quando o cartao esta sobre o dedo.
+    const fittedFingerCenterAtBand=intercept+slope*((fingerTop+fingerBottom)/2);
+    const cardCenterTop=(lt.x+rt.x)/2;
+    const cardCenterBottom=(lb.x+rb.x)/2;
+    const fittedCardCenter=(cardCenterTop+cardCenterBottom)/2;
+
+    opticalCenterOffsetPx=fittedFingerCenterAtBand-canvas.width/2;
+    cardFingerOffsetPx=fittedFingerCenterAtBand-fittedCardCenter;
+
+    const cardQuality=edgeReliable ? 1 : 0.35;
+    opticalCenterConfidence=Math.round(
+      100*Math.min(1,coverage*0.45+residualQuality*0.35+cardQuality*0.20)
+    );
+
     if(fingerTiltConfidence<45 || Math.abs(fingerTiltDeg)>18){
       fingerTiltDeg=null;
       fingerTiltConfidence=0;
+    }
+    if(opticalCenterConfidence<45){
+      opticalCenterOffsetPx=null;
+      cardFingerOffsetPx=null;
+      opticalCenterConfidence=0;
     }
   }
 
@@ -235,6 +266,9 @@ export const analyzeLiveCardGuide = (video: HTMLVideoElement): LiveCardGuideAnal
     ready: frameAligned && angle === "aligned",
     fingerTiltDeg,
     fingerTiltConfidence,
+    opticalCenterOffsetPx,
+    cardFingerOffsetPx,
+    opticalCenterConfidence,
   };
 };
 
