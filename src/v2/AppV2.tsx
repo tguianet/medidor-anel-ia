@@ -332,6 +332,56 @@ export default function AppV2() {
   };
 
   const capture = async () => {
+    // No modo comercial de 1 foto, rejeitamos a geometria ruim ANTES de
+    // congelar a imagem. Isso evita que uma foto claramente inclinada gere
+    // um aro plausível porém errado.
+    if(singlePhotoTestMode && measurementMode==="finger" && !diameterPhotoTestMode){
+      if(
+        VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
+        deviceQuality.devicePitch !== null &&
+        Math.abs(deviceQuality.devicePitch) > 5
+      ){
+        camera.setError(`Inclinação do celular muito alta (${deviceQuality.devicePitch.toFixed(1)}°). Ajuste até ficar entre -5° e +5° antes de capturar.`);
+        return;
+      }
+
+      if(
+        VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
+        deviceQuality.deviceRoll !== null &&
+        Math.abs(deviceQuality.deviceRoll) > 3
+      ){
+        camera.setError(`Celular girado demais (${deviceQuality.deviceRoll.toFixed(1)}°). Deixe o aparelho mais reto, dentro de ±3°.`);
+        return;
+      }
+
+      if(
+        liveFingerTiltDeg !== null &&
+        liveFingerTiltConfidence >= 45 &&
+        Math.abs(liveFingerTiltDeg) > 2
+      ){
+        camera.setError(`Dedo inclinado ${Math.abs(liveFingerTiltDeg).toFixed(1)}°. Alinhe o dedo até ficar próximo de 0°.`);
+        return;
+      }
+
+      if(
+        liveOpticalCenterConfidence >= 45 &&
+        liveOpticalCenterOffsetPx !== null &&
+        Math.abs(liveOpticalCenterOffsetPx) > 6
+      ){
+        camera.setError("Centralize o celular sobre o dedo antes de capturar.");
+        return;
+      }
+
+      if(
+        liveOpticalCenterConfidence >= 45 &&
+        liveCardFingerOffsetPx !== null &&
+        Math.abs(liveCardFingerOffsetPx) > 5
+      ){
+        camera.setError("Centralize o cartão sobre o dedo antes de capturar.");
+        return;
+      }
+    }
+
     if(
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
@@ -2527,6 +2577,20 @@ export default function AppV2() {
     if(stability!==null && stability<75){
       reasons.push(`estabilidade ${stability} < 75`);
     }
+    if(
+      captureDeviceQuality?.devicePitch!==null &&
+      captureDeviceQuality?.devicePitch!==undefined &&
+      Math.abs(captureDeviceQuality.devicePitch)>5
+    ){
+      reasons.push(`pitch ${captureDeviceQuality.devicePitch.toFixed(1)}° > 5°`);
+    }
+    if(
+      captureDeviceQuality?.deviceRoll!==null &&
+      captureDeviceQuality?.deviceRoll!==undefined &&
+      Math.abs(captureDeviceQuality.deviceRoll)>3
+    ){
+      reasons.push(`roll ${captureDeviceQuality.deviceRoll.toFixed(1)}° > 3°`);
+    }
     if(preFormulaQuality.edgeScore<70){
       reasons.push(`bordas ${preFormulaQuality.edgeScore} < 70`);
     }
@@ -2548,6 +2612,8 @@ export default function AppV2() {
   },[
     preFormulaQuality.edgeScore,
     captureDeviceQuality?.stabilityScore,
+    captureDeviceQuality?.devicePitch,
+    captureDeviceQuality?.deviceRoll,
     calibrationConfidence,
     measurementMode,
     diameterPhotoTestMode,
