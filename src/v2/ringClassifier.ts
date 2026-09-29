@@ -118,6 +118,72 @@ export const buildFingerReferenceCurve = (): FingerRingReference[] => {
 
 export const FINGER_REFERENCE_CURVE = buildFingerReferenceCurve();
 
+// TESTE PRIVADO: restaura +0,440 mm somente de 29 a 33, preservando
+// exatamente os espaçamentos relativos já existentes nessa faixa.
+// Isso recria os pontos históricos:
+// 29 = 22,920 mm
+// 30 = 23,445 mm
+// 31 = 24,035 mm
+// 32 = 24,596 mm
+// 33 = 25,280 mm
+// Não altera o classificador oficial.
+export const EXPERIMENTAL_HIGH_RING_CURVE: Record<number, number> = {
+  ...MANUAL_FINGER_CURVE,
+  29: Number((MANUAL_FINGER_CURVE[29] + 0.440).toFixed(3)),
+  30: Number((MANUAL_FINGER_CURVE[30] + 0.440).toFixed(3)),
+  31: Number((MANUAL_FINGER_CURVE[31] + 0.440).toFixed(3)),
+  32: Number((MANUAL_FINGER_CURVE[32] + 0.440).toFixed(3)),
+  33: Number((MANUAL_FINGER_CURVE[33] + 0.440).toFixed(3)),
+};
+
+const buildReferenceCurveFromTargets = (curve:Record<number,number>):FingerRingReference[] => {
+  const sizes=PHYSICAL_RING_TABLE.map(r=>r.size).sort((a,b)=>a-b);
+  return sizes.map((size,index)=>{
+    const target=curve[size] ?? MANUAL_FINGER_CURVE[size];
+    const prevSize=sizes[index-1];
+    const nextSize=sizes[index+1];
+    const prev=prevSize===undefined ? null : (curve[prevSize] ?? MANUAL_FINGER_CURVE[prevSize]);
+    const next=nextSize===undefined ? null : (curve[nextSize] ?? MANUAL_FINGER_CURVE[nextSize]);
+    return {
+      ringSize:size,
+      targetWidthMm:Number(target.toFixed(3)),
+      lowerBoundaryMm:prev===null ? Number.NEGATIVE_INFINITY : Number(((prev+target)/2).toFixed(3)),
+      upperBoundaryMm:next===null ? Number.POSITIVE_INFINITY : Number(((target+next)/2).toFixed(3)),
+    };
+  });
+};
+
+export const EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE =
+  buildReferenceCurveFromTargets(EXPERIMENTAL_HIGH_RING_CURVE);
+
+export const classifyFingerWidthMmExperimentalHigh = (
+  measuredWidthMm:number,
+  comfortOffset=1,
+):RingClassification => {
+  if(!Number.isFinite(measuredWidthMm)||measuredWidthMm<=0){
+    throw new Error("invalid-finger-width-mm");
+  }
+  const match=
+    EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE.find(entry=>
+      measuredWidthMm>=entry.lowerBoundaryMm &&
+      measuredWidthMm<entry.upperBoundaryMm
+    ) ?? EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE[EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE.length-1];
+
+  const minSize=EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE[0].ringSize;
+  const maxSize=EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE[EXPERIMENTAL_HIGH_RING_REFERENCE_CURVE.length-1].ringSize;
+  const comfortRingSize=Math.max(minSize,Math.min(maxSize,match.ringSize+comfortOffset));
+
+  return {
+    measuredWidthMm,
+    exactRingSize:match.ringSize,
+    comfortRingSize,
+    targetWidthMm:match.targetWidthMm,
+    distanceFromTargetMm:Number((measuredWidthMm-match.targetWidthMm).toFixed(3)),
+    lowerBoundaryMm:match.lowerBoundaryMm,
+    upperBoundaryMm:match.upperBoundaryMm,
+  };
+};
+
 export const classifyFingerWidthMm = (
   measuredWidthMm: number,
   comfortOffset = 1,
