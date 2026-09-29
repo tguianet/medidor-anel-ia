@@ -2203,32 +2203,36 @@ export default function AppV2() {
     const reasons:string[]=[];
     const stability=captureDeviceQuality?.stabilityScore ?? null;
 
-    if(preFormulaQuality.perspectiveScore<92){
-      reasons.push(`perspectiva ${preFormulaQuality.perspectiveScore} < 92`);
+    // No fluxo de 1 foto, perspectiva/homografia sao somente diagnostico.
+    // Nao podem bloquear uma medida cuja escala oficial vem das intersecoes
+    // A-B do cartao (85,60 mm).
+    //
+    // O gate real fica coerente com a propria captura:
+    // - estabilidade minima: 75
+    // - bordas/refinamento: 70
+    // - calibracao do cartao: 90
+    if(stability!==null && stability<75){
+      reasons.push(`estabilidade ${stability} < 75`);
     }
-    if(stability!==null && stability<90){
-      reasons.push(`estabilidade ${stability} < 90`);
+    if(preFormulaQuality.edgeScore<70){
+      reasons.push(`bordas ${preFormulaQuality.edgeScore} < 70`);
     }
-    if(preFormulaQuality.edgeScore<90){
-      reasons.push(`bordas ${preFormulaQuality.edgeScore} < 90`);
-    }
-    if(preFormulaQuality.finalConfidence<90){
-      reasons.push(`confiança ${preFormulaQuality.finalConfidence} < 90`);
+    if(calibrationConfidence<MIN_CARD_CALIBRATION_CONFIDENCE){
+      reasons.push(`calibração ${calibrationConfidence} < ${MIN_CARD_CALIBRATION_CONFIDENCE}`);
     }
 
     return {
       accepted:reasons.length===0,
       reasons,
-      perspectiveMin:92,
-      stabilityMin:90,
-      edgeMin:90,
-      confidenceMin:90,
+      perspectiveMin:null,
+      stabilityMin:75,
+      edgeMin:70,
+      confidenceMin:null,
     };
   },[
-    preFormulaQuality.perspectiveScore,
     preFormulaQuality.edgeScore,
-    preFormulaQuality.finalConfidence,
     captureDeviceQuality?.stabilityScore,
+    calibrationConfidence,
   ]);
 
   useEffect(() => {
@@ -2242,7 +2246,6 @@ export default function AppV2() {
       !leftLocked ||
       !rightLocked ||
       liveWidthMm===null ||
-      !preFormulaQuality.accepted ||
       !captureQualityGate.accepted
     ) return;
 
@@ -2291,7 +2294,7 @@ export default function AppV2() {
       }
     };
   },[
-    photo,leftLocked,rightLocked,liveWidthMm,preFormulaQuality.accepted,
+    photo,leftLocked,rightLocked,liveWidthMm,
     captureQualityGate.accepted,
     handLandmarkAnalysis?.measuredFinger?.confidence,
     handLandmarkAnalysis?.measuredFinger?.ringRegionY,
@@ -2352,7 +2355,7 @@ export default function AppV2() {
   // Nenhum valor anterior pode participar do resultado atual.
   // Foto reprovada pelo gate nunca chega a formula.
   const widthSentToFormulaMm =
-    captureQualityGate.accepted && preFormulaQuality.accepted
+    captureQualityGate.accepted
       ? liveWidthMm
       : null;
 
@@ -2377,7 +2380,7 @@ export default function AppV2() {
 
   const result = useMemo(() => {
     if (widthSentToFormulaMm === null) return null;
-    if (!preFormulaQuality.accepted || !captureQualityGate.accepted) return null;
+    if (!captureQualityGate.accepted) return null;
     if (measurementMode === "anelimetro" && calibrationConfidence < MIN_CARD_CALIBRATION_CONFIDENCE) return null;
     if (diameterPhotoTestMode) return computeDiameterOnlyTestResult(widthSentToFormulaMm, calibrationConfidence);
 
@@ -2402,7 +2405,7 @@ export default function AppV2() {
     }
 
     return computeRingResult(widthSentToFormulaMm, calibrationRules, true, calibrationConfidence);
-  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, preFormulaQuality.accepted, captureQualityGate.accepted]);
+  }, [widthSentToFormulaMm, measurementMode, calibrationRules, calibrationConfidence, diameterPhotoTestMode, captureQualityGate.accepted]);
 
   const resetPhoto = () => {
     // Nova foto = nova medicao. Nao herda largura, regiao ou historico anterior.
@@ -3093,7 +3096,7 @@ export default function AppV2() {
           {phase==="finger" && singlePhotoTestMode && liveWidthMm!==null && !captureQualityGate.accepted && (
             <div className="analysis-result">
               <strong>Captura descartada</strong>
-              <span>Esta foto não passou na validação. Refaça a captura; a nova foto começa do zero e não será combinada com esta.</span>
+              <span>Esta foto não passou na validação: {captureQualityGate.reasons.join(" · ")}. Refaça a captura; a nova foto começa do zero e não será combinada com esta.</span>
             </div>
           )}
           {phase === "finger" && liveWidthMm !== null && !preFormulaQuality.accepted && (
