@@ -2002,26 +2002,76 @@ export default function AppV2() {
     autoAnatomyAppliedPhotoRef.current=photo;
   },[photo,handLandmarkAnalysis]);
 
+  const cardBaseYPercent = useMemo(() => {
+    try{
+      const quad=quadFromLines(cardLines);
+      return clamp((quad[2].y+quad[3].y)/2,4,92);
+    }catch{
+      return clamp(cardBottom,4,92);
+    }
+  },[cardLines,cardBottom]);
+
+  const anatomicalWindow = useMemo(() => {
+    // Região plausível do anel: primeiro trecho anatômico logo abaixo
+    // da base física do cartão. Testes bons ficaram cerca de +5% a +8%;
+    // regiões muito mais baixas estavam puxando a medida para cima.
+    const minY=clamp(cardBaseYPercent+3,28,84);
+    const maxY=clamp(cardBaseYPercent+12,28,84);
+    return {
+      minY,
+      maxY,
+      centerY:(minY+maxY)/2,
+      halfSpan:Math.max(4,(maxY-minY)/2),
+    };
+  },[cardBaseYPercent]);
+
   const contourAnatomy = useMemo(() => {
     if(!photo || !leftLocked || !rightLocked) return null;
 
-    // Varredura anatomica ampla e fixa. Ela NAO acompanha a linha amarela.
-    // Assim a mesma foto encontra sempre a mesma regiao do anel, mesmo que
-    // o usuario tente mover a guia para cima ou para baixo.
-    const anatomySearchCenterY=60;
-    const samples=fingerBandSamplesPx(anatomySearchCenterY,28);
+    // Procura APENAS o primeiro plato anatomico logo abaixo da base do cartao.
+    // Nao varremos mais toda a parte inferior do dedo, porque um plato mais
+    // baixo pode ser estavel, porem largo demais para representar a regiao
+    // real onde o anel fica.
+    const samples=fingerBandSamplesPx(
+      anatomicalWindow.centerY,
+      anatomicalWindow.halfSpan,
+    )?.filter(sample=>
+      sample.yPercent>=anatomicalWindow.minY &&
+      sample.yPercent<=anatomicalWindow.maxY
+    );
+
     if(!samples?.length) return null;
-    return analyzeFingerContourAnatomy(
+
+    const analysis=analyzeFingerContourAnatomy(
       samples.map(sample=>({
         yPercent:sample.yPercent,
         width:sample.width,
         confidence:sample.confidence,
       })),
-      anatomySearchCenterY,
+      anatomicalWindow.centerY,
     );
+
+    if(
+      analysis.ringRegionY!==null &&
+      (
+        analysis.ringRegionY<anatomicalWindow.minY ||
+        analysis.ringRegionY>anatomicalWindow.maxY
+      )
+    ){
+      return {
+        ...analysis,
+        detected:false,
+        ringRegionY:null,
+        reason:"platô fora da janela anatômica",
+      };
+    }
+
+    return analysis;
   },[
     photo,leftLocked,rightLocked,leftLine,rightLine,zoom,panX,panY,
-    measurementCardHomography
+    measurementCardHomography,
+    anatomicalWindow.minY,anatomicalWindow.maxY,
+    anatomicalWindow.centerY,anatomicalWindow.halfSpan
   ]);
 
   // Ima anatomico da linha amarela.
@@ -2033,12 +2083,19 @@ export default function AppV2() {
     if(!photo || phase!=="finger" || !leftLocked || !rightLocked) return;
 
     const landmark=handLandmarkAnalysis?.measuredFinger;
-    const landmarkY=
+    const landmarkCandidate=
       VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
       landmark &&
       landmark.confidence>=60 &&
       landmark.ringRegionY!==null
         ? clamp(landmark.ringRegionY*100,28,84)
+        : null;
+
+    const landmarkY=
+      landmarkCandidate!==null &&
+      landmarkCandidate>=anatomicalWindow.minY &&
+      landmarkCandidate<=anatomicalWindow.maxY
+        ? landmarkCandidate
         : null;
 
     const contourY=
@@ -2061,6 +2118,7 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.confidence,
     handLandmarkAnalysis?.measuredFinger?.ringRegionY,
     contourAnatomy?.detected,contourAnatomy?.score,contourAnatomy?.ringRegionY,
+    anatomicalWindow.minY,anatomicalWindow.maxY,
     ringGuideY,measureY
   ]);
 
@@ -2314,16 +2372,25 @@ export default function AppV2() {
     if(measurementMode!=="finger" || diameterPhotoTestMode) return true;
 
     const landmark=handLandmarkAnalysis?.measuredFinger;
+    const landmarkY=
+      landmark?.ringRegionY!==null && landmark?.ringRegionY!==undefined
+        ? landmark.ringRegionY*100
+        : null;
+
     const landmarkReady=
       VISION_FEATURE_FLAGS.ENABLE_HAND_LANDMARKS &&
       !!landmark &&
       landmark.confidence>=60 &&
-      landmark.ringRegionY!==null;
+      landmarkY!==null &&
+      landmarkY>=anatomicalWindow.minY &&
+      landmarkY<=anatomicalWindow.maxY;
 
     const contourReady=
       !!contourAnatomy?.detected &&
       contourAnatomy.score>=70 &&
-      contourAnatomy.ringRegionY!==null;
+      contourAnatomy.ringRegionY!==null &&
+      contourAnatomy.ringRegionY>=anatomicalWindow.minY &&
+      contourAnatomy.ringRegionY<=anatomicalWindow.maxY;
 
     return landmarkReady || contourReady;
   },[
@@ -2334,6 +2401,8 @@ export default function AppV2() {
     contourAnatomy?.detected,
     contourAnatomy?.score,
     contourAnatomy?.ringRegionY,
+    anatomicalWindow.minY,
+    anatomicalWindow.maxY,
   ]);
 
   const anatomicalRegionSource =
@@ -3316,6 +3385,7 @@ export default function AppV2() {
                   {handLandmarkAnalysis?.measuredFinger && <span>Dedo estimado: {handLandmarkAnalysis.measuredFinger.finger} · confiança {handLandmarkAnalysis.measuredFinger.confidence}% · visíveis {handLandmarkAnalysis.measuredFinger.visibleLandmarks}/4 · {handLandmarkAnalysis.measuredFinger.partial ? "parcial" : "completo"} · cartão ocultando {handLandmarkAnalysis.measuredFinger.occludedByCard ? "sim" : "não"}</span>}
                   {handLandmarkAnalysis?.measuredFinger && <span>ringRegionY {handLandmarkAnalysis.measuredFinger.ringRegionY===null?"oculta/fallback":(handLandmarkAnalysis.measuredFinger.ringRegionY*100).toFixed(1)+"%"} · jointRegionY {handLandmarkAnalysis.measuredFinger.jointRegionY===null?"oculta":(handLandmarkAnalysis.measuredFinger.jointRegionY*100).toFixed(1)+"%"}</span>}
                   <span>Contorno anatômico: {contourAnatomy?.detected ? "detectado" : "não detectado"}{contourAnatomy ? ` · score ${contourAnatomy.score} · ${contourAnatomy.reason}` : ""}</span>
+                  <span>Janela anatômica: base do cartão ${cardBaseYPercent.toFixed(1)}% · busca ${anatomicalWindow.minY.toFixed(1)}%–${anatomicalWindow.maxY.toFixed(1)}%</span>
                   {contourAnatomy?.ringRegionY!==null && contourAnatomy?.ringRegionY!==undefined && <span>Contour ringRegionY: {contourAnatomy.ringRegionY.toFixed(1)}% · jointRegionY {contourAnatomy.jointRegionY===null?"n/d":contourAnatomy.jointRegionY.toFixed(1)+"%"} · CV {contourAnatomy.widthCvPercent===null?"n/d":contourAnatomy.widthCvPercent.toFixed(2)+"%"}</span>}
                   <span>Região anatômica: somente a foto atual · sem fusão entre capturas</span>
                   <span>Região anatômica aplicada: {anatomicalRegionSource}{anatomicalRegionReady ? ` · Y ${auditGuideY.toFixed(1)}%` : ""}</span>
