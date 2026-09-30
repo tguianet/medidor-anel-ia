@@ -696,16 +696,53 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   // Cada candidato bruto passa por um refinamento baseado nas quatro bordas
   // e na proporção física real 85,60 x 53,98 mm. Assim elementos conectados
   // acima/abaixo do cartão não entram na caixa final.
-  const rawCandidates = [edgeCandidate, runCandidate, colorCandidate]
-    .filter((candidate): candidate is Box => candidate !== null);
+  // PRIORIDADE DE DETECCAO:
+  // 1) bordas fisicas reais do cartao;
+  // 2) somente se nao houver borda confiavel, usamos forma/faixa de cor como fallback.
+  //
+  // A cor nunca deve ganhar de uma borda fisica valida, porque o que interessa
+  // para a calibracao e a geometria real do cartao (85,60 x 53,98 mm).
+  const edgeRefined = edgeCandidate
+    ? refineCardBoxByKnownRatio(pixels,work.width,work.height,edgeCandidate)
+    : null;
 
-  const candidates = rawCandidates.map(candidate =>
-    refineCardBoxByKnownRatio(pixels,work.width,work.height,candidate)
-  );
+  const edgeScore = edgeRefined
+    ? scoreCardShape(edgeRefined,work.width,work.height)
+    : 0;
 
-  const best = candidates.sort(
-    (a,b)=>scoreCardShape(b,work.width,work.height)-scoreCardShape(a,work.width,work.height)
-  )[0];
+  const edgeWidthShare = edgeRefined
+    ? (edgeRefined.maxX-edgeRefined.minX+1)/work.width
+    : 0;
+
+  // Consideramos a borda fisica confiavel quando a geometria esta coerente
+  // com o cartao inteiro na guia. Nessa condicao, ignoramos completamente a cor.
+  const edgeReliable =
+    edgeRefined !== null &&
+    edgeWidthShare >= 0.42 &&
+    edgeScore >= 0.42;
+
+  let best: Box | null = null;
+
+  if(edgeReliable && edgeRefined){
+    best=edgeRefined;
+  }else{
+    // Fallback: cor/faixas ajudam apenas a encontrar um candidato inicial.
+    // Todo candidato ainda passa pelo refinamento por quatro bordas e proporcao.
+    const fallbackRaw = [runCandidate,colorCandidate]
+      .filter((candidate): candidate is Box => candidate !== null);
+
+    const fallbackCandidates = fallbackRaw.map(candidate =>
+      refineCardBoxByKnownRatio(pixels,work.width,work.height,candidate)
+    );
+
+    best = fallbackCandidates.sort(
+      (a,b)=>scoreCardShape(b,work.width,work.height)-scoreCardShape(a,work.width,work.height)
+    )[0] ?? null;
+
+    // Se o fallback falhar mas existia uma borda parcial, usamos a borda refinada
+    // em vez de aceitar uma superficie de cor pior.
+    if(!best && edgeRefined) best=edgeRefined;
+  }
   const bestWidthShare = best ? (best.maxX - best.minX + 1) / work.width : 0;
   if (!best || bestWidthShare < 0.42) throw new Error("Não encontrei a base inteira do cartão. Deixe os dois cantos inferiores visíveis e alinhe o cartão na guia.");
 
