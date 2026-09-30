@@ -42,6 +42,7 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
+            display:"none",
             position:"absolute",
             top:18,
             left:"50%",
@@ -77,6 +78,7 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
+            display:"none",
             position:"absolute",
             top:88,
             left:"50%",
@@ -152,9 +154,39 @@ export default function FrozenCameraScreen({
             <span className="angle-arrow backward">↓</span>
           </div>
 
+          <div
+            aria-hidden="true"
+            style={{
+              position:"absolute",
+              left:"37%",
+              top:"8%",
+              bottom:"7%",
+              width:2,
+              transform:"translateX(-50%)",
+              borderRadius:999,
+              background:"rgba(255,255,255,.58)",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.35), 0 0 7px rgba(255,255,255,.16)",
+              pointerEvents:"none",
+            }}
+          />
           <div className="live-finger-axis">
             <span>ALINHE O DEDO</span>
           </div>
+          <div
+            aria-hidden="true"
+            style={{
+              position:"absolute",
+              left:"63%",
+              top:"8%",
+              bottom:"7%",
+              width:2,
+              transform:"translateX(-50%)",
+              borderRadius:999,
+              background:"rgba(255,255,255,.58)",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.35), 0 0 7px rgba(255,255,255,.16)",
+              pointerEvents:"none",
+            }}
+          />
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
