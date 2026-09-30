@@ -34,7 +34,6 @@ export default function FrozenCameraScreen({
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
   onClose, onCapture, onRetry,
 }: Props) {
-  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(false);
   const autoCaptureTimerRef = useRef<number | null>(null);
   const autoCaptureLockedRef = useRef(false);
 
@@ -79,7 +78,7 @@ export default function FrozenCameraScreen({
     !cameraOpening;
 
   useEffect(() => {
-    if (!autoCaptureEnabled || !levelReady) {
+    if (!levelReady) {
       if (autoCaptureTimerRef.current !== null) {
         window.clearTimeout(autoCaptureTimerRef.current);
         autoCaptureTimerRef.current = null;
@@ -92,7 +91,7 @@ export default function FrozenCameraScreen({
 
     autoCaptureTimerRef.current = window.setTimeout(() => {
       autoCaptureTimerRef.current = null;
-      if (!autoCaptureEnabled || !levelReady || autoCaptureLockedRef.current) return;
+      if (!levelReady || autoCaptureLockedRef.current) return;
       autoCaptureLockedRef.current = true;
       onCapture();
     }, 700);
@@ -103,7 +102,7 @@ export default function FrozenCameraScreen({
         autoCaptureTimerRef.current = null;
       }
     };
-  }, [autoCaptureEnabled, levelReady, onCapture]);
+  }, [levelReady, onCapture]);
 
   return (
     <section className="camera-screen">
@@ -382,45 +381,7 @@ export default function FrozenCameraScreen({
               : calibrationStep === "reference"
                 ? "Coloque o cartão em uma base plana, enquadre na moldura e ajuste o ângulo até ficar verde."
                 : "Coloque o cartão sobre o dedo e ajuste a distância do celular até o cartão coincidir com a guia fantasma da Foto 1."}</p>
-      {singlePhotoTestMode && (
-        <button
-          type="button"
-          onClick={() => setAutoCaptureEnabled((value) => !value)}
-          style={{
-            display:"inline-flex",
-            alignItems:"center",
-            gap:9,
-            margin:"0 0 12px",
-            padding:"8px 12px",
-            border:`1px solid ${autoCaptureEnabled ? "#52e0a3" : "#73634a"}`,
-            borderRadius:999,
-            color:autoCaptureEnabled ? "#52e0a3" : "#d8cfbf",
-            background:"rgba(18,15,11,.92)",
-            fontSize:12,
-            fontWeight:800,
-            cursor:"pointer",
-          }}
-          aria-pressed={autoCaptureEnabled}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              width:32,
-              height:18,
-              padding:2,
-              borderRadius:999,
-              background:autoCaptureEnabled ? "#52e0a3" : "#4b443b",
-              display:"flex",
-              justifyContent:autoCaptureEnabled ? "flex-end" : "flex-start",
-              alignItems:"center",
-            }}
-          >
-            <i style={{display:"block",width:14,height:14,borderRadius:"50%",background:"#fff"}} />
-          </span>
-          Auto captura {autoCaptureEnabled ? "LIGADA" : "DESLIGADA"}
-        </button>
-      )}
-      <button className={`shutter${cardReady ? " ready" : ""}`} onClick={onCapture} aria-label="Capturar foto manualmente"><span /></button>
+      <button className={`shutter${cardReady ? " ready" : ""}`} style={{display:"block",margin:"0 auto"}} onClick={onCapture} aria-label="Capturar foto manualmente"><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
   );
