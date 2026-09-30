@@ -18,6 +18,7 @@ type Props = {
   referenceCardWidthPercent?: number | null;
   referenceCardAngleDeg?: number | null;
   singlePhotoTestMode?: boolean;
+  showThreeFingerGuides?: boolean;
   onClose: () => void;
   onCapture: () => void;
   onRetry: () => void;
@@ -28,7 +29,7 @@ export default function CameraScreen({
   liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
   liveOpticalCenterOffsetPx = null, liveCardFingerOffsetPx = null, liveOpticalCenterConfidence = 0,
   cameraOpening, error,
-  referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
+  referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false, showThreeFingerGuides = false,
   onClose, onCapture, onRetry,
 }: Props) {
   return (
