@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "../vision";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
-import { useCameraStream } from "../useCameraStream";
+import { useTestCameraStream } from "./useTestCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "../types";
 import { wearableRingImage } from "../types";
 import IntroScreen from "../components/IntroScreen";
@@ -77,7 +77,7 @@ const projectPoint = (h:Homography, point:Point):Point => {
 };
 
 export default function AppV2() {
-  const camera = useCameraStream();
+  const camera = useTestCameraStream();
   const deviceQuality = useDeviceCaptureQuality(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION);
   // Diagnostico privado: fica dentro da mesma pagina para nao interferir
   // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
