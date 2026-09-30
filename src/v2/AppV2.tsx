@@ -4061,6 +4061,8 @@ export default function AppV2() {
           liveOpticalCenterOffsetPx={measurementMode==="finger" ? liveOpticalCenterOffsetPx : null}
           liveCardFingerOffsetPx={measurementMode==="finger" ? liveCardFingerOffsetPx : null}
           liveOpticalCenterConfidence={measurementMode==="finger" ? liveOpticalCenterConfidence : 0}
+          devicePitch={deviceQuality.devicePitch}
+          deviceRoll={deviceQuality.deviceRoll}
           cameraOpening={camera.cameraOpening}
           error={camera.error}
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
