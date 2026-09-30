@@ -56,28 +56,6 @@ export default function FrozenCameraScreen({
   const phoneY =
     devicePitch === null ? 0 : clampLevel(devicePitch, 14) * 34;
 
-  // Linha fantasma: segue o eixo visual detectado do dedo.
-  // Apenas representacao visual; nao participa de nenhuma medida.
-  const ghostFingerAngleDeg =
-    liveFingerTiltDeg !== null && liveFingerTiltConfidence >= 30
-      ? Math.max(-12, Math.min(12, liveFingerTiltDeg))
-      : 0;
-
-  const ghostFingerOffsetX =
-    liveCardFingerOffsetPx !== null && liveOpticalCenterConfidence >= 30
-      ? clampLevel(liveCardFingerOffsetPx, 18) * 24
-      : 0;
-
-  const ghostFingerAbsAngle = Math.abs(ghostFingerAngleDeg);
-  const ghostFingerColor =
-    liveFingerTiltDeg === null || liveFingerTiltConfidence < 30
-      ? "rgba(255,255,255,.55)"
-      : ghostFingerAbsAngle <= 1.5
-        ? "#52e0a3"
-        : ghostFingerAbsAngle <= 3
-          ? "#f2cf73"
-          : "#ff7770";
-
   const fingerReady =
     liveFingerTiltDeg !== null &&
     liveFingerTiltConfidence >= 45 &&
@@ -371,45 +349,7 @@ export default function FrozenCameraScreen({
             <span>{fingerReady ? "✓ DEDO RETO" : "ALINHE O DEDO"}</span>
           </div>
 
-          {singlePhotoTestMode && (
-            <div
-              aria-hidden="true"
-              style={{
-                position:"absolute",
-                left:`calc(50% + ${ghostFingerOffsetX.toFixed(1)}px)`,
-                top:"8%",
-                bottom:"7%",
-                width:3,
-                borderRadius:999,
-                background:ghostFingerColor,
-                boxShadow:`0 0 0 1px rgba(0,0,0,.45), 0 0 12px ${ghostFingerColor}`,
-                transform:`translateX(-50%) rotate(${ghostFingerAngleDeg.toFixed(2)}deg)`,
-                transformOrigin:"50% 50%",
-                opacity:liveFingerTiltConfidence >= 30 ? .82 : .42,
-                pointerEvents:"none",
-                transition:"left .10s linear, transform .10s linear, background .12s ease, opacity .12s ease",
-              }}
-            >
-              <span
-                style={{
-                  position:"absolute",
-                  left:"50%",
-                  top:"70%",
-                  transform:"translate(-50%,-50%) rotate(90deg)",
-                  padding:"3px 6px",
-                  borderRadius:999,
-                  color:"#111",
-                  background:ghostFingerColor,
-                  fontSize:8,
-                  fontWeight:900,
-                  whiteSpace:"nowrap",
-                  boxShadow:"0 2px 8px rgba(0,0,0,.35)",
-                }}
-              >
-                LINHA DO DEDO
-              </span>
-            </div>
-          )}
+
           <div
             aria-hidden="true"
             style={{
