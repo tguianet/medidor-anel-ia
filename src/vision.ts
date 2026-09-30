@@ -309,16 +309,26 @@ const loadImage = async (src: string) => {
   return image;
 };
 
-// Cor não é uma regra de calibração. Esta leitura existe somente como plano B
-// quando as bordas estiverem pouco visíveis; o critério principal é o formato
-// retangular padrão do cartão.
+// Cor NAO e criterio de validade do cartao.
+// O cartao e reconhecido prioritariamente pelas bordas, proporcao e tamanho
+// padrao 85,60 x 53,98 mm. Esta leitura existe somente como plano B quando
+// as bordas estiverem pouco visiveis.
+//
+// Aceitamos qualquer matiz (azul, verde, vermelho, amarelo, roxo etc.) e
+// tambem superficies neutras claras/escuras (cartoes brancos, cinza e pretos).
+// A etapa posterior de forma/proporcao impede que a cor, sozinha, valide algo
+// que nao tenha geometria de cartao.
 export const isChromaticCardSurface = (r: number, g: number, b: number) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
+  const brightness = (r + g + b) / 3;
   const saturation = (max - min) / Math.max(1, max);
-  const coolColor = b > r * 1.08 || g > r * 1.08;
-  const vividRed = r > g * 1.55 && r > b * 1.55;
-  return max > 50 && saturation > 0.28 && (coolColor || vividRed);
+
+  const coloredSurface = max > 35 && saturation >= 0.16;
+  const lightNeutralSurface = saturation < 0.16 && brightness >= 175;
+  const darkNeutralSurface = saturation < 0.16 && brightness <= 72;
+
+  return coloredSurface || lightNeutralSurface || darkNeutralSurface;
 };
 
 export const percentile = (values: number[], amount: number) => {
