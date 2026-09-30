@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 type Props = {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -13,6 +13,8 @@ type Props = {
   liveOpticalCenterOffsetPx?: number | null;
   liveCardFingerOffsetPx?: number | null;
   liveOpticalCenterConfidence?: number;
+  devicePitch?: number | null;
+  deviceRoll?: number | null;
   cameraOpening: boolean;
   error: string;
   referenceCardWidthPercent?: number | null;
@@ -27,10 +29,82 @@ export default function FrozenCameraScreen({
   videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide,
   liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
   liveOpticalCenterOffsetPx = null, liveCardFingerOffsetPx = null, liveOpticalCenterConfidence = 0,
+  devicePitch = null, deviceRoll = null,
   cameraOpening, error,
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
   onClose, onCapture, onRetry,
 }: Props) {
+  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(false);
+  const autoCaptureTimerRef = useRef<number | null>(null);
+  const autoCaptureLockedRef = useRef(false);
+
+  const clampLevel = (value:number, max:number) =>
+    Math.max(-1, Math.min(1, value / max));
+
+  // DEDO: horizontal = inclinacao; vertical = cartao em relacao ao dedo.
+  const fingerX =
+    liveFingerTiltDeg === null || liveFingerTiltConfidence < 45
+      ? 0
+      : clampLevel(liveFingerTiltDeg, 7) * 34;
+  const fingerY =
+    liveCardFingerOffsetPx === null || liveOpticalCenterConfidence < 45
+      ? 0
+      : clampLevel(liveCardFingerOffsetPx, 18) * 34;
+
+  // CELULAR: nivel bidimensional real usando roll e pitch.
+  const phoneX =
+    deviceRoll === null ? 0 : clampLevel(deviceRoll, 8) * 34;
+  const phoneY =
+    devicePitch === null ? 0 : clampLevel(devicePitch, 14) * 34;
+
+  const fingerReady =
+    liveFingerTiltDeg !== null &&
+    liveFingerTiltConfidence >= 45 &&
+    Math.abs(liveFingerTiltDeg) <= 1.5 &&
+    liveCardFingerOffsetPx !== null &&
+    liveOpticalCenterConfidence >= 45 &&
+    Math.abs(liveCardFingerOffsetPx) <= 5;
+
+  const phoneReady =
+    devicePitch !== null &&
+    deviceRoll !== null &&
+    Math.abs(devicePitch) <= 6 &&
+    Math.abs(deviceRoll) <= 3;
+
+  const levelReady =
+    singlePhotoTestMode &&
+    cardReady &&
+    fingerReady &&
+    phoneReady &&
+    !cameraOpening;
+
+  useEffect(() => {
+    if (!autoCaptureEnabled || !levelReady) {
+      if (autoCaptureTimerRef.current !== null) {
+        window.clearTimeout(autoCaptureTimerRef.current);
+        autoCaptureTimerRef.current = null;
+      }
+      autoCaptureLockedRef.current = false;
+      return;
+    }
+
+    if (autoCaptureLockedRef.current || autoCaptureTimerRef.current !== null) return;
+
+    autoCaptureTimerRef.current = window.setTimeout(() => {
+      autoCaptureTimerRef.current = null;
+      if (!autoCaptureEnabled || !levelReady || autoCaptureLockedRef.current) return;
+      autoCaptureLockedRef.current = true;
+      onCapture();
+    }, 700);
+
+    return () => {
+      if (autoCaptureTimerRef.current !== null) {
+        window.clearTimeout(autoCaptureTimerRef.current);
+        autoCaptureTimerRef.current = null;
+      }
+    };
+  }, [autoCaptureEnabled, levelReady, onCapture]);
+
   return (
     <section className="camera-screen">
       <div className="camera-top">
@@ -42,6 +116,7 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
+            display:"none",
             position:"absolute",
             top:18,
             left:"50%",
@@ -77,6 +152,7 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
+            display:"none",
             position:"absolute",
             top:88,
             left:"50%",
@@ -119,6 +195,109 @@ export default function FrozenCameraScreen({
                   ? `MOVA O CELULAR PARA A DIREITA → · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px`
                   : `CENTRE CARTÃO SOBRE O DEDO · diferença ${liveCardFingerOffsetPx.toFixed(1)} px`}
         </div>
+        {singlePhotoTestMode && (
+          <div
+            aria-label="Nivel visual de alinhamento do dedo e do celular"
+            style={{
+              position:"absolute",
+              left:"50%",
+              top:18,
+              zIndex:50,
+              transform:"translateX(-50%)",
+              display:"grid",
+              justifyItems:"center",
+              gap:7,
+              width:"min(270px, calc(100% - 110px))",
+              pointerEvents:"none",
+            }}
+          >
+            <div
+              style={{
+                position:"relative",
+                width:112,
+                height:112,
+                borderRadius:"50%",
+                border:`3px solid ${levelReady ? "#52e0a3" : "rgba(242,207,115,.88)"}`,
+                background:"rgba(8,8,8,.62)",
+                boxShadow:levelReady
+                  ? "0 0 22px rgba(82,224,163,.55)"
+                  : "0 0 16px rgba(0,0,0,.45)",
+                transition:"border-color .15s ease, box-shadow .15s ease",
+              }}
+            >
+              <span style={{position:"absolute",left:"50%",top:8,bottom:8,width:1,background:"rgba(255,255,255,.16)",transform:"translateX(-50%)"}} />
+              <span style={{position:"absolute",top:"50%",left:8,right:8,height:1,background:"rgba(255,255,255,.16)",transform:"translateY(-50%)"}} />
+
+              <span
+                aria-hidden="true"
+                style={{
+                  position:"absolute",
+                  left:"50%",
+                  top:"50%",
+                  width:34,
+                  height:34,
+                  borderRadius:"50%",
+                  border:`2px solid ${levelReady ? "#52e0a3" : "rgba(255,255,255,.55)"}`,
+                  transform:"translate(-50%,-50%)",
+                  boxShadow:levelReady ? "0 0 12px rgba(82,224,163,.7)" : "none",
+                }}
+              />
+
+              <span
+                title="Dedo"
+                style={{
+                  position:"absolute",
+                  left:`calc(50% + ${fingerX.toFixed(1)}px)`,
+                  top:`calc(50% + ${fingerY.toFixed(1)}px)`,
+                  width:18,
+                  height:18,
+                  borderRadius:"50%",
+                  transform:"translate(-50%,-50%)",
+                  background:fingerReady ? "#52e0a3" : "#f2cf73",
+                  border:"2px solid rgba(0,0,0,.55)",
+                  boxShadow:"0 0 9px rgba(242,207,115,.75)",
+                  transition:"left .10s linear, top .10s linear, background .15s ease",
+                }}
+              />
+
+              <span
+                title="Celular"
+                style={{
+                  position:"absolute",
+                  left:`calc(50% + ${phoneX.toFixed(1)}px)`,
+                  top:`calc(50% + ${phoneY.toFixed(1)}px)`,
+                  width:14,
+                  height:14,
+                  borderRadius:"50%",
+                  transform:"translate(-50%,-50%)",
+                  background:phoneReady ? "#52e0a3" : "#79c8ff",
+                  border:"2px solid rgba(0,0,0,.55)",
+                  boxShadow:"0 0 9px rgba(121,200,255,.8)",
+                  transition:"left .10s linear, top .10s linear, background .15s ease",
+                }}
+              />
+            </div>
+
+            <strong
+              style={{
+                padding:"4px 9px",
+                borderRadius:999,
+                color:levelReady ? "#071b14" : "#f5dfaa",
+                background:levelReady ? "#52e0a3" : "rgba(10,9,7,.78)",
+                fontSize:10,
+                letterSpacing:".04em",
+              }}
+            >
+              {levelReady ? "✓ ALINHADO" : "JUNTE AS DUAS BOLINHAS NO CENTRO"}
+            </strong>
+
+            <div style={{display:"flex",gap:10,fontSize:9,color:"#fff"}}>
+              <span><b style={{color:"#f2cf73"}}>●</b> dedo</span>
+              <span><b style={{color:"#79c8ff"}}>●</b> celular</span>
+            </div>
+          </div>
+        )}
+
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
           <div
@@ -203,6 +382,44 @@ export default function FrozenCameraScreen({
               : calibrationStep === "reference"
                 ? "Coloque o cartão em uma base plana, enquadre na moldura e ajuste o ângulo até ficar verde."
                 : "Coloque o cartão sobre o dedo e ajuste a distância do celular até o cartão coincidir com a guia fantasma da Foto 1."}</p>
+      {singlePhotoTestMode && (
+        <button
+          type="button"
+          onClick={() => setAutoCaptureEnabled((value) => !value)}
+          style={{
+            display:"inline-flex",
+            alignItems:"center",
+            gap:9,
+            margin:"0 0 12px",
+            padding:"8px 12px",
+            border:`1px solid ${autoCaptureEnabled ? "#52e0a3" : "#73634a"}`,
+            borderRadius:999,
+            color:autoCaptureEnabled ? "#52e0a3" : "#d8cfbf",
+            background:"rgba(18,15,11,.92)",
+            fontSize:12,
+            fontWeight:800,
+            cursor:"pointer",
+          }}
+          aria-pressed={autoCaptureEnabled}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width:32,
+              height:18,
+              padding:2,
+              borderRadius:999,
+              background:autoCaptureEnabled ? "#52e0a3" : "#4b443b",
+              display:"flex",
+              justifyContent:autoCaptureEnabled ? "flex-end" : "flex-start",
+              alignItems:"center",
+            }}
+          >
+            <i style={{display:"block",width:14,height:14,borderRadius:"50%",background:"#fff"}} />
+          </span>
+          Auto captura {autoCaptureEnabled ? "LIGADA" : "DESLIGADA"}
+        </button>
+      )}
       <button className={`shutter${cardReady ? " ready" : ""}`} onClick={onCapture} aria-label="Capturar foto manualmente"><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
