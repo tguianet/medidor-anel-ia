@@ -35,19 +35,25 @@ export function useFrozenCameraStream() {
     }
 
     const attempts: MediaStreamConstraints[] = [
-      // Primeiro tenta a câmera traseira principal com resolução moderada.
-      // Em alguns Androids o torch só aparece em determinados modos de captura.
-      { video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+      // V2 teste: começa pela traseira preferencial sem exigir "exact",
+      // evitando espera longa em aparelhos Android.
       { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-      { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
-      { video: { facingMode: { ideal: "environment" } }, audio: false },
+      // Fallback simples caso o navegador ignore/recuse facingMode.
       { video: true, audio: false },
     ];
     let lastFailure: unknown;
 
     for (const constraints of attempts) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await Promise.race([
+          navigator.mediaDevices.getUserMedia(constraints),
+          new Promise<MediaStream>((_, reject) =>
+            window.setTimeout(
+              () => reject(new DOMException("Tempo excedido ao abrir a câmera.", "AbortError")),
+              3000
+            )
+          ),
+        ]);
         streamRef.current = stream;
         const track = stream.getVideoTracks()[0];
         const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
@@ -66,7 +72,23 @@ export function useFrozenCameraStream() {
         video.srcObject = stream;
         video.muted = true;
         video.setAttribute("playsinline", "true");
-        await video.play();
+        // Não deixa o /v2 preso esperando indefinidamente o play().
+        // A câmera pode já estar ativa mesmo se a Promise demorar em alguns Androids.
+        void video.play().catch(() => {});
+        await new Promise<void>((resolve) => {
+          if (video.readyState >= 2 || video.videoWidth > 0) {
+            resolve();
+            return;
+          }
+          const done = () => {
+            video.removeEventListener("loadeddata", done);
+            video.removeEventListener("canplay", done);
+            resolve();
+          };
+          video.addEventListener("loadeddata", done, { once: true });
+          video.addEventListener("canplay", done, { once: true });
+          window.setTimeout(done, 1200);
+        });
 
         // Segunda leitura de capabilities após a câmera estar efetivamente ativa.
         // Em alguns aparelhos Android o suporte ao torch só aparece neste ponto.
