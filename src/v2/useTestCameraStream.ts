@@ -22,11 +22,82 @@ export function useTestCameraStream() {
 
   useEffect(() => () => stopCamera(), []);
 
+  const waitForVideoElement = async (frames = 20) => {
+    for (let i = 0; i < frames; i++) {
+      if (videoRef.current) return videoRef.current;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return videoRef.current;
+  };
+
+  const getUserMediaWithTimeout = async (
+    constraints: MediaStreamConstraints,
+    timeoutMs = 7000,
+  ) => {
+    let timedOut = false;
+    const mediaPromise = navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+      if (timedOut) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new DOMException("Camera startup timed out", "AbortError");
+      }
+      return stream;
+    });
+
+    const timeoutPromise = new Promise<MediaStream>((_, reject) => {
+      window.setTimeout(() => {
+        timedOut = true;
+        reject(new DOMException("Camera startup timed out", "AbortError"));
+      }, timeoutMs);
+    });
+
+    return Promise.race([mediaPromise, timeoutPromise]);
+  };
+
+  const waitForVideoReady = async (video: HTMLVideoElement, timeoutMs = 4000) => {
+    if (video.readyState >= 2 && video.videoWidth > 0) return;
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new DOMException("Video metadata timeout", "AbortError"));
+      };
+      const cleanup = () => {
+        video.removeEventListener("loadedmetadata", finish);
+        video.removeEventListener("canplay", finish);
+        window.clearTimeout(timer);
+      };
+      const timer = window.setTimeout(fail, timeoutMs);
+      video.addEventListener("loadedmetadata", finish, { once: true });
+      video.addEventListener("canplay", finish, { once: true });
+    });
+  };
+
   const startCameraStream = async () => {
     stopCamera();
     setError("");
     setCameraOpening(true);
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const video = await waitForVideoElement();
+    if (!video) {
+      setCameraOpening(false);
+      setError("A tela da câmera não terminou de abrir. Toque em Tentar novamente.");
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setCameraOpening(false);
+      setError("A câmera exige HTTPS. Abra o endereço oficial do aplicativo.");
+      return;
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraOpening(false);
@@ -35,48 +106,59 @@ export function useTestCameraStream() {
     }
 
     const attempts: MediaStreamConstraints[] = [
-      // Primeiro tenta a câmera traseira principal com resolução moderada.
-      // Em alguns Androids o torch só aparece em determinados modos de captura.
-      { video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+      // Android costuma ser mais estável começando com 'ideal' em vez de 'exact'.
       { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-      { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
       { video: { facingMode: { ideal: "environment" } }, audio: false },
       { video: true, audio: false },
+      { video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
     ];
+
     let lastFailure: unknown;
 
     for (const constraints of attempts) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await getUserMediaWithTimeout(constraints);
         streamRef.current = stream;
+
         const track = stream.getVideoTracks()[0];
         const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
         const settings = track?.getSettings?.() as MediaTrackSettings & { facingMode?: string };
 
-        // Alguns navegadores reportam torch apenas depois que a câmera já iniciou.
-        // Mantemos a detecção inicial e fazemos nova checagem após o play().
         setTorchSupported(Boolean(capabilities?.torch));
-
-        // Se o fallback acabou abrindo a câmera frontal, não oferecemos lanterna.
         if (settings?.facingMode && settings.facingMode !== "environment") {
           setTorchSupported(false);
         }
-        const video = videoRef.current;
-        if (!video) throw new Error("A tela da câmera não ficou pronta.");
+
         video.srcObject = stream;
         video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
         video.setAttribute("playsinline", "true");
-        await video.play();
 
-        // Segunda leitura de capabilities após a câmera estar efetivamente ativa.
-        // Em alguns aparelhos Android o suporte ao torch só aparece neste ponto.
+        await waitForVideoReady(video);
+
+        try {
+          await Promise.race([
+            video.play(),
+            new Promise<void>((_, reject) =>
+              window.setTimeout(
+                () => reject(new DOMException("Video play timeout", "AbortError")),
+                4000,
+              ),
+            ),
+          ]);
+        } catch (playError) {
+          // Alguns Androids já exibem o stream mesmo que play() não resolva.
+          if (!(video.readyState >= 2 && video.videoWidth > 0)) throw playError;
+        }
+
         try {
           const refreshedCapabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
           const refreshedSettings = track?.getSettings?.() as MediaTrackSettings & { facingMode?: string };
           const rearCamera = !refreshedSettings?.facingMode || refreshedSettings.facingMode === "environment";
           setTorchSupported(Boolean(refreshedCapabilities?.torch) && rearCamera);
         } catch {
-          // Mantém o valor detectado anteriormente.
+          // Mantém o estado já detectado.
         }
 
         setCameraOpening(false);
@@ -85,6 +167,7 @@ export function useTestCameraStream() {
       } catch (reason) {
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+        video.srcObject = null;
         lastFailure = reason;
       }
     }
@@ -92,9 +175,11 @@ export function useTestCameraStream() {
     setCameraOpening(false);
     const failureName = lastFailure instanceof DOMException ? lastFailure.name : "";
     if (failureName === "NotAllowedError" || failureName === "SecurityError") {
-      setError("A câmera está bloqueada. Libere a permissão nas configurações do navegador e tente novamente.");
+      setError("A câmera está bloqueada. Libere a permissão do site para usar a câmera e tente novamente.");
     } else if (failureName === "NotReadableError" || failureName === "TrackStartError") {
-      setError("A câmera está sendo usada por outro aplicativo. Feche-o e tente novamente.");
+      setError("A câmera está ocupada por outro aplicativo. Feche o outro app e tente novamente.");
+    } else if (failureName === "AbortError") {
+      setError("A câmera demorou demais para responder. Toque em Tentar novamente.");
     } else {
       setError("Não foi possível iniciar a câmera. Toque em Tentar novamente.");
     }
