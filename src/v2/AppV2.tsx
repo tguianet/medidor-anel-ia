@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "../vision";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
-import { useTestCameraStream } from "./useTestCameraStream";
+import { useFrozenCameraStream } from "./FrozenCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "../types";
 import { wearableRingImage } from "../types";
-import IntroScreen from "../components/IntroScreen";
-import CameraScreen from "../components/CameraScreen";
+import FrozenIntroScreen from "./FrozenIntroScreen";
+import FrozenCameraScreen from "./FrozenCameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
@@ -77,7 +77,7 @@ const projectPoint = (h:Homography, point:Point):Point => {
 };
 
 export default function AppV2() {
-  const camera = useTestCameraStream();
+  const camera = useFrozenCameraStream();
   const deviceQuality = useDeviceCaptureQuality(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION);
   // Diagnostico privado: fica dentro da mesma pagina para nao interferir
   // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
@@ -4000,7 +4000,7 @@ export default function AppV2() {
 
       {stage === "intro" && (
         <>
-          <IntroScreen
+          <FrozenIntroScreen
             error={camera.error}
             onMeasureFinger={() => {
               resetMeasurementSession();
@@ -4048,7 +4048,7 @@ export default function AppV2() {
       )}
 
       {stage === "camera" && (
-        <CameraScreen
+        <FrozenCameraScreen
           videoRef={camera.videoRef}
           torchOn={camera.torchOn}
           torchSupported={camera.torchSupported}
@@ -4066,7 +4066,6 @@ export default function AppV2() {
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
           referenceCardAngleDeg={fingerCardCalibrationStep === "measurement" ? referenceCardAngleDeg : null}
           singlePhotoTestMode={singlePhotoTestMode}
-          showThreeFingerGuides={true}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
           onRetry={() => void openCamera()}
