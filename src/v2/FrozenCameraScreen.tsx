@@ -42,7 +42,6 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
-            display:"none",
             position:"absolute",
             top:18,
             left:"50%",
@@ -78,7 +77,6 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
-            display:"none",
             position:"absolute",
             top:88,
             left:"50%",
