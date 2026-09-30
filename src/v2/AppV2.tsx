@@ -4066,6 +4066,7 @@ export default function AppV2() {
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
           referenceCardAngleDeg={fingerCardCalibrationStep === "measurement" ? referenceCardAngleDeg : null}
           singlePhotoTestMode={singlePhotoTestMode}
+          showThreeFingerGuides={true}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
           onRetry={() => void openCamera()}
