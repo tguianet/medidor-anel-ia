@@ -156,6 +156,14 @@ export default function CameraScreen({
           <div className="live-finger-axis">
             <span>ALINHE O DEDO</span>
           </div>
+
+          {showThreeFingerGuides && (
+            <div className="finger-three-guides" aria-hidden="true">
+              <i className="finger-guide-line finger-guide-left" />
+              <i className="finger-guide-line finger-guide-center" />
+              <i className="finger-guide-line finger-guide-right" />
+            </div>
+          )}
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
