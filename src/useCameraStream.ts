@@ -22,11 +22,35 @@ export function useCameraStream() {
 
   useEffect(() => () => stopCamera(), []);
 
+  const waitForVideoElement = async (maxFrames = 18) => {
+    for (let frame = 0; frame < maxFrames; frame++) {
+      if (videoRef.current) return videoRef.current;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return videoRef.current;
+  };
+
   const startCameraStream = async () => {
     stopCamera();
     setError("");
     setCameraOpening(true);
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    // A troca intro -> camera acontece no mesmo clique que inicia o stream.
+    // Em alguns celulares o React ainda nao montou o <video> no primeiro frame.
+    // Esperamos explicitamente o elemento existir antes de pedir/ligar a camera.
+    const mountedVideo = await waitForVideoElement();
+
+    if (!mountedVideo) {
+      setCameraOpening(false);
+      setError("A tela da câmera não terminou de abrir. Toque em Tentar novamente.");
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setCameraOpening(false);
+      setError("A câmera exige uma conexão segura (HTTPS). Abra o endereço oficial do aplicativo.");
+      return;
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraOpening(false);
@@ -61,12 +85,26 @@ export function useCameraStream() {
         if (settings?.facingMode && settings.facingMode !== "environment") {
           setTorchSupported(false);
         }
-        const video = videoRef.current;
-        if (!video) throw new Error("A tela da câmera não ficou pronta.");
+        const video = videoRef.current ?? await waitForVideoElement(8);
+        if (!video) {
+          stream.getTracks().forEach((item) => item.stop());
+          throw new Error("A tela da câmera não ficou pronta.");
+        }
+
         video.srcObject = stream;
         video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
         video.setAttribute("playsinline", "true");
-        await video.play();
+
+        try {
+          await video.play();
+        } catch {
+          // Alguns navegadores liberam o play apenas no frame seguinte,
+          // mesmo quando getUserMedia foi iniciado por um clique do usuario.
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await video.play();
+        }
 
         // Segunda leitura de capabilities após a câmera estar efetivamente ativa.
         // Em alguns aparelhos Android o suporte ao torch só aparece neste ponto.
