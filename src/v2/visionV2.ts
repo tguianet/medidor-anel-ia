@@ -622,6 +622,54 @@ const refineCardBoxByKnownRatio = (
   };
 };
 
+// Detector primario independente de cor e pouco sensivel ao fundo.
+// A camera ja possui uma guia geometrica conhecida: o cartao deve ocupar
+// aproximadamente 78% da largura, centralizado. Usamos essa geometria apenas
+// como SEMENTE e depois refinamos nas bordas fisicas reais.
+const findCardFromCameraGuide = (
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): Box | null => {
+  if(width<40 || height<40) return null;
+
+  const guideLeft=Math.round(width*0.11);
+  const guideRight=Math.round(width*0.89);
+  const guideWidth=Math.max(20,guideRight-guideLeft);
+  const expectedHeight=guideWidth/1.586;
+  const guideTop=Math.round(height*0.10);
+  const guideBottom=Math.min(height-1,Math.round(guideTop+expectedHeight));
+
+  const seed:Box={
+    minX:guideLeft,
+    maxX:guideRight,
+    minY:guideTop,
+    maxY:guideBottom,
+    count:guideWidth*Math.max(1,guideBottom-guideTop),
+  };
+
+  const refined=refineCardBoxByKnownRatio(pixels,width,height,seed);
+  const refinedWidth=refined.maxX-refined.minX+1;
+  const refinedHeight=refined.maxY-refined.minY+1;
+  if(refinedWidth<=0 || refinedHeight<=0) return null;
+
+  const ratio=refinedWidth/refinedHeight;
+  const widthShare=refinedWidth/width;
+  const center=((refined.minX+refined.maxX)/2)/width;
+
+  // A semente da guia so e aceita quando o refinamento continua fisicamente
+  // plausivel para um cartao inteiro. Nenhuma informacao de cor entra aqui.
+  if(
+    widthShare<0.50 || widthShare>0.94 ||
+    ratio<1.40 || ratio>1.78 ||
+    Math.abs(center-0.5)>0.13
+  ){
+    return null;
+  }
+
+  return refined;
+};
+
 // A câmera já pede que o cartão ocupe quase toda a largura da guia. Portanto,
 // um trecho curto de texto, logotipo ou brilho nunca pode virar a base.
 export const scoreCardShape = (box: Box, imageWidth: number, imageHeight: number) => {
@@ -688,20 +736,39 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
     if (score > colorScore) { colorCandidate = box; colorScore = score; }
   }
   const runCandidate = findCardByChromaticRuns(pixels, work.width, work.height);
-  // Selecionamos somente o retângulo que parece o cartão inteiro na guia.
-  // Isso impede que um trecho de logotipo, texto ou reflexo seja usado como
-  // se fosse a base de 85,60 mm.
+
+  // PRIORIDADE 1: a propria guia da camera fornece uma semente geometrica.
+  // Isso torna a deteccao principal independente da cor do cartao e reduz
+  // drasticamente a influencia da cor/textura do fundo.
+  const guideCandidate = findCardFromCameraGuide(pixels, work.width, work.height);
+
+  // PRIORIDADE 2: detector global de bordas, mantido como redundancia.
   const edgeCandidate = findCardByEdges(pixels, work.width, work.height);
 
   // Cada candidato bruto passa por um refinamento baseado nas quatro bordas
   // e na proporção física real 85,60 x 53,98 mm. Assim elementos conectados
   // acima/abaixo do cartão não entram na caixa final.
   // PRIORIDADE DE DETECCAO:
-  // 1) bordas fisicas reais do cartao;
-  // 2) somente se nao houver borda confiavel, usamos forma/faixa de cor como fallback.
+  // 1) bordas fisicas refinadas a partir da guia da camera;
+  // 2) detector global de bordas;
+  // 3) somente se ambos falharem, cor/faixas entram como fallback.
   //
-  // A cor nunca deve ganhar de uma borda fisica valida, porque o que interessa
-  // para a calibracao e a geometria real do cartao (85,60 x 53,98 mm).
+  // O fundo nao participa da escolha principal.
+  const guideRefined = guideCandidate;
+
+  const guideScore = guideRefined
+    ? scoreCardShape(guideRefined,work.width,work.height)
+    : 0;
+
+  const guideWidthShare = guideRefined
+    ? (guideRefined.maxX-guideRefined.minX+1)/work.width
+    : 0;
+
+  const guideReliable =
+    guideRefined !== null &&
+    guideWidthShare >= 0.50 &&
+    guideScore >= 0.48;
+
   const edgeRefined = edgeCandidate
     ? refineCardBoxByKnownRatio(pixels,work.width,work.height,edgeCandidate)
     : null;
@@ -723,11 +790,13 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
 
   let best: Box | null = null;
 
-  if(edgeReliable && edgeRefined){
+  if(guideReliable && guideRefined){
+    best=guideRefined;
+  }else if(edgeReliable && edgeRefined){
     best=edgeRefined;
   }else{
-    // Fallback: cor/faixas ajudam apenas a encontrar um candidato inicial.
-    // Todo candidato ainda passa pelo refinamento por quatro bordas e proporcao.
+    // Fallback final: cor/faixas apenas fornecem uma semente.
+    // A caixa ainda precisa ser refinada pelas quatro bordas e pela proporcao.
     const fallbackRaw = [runCandidate,colorCandidate]
       .filter((candidate): candidate is Box => candidate !== null);
 
@@ -739,8 +808,7 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
       (a,b)=>scoreCardShape(b,work.width,work.height)-scoreCardShape(a,work.width,work.height)
     )[0] ?? null;
 
-    // Se o fallback falhar mas existia uma borda parcial, usamos a borda refinada
-    // em vez de aceitar uma superficie de cor pior.
+    if(!best && guideRefined) best=guideRefined;
     if(!best && edgeRefined) best=edgeRefined;
   }
   const bestWidthShare = best ? (best.maxX - best.minX + 1) / work.width : 0;
