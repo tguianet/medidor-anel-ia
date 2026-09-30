@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { calibratePhoto } from "../vision";
+import { calibratePhoto } from "./visionV2";
 
 type LightResult={
   confidence:number;
