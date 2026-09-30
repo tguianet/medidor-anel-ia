@@ -70,15 +70,26 @@ export function useTestCameraStream() {
       video.autoplay = true;
       video.playsInline = true;
       video.setAttribute("playsinline", "true");
+      video.setAttribute("autoplay", "true");
 
-      // Nao bloqueia a abertura esperando play() resolver.
-      // Alguns Androids deixam a Promise pendurada mesmo com o stream ativo.
-      void video.play().catch(() => {
-        // O effect do AppV2 tenta play() novamente quando o stage ja esta montado.
-      });
+      // Android/Chrome pode entregar o MediaStream antes de o elemento <video>
+      // estar realmente pronto para renderizar. Nao bloqueamos a interface,
+      // mas insistimos no play assim que os metadados chegam e em alguns
+      // frames seguintes, ate a imagem ficar visivel.
+      const tryPlay = () => {
+        if (!video.srcObject) return;
+        void video.play().catch(() => {});
+      };
+
+      video.onloadedmetadata = tryPlay;
+      video.oncanplay = tryPlay;
+
+      tryPlay();
+      window.setTimeout(tryPlay, 120);
+      window.setTimeout(tryPlay, 350);
+      window.setTimeout(tryPlay, 800);
 
       // Se chegou aqui, o navegador entregou um MediaStream valido.
-      // Liberamos a UI imediatamente para nunca ficar presa em "Abrindo camera...".
       setCameraOpening(false);
       setError("");
     } catch (reason) {
