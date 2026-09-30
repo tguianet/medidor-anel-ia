@@ -309,26 +309,16 @@ const loadImage = async (src: string) => {
   return image;
 };
 
-// Cor NAO e criterio de validade do cartao.
-// O cartao e reconhecido prioritariamente pelas bordas, proporcao e tamanho
-// padrao 85,60 x 53,98 mm. Esta leitura existe somente como plano B quando
-// as bordas estiverem pouco visiveis.
-//
-// Aceitamos qualquer matiz (azul, verde, vermelho, amarelo, roxo etc.) e
-// tambem superficies neutras claras/escuras (cartoes brancos, cinza e pretos).
-// A etapa posterior de forma/proporcao impede que a cor, sozinha, valide algo
-// que nao tenha geometria de cartao.
+// Cor não é uma regra de calibração. Esta leitura existe somente como plano B
+// quando as bordas estiverem pouco visíveis; o critério principal é o formato
+// retangular padrão do cartão.
 export const isChromaticCardSurface = (r: number, g: number, b: number) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  const brightness = (r + g + b) / 3;
   const saturation = (max - min) / Math.max(1, max);
-
-  const coloredSurface = max > 35 && saturation >= 0.16;
-  const lightNeutralSurface = saturation < 0.16 && brightness >= 175;
-  const darkNeutralSurface = saturation < 0.16 && brightness <= 72;
-
-  return coloredSurface || lightNeutralSurface || darkNeutralSurface;
+  const coolColor = b > r * 1.08 || g > r * 1.08;
+  const vividRed = r > g * 1.55 && r > b * 1.55;
+  return max > 50 && saturation > 0.28 && (coolColor || vividRed);
 };
 
 export const percentile = (values: number[], amount: number) => {
@@ -696,53 +686,16 @@ export async function calibratePhoto(photo: string): Promise<CardCalibration> {
   // Cada candidato bruto passa por um refinamento baseado nas quatro bordas
   // e na proporção física real 85,60 x 53,98 mm. Assim elementos conectados
   // acima/abaixo do cartão não entram na caixa final.
-  // PRIORIDADE DE DETECCAO:
-  // 1) bordas fisicas reais do cartao;
-  // 2) somente se nao houver borda confiavel, usamos forma/faixa de cor como fallback.
-  //
-  // A cor nunca deve ganhar de uma borda fisica valida, porque o que interessa
-  // para a calibracao e a geometria real do cartao (85,60 x 53,98 mm).
-  const edgeRefined = edgeCandidate
-    ? refineCardBoxByKnownRatio(pixels,work.width,work.height,edgeCandidate)
-    : null;
+  const rawCandidates = [edgeCandidate, runCandidate, colorCandidate]
+    .filter((candidate): candidate is Box => candidate !== null);
 
-  const edgeScore = edgeRefined
-    ? scoreCardShape(edgeRefined,work.width,work.height)
-    : 0;
+  const candidates = rawCandidates.map(candidate =>
+    refineCardBoxByKnownRatio(pixels,work.width,work.height,candidate)
+  );
 
-  const edgeWidthShare = edgeRefined
-    ? (edgeRefined.maxX-edgeRefined.minX+1)/work.width
-    : 0;
-
-  // Consideramos a borda fisica confiavel quando a geometria esta coerente
-  // com o cartao inteiro na guia. Nessa condicao, ignoramos completamente a cor.
-  const edgeReliable =
-    edgeRefined !== null &&
-    edgeWidthShare >= 0.42 &&
-    edgeScore >= 0.42;
-
-  let best: Box | null = null;
-
-  if(edgeReliable && edgeRefined){
-    best=edgeRefined;
-  }else{
-    // Fallback: cor/faixas ajudam apenas a encontrar um candidato inicial.
-    // Todo candidato ainda passa pelo refinamento por quatro bordas e proporcao.
-    const fallbackRaw = [runCandidate,colorCandidate]
-      .filter((candidate): candidate is Box => candidate !== null);
-
-    const fallbackCandidates = fallbackRaw.map(candidate =>
-      refineCardBoxByKnownRatio(pixels,work.width,work.height,candidate)
-    );
-
-    best = fallbackCandidates.sort(
-      (a,b)=>scoreCardShape(b,work.width,work.height)-scoreCardShape(a,work.width,work.height)
-    )[0] ?? null;
-
-    // Se o fallback falhar mas existia uma borda parcial, usamos a borda refinada
-    // em vez de aceitar uma superficie de cor pior.
-    if(!best && edgeRefined) best=edgeRefined;
-  }
+  const best = candidates.sort(
+    (a,b)=>scoreCardShape(b,work.width,work.height)-scoreCardShape(a,work.width,work.height)
+  )[0];
   const bestWidthShare = best ? (best.maxX - best.minX + 1) / work.width : 0;
   if (!best || bestWidthShare < 0.42) throw new Error("Não encontrei a base inteira do cartão. Deixe os dois cantos inferiores visíveis e alinhe o cartão na guia.");
 
