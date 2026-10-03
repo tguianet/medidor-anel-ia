@@ -2118,8 +2118,10 @@ export default function AppV2() {
 
     for(const index of seedOrder){
       const yPercent=yPercents[index];
-      const leftGuide=toImageX(leftLine);
-      const rightGuide=toImageX(rightLine);
+      // Depois que os snaps inclinarem as linhas, a semente acompanha a
+      // geometria real do dedo naquele Y, em vez de voltar para uma vertical fixa.
+      const leftGuide=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+      const rightGuide=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
       const candidate=sampleAt(yPercent,leftGuide,rightGuide,null,null,seedRadius);
       if(candidate){
         seedIndex=index;
@@ -2139,10 +2141,11 @@ export default function AppV2() {
       for(let index=seedIndex+step;index>=0&&index<yPercents.length;index+=step){
         const yPercent=yPercents[index];
 
-        // Cada corte volta a usar as linhas manuais como centro de busca.
-        // A borda anterior entra apenas como continuidade, impedindo saltos.
-        const manualLeft=toImageX(leftLine);
-        const manualRight=toImageX(rightLine);
+        // Cada corte usa a linha ja inclinada pelos snaps como centro de busca.
+        // Assim a guia segue o eixo real do dedo e nao regride para a horizontal
+        // da tela quando o dedo esta alguns graus torto.
+        const manualLeft=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+        const manualRight=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
         let pair=sampleAt(
           yPercent,
           manualLeft,
