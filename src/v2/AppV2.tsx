@@ -1687,8 +1687,15 @@ export default function AppV2() {
       return candidates.reduce((best,item)=>item.score>best.score?item:best,candidates[0]);
     };
 
-    // Varias amostras verticais curtas para privilegiar um contorno continuo.
-    const sampleOffsets=[-24,-16,-8,0,8,16,24].map(v=>v/Math.max(1,zoom));
+    // V2: usa uma faixa vertical bem maior do dedo com 300 pontos de snap.
+    // Os pontos existem somente sobre a linha/contorno analisado e servem para
+    // estimar a borda continua com muito mais cobertura, sem "pontos soltos".
+    const snapSampleCount=300;
+    const snapHalfSpan=Math.min(150,Math.max(90,source.height*0.12))/Math.max(1,zoom);
+    const sampleOffsets=Array.from({length:snapSampleCount},(_,index)=>{
+      if(snapSampleCount<=1) return 0;
+      return -snapHalfSpan+(index/(snapSampleCount-1))*snapHalfSpan*2;
+    });
     const rawPoints:{x:number;y:number;score:number}[]=[];
 
     for(const off of sampleOffsets){
