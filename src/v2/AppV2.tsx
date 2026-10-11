@@ -616,13 +616,40 @@ export default function AppV2() {
           const refinedLeft=Math.min(leftEdge.position,rightEdge.position-20)-LEGACY_CARD_EDGE_OUTWARD_PX;
           const refinedRight=Math.max(rightEdge.position,leftEdge.position+20)+LEGACY_CARD_EDGE_OUTWARD_PX;
 
-          const bottomEdge=findCardEdge(image,{
-            side:"bottom",
-            expected:bottom0,
-            from:refinedLeft+cardW*0.10,
-            to:refinedRight-cardW*0.10,
-            searchPx:14,
-          });
+          // Base do cartao: detector ORIGINAL do site principal (cinza,
+          // contraste +/-3 px, penalidade de distancia). Com o cartao apoiado
+          // sobre os dedos, abaixo dele alternam pele/madeira/vao; o detector
+          // novo podia preferir uma linha interna do cartao e jogar a regiao
+          // do anel para cima. A base so posiciona a regiao anatomica; a
+          // escala vem das laterais (novas, independentes da cor).
+          const grayAt=(x:number,y:number)=>{
+            const ix=Math.max(0,Math.min(canvas.width-1,Math.round(x)));
+            const iy=Math.max(0,Math.min(canvas.height-1,Math.round(y)));
+            const o=(iy*canvas.width+ix)*4;
+            return image.data[o]*0.299+image.data[o+1]*0.587+image.data[o+2]*0.114;
+          };
+          const legacyRobustMean=(values:number[])=>{
+            if(!values.length) return 0;
+            const ordered=[...values].sort((a,b)=>a-b);
+            const trim=Math.floor(ordered.length*0.18);
+            const kept=ordered.slice(trim,Math.max(trim+1,ordered.length-trim));
+            return kept.reduce((sum,value)=>sum+value,0)/kept.length;
+          };
+          const bottomEdge=(()=>{
+            let bestY=bottom0;
+            let bestScore=-Infinity;
+            for(let dy=-14;dy<=14;dy+=1){
+              const y=bottom0+dy;
+              const contrasts:number[]=[];
+              for(let x=refinedLeft+cardW*0.10;x<=refinedRight-cardW*0.10;x+=Math.max(4,cardW/28)){
+                contrasts.push(Math.abs(grayAt(x,y-3)-grayAt(x,y+3)));
+              }
+              const edge=legacyRobustMean(contrasts);
+              const score=edge-Math.abs(dy)*0.20;
+              if(score>bestScore){bestScore=score;bestY=y;}
+            }
+            return {position:bestY,shift:bestY-bottom0,strength:bestScore,reliable:bestScore>=7};
+          })();
 
           const debug={
             left:{x:leftEdge.position,shift:leftEdge.shift,strength:leftEdge.strength,coverage:leftEdge.coverage,consistency:leftEdge.consistency,reliable:leftEdge.reliable},
@@ -2501,6 +2528,7 @@ export default function AppV2() {
 
   const widthAnalysis = useMemo(() => {
     const empty = {
+      failReason:null as string|null,
       oldMm:null as number|null,
       newMm:null as number|null,
       stats:null as ReturnType<typeof robustWidthStats>|null,
@@ -2513,7 +2541,8 @@ export default function AppV2() {
       normalizedMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
       measurementSource:"intersection-85.60" as const,
     };
-    if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
+    if(!pixelsPerMm) return {...empty,failReason:"escala do cartão ausente"};
+    if(!leftLocked||!rightLocked) return {...empty,failReason:"linhas do dedo não confirmadas"};
 
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     const currentDetectedRegionY=
@@ -2538,7 +2567,7 @@ export default function AppV2() {
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
-    if(!samples || samples.length<35) return empty;
+    if(!samples || samples.length<35) return {...empty,failReason:`bordas do dedo encontradas em ${samples?.length ?? 0}/50 pontos (mínimo 35) na altura Y ${anatomicalGuideY.toFixed(1)}% · base do cartão ${cardBaseYPercent.toFixed(1)}%`};
 
     const baseMmPerPx=1/pixelsPerMm;
 
@@ -2659,6 +2688,7 @@ export default function AppV2() {
     const activeRobust=localRobust;
 
     return {
+      failReason:null as string|null,
       oldMm:activeStable,
       newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
       stats:activeStats,
@@ -2678,7 +2708,7 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
     anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY,
-    photoPixelsReady
+    photoPixelsReady,cardBaseYPercent
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
@@ -4517,6 +4547,8 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              {widthAnalysis.failReason && <span>Motivo do n/d: {widthAnalysis.failReason}</span>}
+              {liveWidthMm!==null && !captureQualityGate.accepted && <span>Foto recusada: {captureQualityGate.reasons.join(" · ")}</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
