@@ -26,6 +26,11 @@ export type CalibrationV2Snapshot = {
   gateAccepted: boolean;
   gateReasons: string[];
   appVersion: string;
+  /** Serie de fotos: medida de cada foto (null = reprovada). */
+  shotWidthsMm?: (number | null)[];
+  shotSpreadMm?: number | null;
+  shotValid?: number | null;
+  shotOutlierIndex?: number | null;
 };
 
 type RecordV2 = CalibrationV2Snapshot & {

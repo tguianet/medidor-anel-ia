@@ -8,6 +8,7 @@ import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, R
 import { wearableRingImage } from "../types";
 import FrozenIntroScreen from "./FrozenIntroScreen";
 import CalibrationPanelV2, { type CalibrationV2Snapshot } from "./CalibrationPanelV2";
+import { decideSeries, seriesFailMessage } from "./multiShot";
 import FrozenCameraScreen from "./FrozenCameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
@@ -22,6 +23,45 @@ const USE_PHYSICAL_EDGE_AS_PRIMARY = true;
 const PHYSICAL_EDGE_OFFSET_MM = 0.05;
 // Distancia ate a divisa entre dois aros em que avisamos o cliente.
 const RING_BOUNDARY_WARNING_MM = 0.03;
+
+// SERIE DE FOTOS (1 toque = varias fotos ao longo de ~3 s; aro = mediana).
+const MULTI_SHOT_ENABLED = true;
+const MULTI_SHOT_COUNT = 4;
+const MULTI_SHOT_INTERVAL_MS = 900; // 0 / 0,9 / 1,8 / 2,7 s
+const MULTI_SHOT_FRAMES_PER_SHOT = 3; // mini-rajada por foto contra borrado
+const MULTI_SHOT_MIN_VALID = 3;
+const MULTI_SHOT_MAX_SPREAD_MM = 0.15;
+const MULTI_SHOT_SETTLE_MS = 700; // medida parada por este tempo = estabilizou
+const MULTI_SHOT_SHOT_TIMEOUT_MS = 7000;
+const MULTI_SHOT_BLOCKED_GIVEUP_MS = 2500;
+
+type MultiShotEntry = {
+  index:number;
+  photo:string|null;
+  mm:number|null;
+  rawMm:number|null;
+  ring:number|null;
+  accepted:boolean;
+  reason:string;
+  angleDeg:number|null;
+};
+type MultiShotState = {
+  status:"idle"|"capturing"|"analyzing"|"done"|"failed";
+  taken:number;
+  analyzed:number;
+  shots:MultiShotEntry[];
+  medianMm:number|null;
+  spreadMm:number|null;
+  validCount:number;
+  photoKey:string;
+  hints:string[];
+  failReason:string;
+  outlierIndex:number|null;
+};
+const MULTI_SHOT_IDLE:MultiShotState = {
+  status:"idle", taken:0, analyzed:0, shots:[], medianMm:null, spreadMm:null,
+  validCount:0, photoKey:"", hints:[], failReason:"", outlierIndex:null,
+};
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
@@ -90,6 +130,51 @@ const projectPoint = (h:Homography, point:Point):Point => {
 export default function AppV2() {
   const camera = useFrozenCameraStream();
   const deviceQuality = useDeviceCaptureQuality(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION);
+  // Leitura sempre atual do sensor, para a serie de fotos (evita closure antiga).
+  const deviceQualityRef = useRef(deviceQuality);
+  deviceQualityRef.current = deviceQuality;
+  const [multiShot, setMultiShot] = useState<MultiShotState>(MULTI_SHOT_IDLE);
+  const multiShotSeriesRef = useRef(0);
+  // Sonda atualizada a cada render com a medida da foto em processamento.
+  const multiShotProbeRef = useRef<{
+    photo:string;
+    pixelsReady:boolean;
+    snapshot:CalibrationV2Snapshot|null;
+    hints:string[];
+    blockedReason:string|null;
+  }>({photo:"",pixelsReady:false,snapshot:null,hints:[],blockedReason:null});
+
+  // Espera a medida de uma foto parar de mudar (o pipeline ajusta linhas e
+  // regiao do anel em alguns renders) e devolve a leitura estabilizada.
+  const waitForSettledProbe = async (photoKey:string, alive:()=>boolean) => {
+    const started=performance.now();
+    let lastSignature="";
+    let stableSince=0;
+    let blockedSince=0;
+    while(alive() && performance.now()-started<MULTI_SHOT_SHOT_TIMEOUT_MS){
+      await new Promise<void>((resolve)=>window.setTimeout(resolve,100));
+      const probe=multiShotProbeRef.current;
+      if(probe.photo!==photoKey || !probe.pixelsReady) continue;
+      const now=performance.now();
+      if(probe.snapshot){
+        blockedSince=0;
+        const snap=probe.snapshot;
+        const signature=`${snap.usedWidthMm.toFixed(3)}|${snap.gateAccepted}|${snap.widthSource}|${snap.physicalRawMm ?? ""}`;
+        if(signature!==lastSignature){
+          lastSignature=signature;
+          stableSince=now;
+          continue;
+        }
+        if(now-stableSince>=MULTI_SHOT_SETTLE_MS) return {...probe};
+      }else if(probe.blockedReason){
+        lastSignature="";
+        if(!blockedSince) blockedSince=now;
+        if(now-blockedSince>=MULTI_SHOT_BLOCKED_GIVEUP_MS) return {...probe};
+      }
+    }
+    const last=multiShotProbeRef.current;
+    return last.photo===photoKey ? {...last} : null;
+  };
   // Diagnostico privado: fica dentro da mesma pagina para nao interferir
   // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
   const [debugMode, setDebugMode] = useState(false);
@@ -308,6 +393,8 @@ export default function AppV2() {
   // A captura acontece somente quando o usuario toca no botao da camera.
 
   const openCamera = async () => {
+    multiShotSeriesRef.current++;
+    setMultiShot(MULTI_SHOT_IDLE);
     if(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION){
       void deviceQuality.requestPermission();
     }
@@ -449,30 +536,29 @@ export default function AppV2() {
       measurementMode==="finger" &&
       !diameterPhotoTestMode;
 
-    let selectedCanvas:HTMLCanvasElement;
-    let capturedPhoto:string;
-    let selectedBurstCalibration:Awaited<ReturnType<typeof calibratePhoto>> | null=null;
+    const sleep=(ms:number)=>new Promise<void>((resolve)=>window.setTimeout(resolve,ms));
 
-    if(useBurst){
-      camera.setError("Selecionando automaticamente o melhor quadro...");
-      const candidates:BurstCandidate[]=[];
-
-      for(let index=0;index<8;index++){
-        const canvas=drawCurrentFrame();
+    // Captura N quadros seguidos da camera (sem calibrar ainda).
+    const grabFrames=async (count:number, gapMs:number)=>{
+      const list:BurstCandidate[]=[];
+      for(let index=0;index<count;index++){
+        const frameCanvas=drawCurrentFrame();
         const guide=analyzeLiveCardGuide(video);
-        candidates.push({
-          canvas,
-          photo:canvas.toDataURL("image/jpeg",0.94),
+        list.push({
+          canvas:frameCanvas,
+          photo:frameCanvas.toDataURL("image/jpeg",0.94),
           guide,
           score:scoreGuide(guide),
           consistencyScore:0,
           calibration:null,
         });
-        if(index<7){
-          await new Promise<void>((resolve)=>window.setTimeout(resolve,65));
-        }
+        if(index<count-1) await sleep(gapMs);
       }
+      return list;
+    };
 
+    // Escolhe o melhor quadro de uma rajada (mesma regra de antes).
+    const pickBestFrame=async (candidates:BurstCandidate[]):Promise<{best:BurstCandidate|null; error:string}>=>{
       // Consistencia geométrica da própria rajada:
       // calculamos a mediana da razão dedo/cartão e penalizamos frames
       // que fazem o dedo parecer artificialmente maior ou menor.
@@ -501,9 +587,8 @@ export default function AppV2() {
         }
       }
 
-      // Calibramos os 8 frames antes de escolher. Um frame só pode vencer
-      // a rajada se também for elegível para o fluxo automático; assim não
-      // escolhemos um quadro bonito/consistente que depois para na etapa do cartão.
+      // Calibramos todos os frames antes de escolher. Um frame só pode vencer
+      // se também for elegível para o fluxo automático.
       for(const candidate of candidates){
         try{
           candidate.calibration=await calibratePhoto(candidate.photo);
@@ -518,8 +603,7 @@ export default function AppV2() {
       );
 
       if(!autoEligible.length){
-        camera.setError("A rajada não encontrou um quadro com calibração suficiente do cartão. Reenquadre cartão e dedo e tente novamente.");
-        return;
+        return {best:null,error:"A rajada não encontrou um quadro com calibração suficiente do cartão. Reenquadre cartão e dedo e tente novamente."};
       }
 
       // Entre os quadros que já passaram pela calibração mínima, vence o mais
@@ -527,37 +611,166 @@ export default function AppV2() {
       // do cartão servem como desempate.
       let best:BurstCandidate|null=null;
       let bestCombined=-Infinity;
-
       for(const candidate of autoEligible){
         const calibration=candidate.calibration!;
         const combined=
           candidate.consistencyScore*1.35 +
           candidate.score*0.65 +
           calibration.confidence*0.45;
-
         if(combined>bestCombined){
           best=candidate;
           bestCombined=combined;
         }
       }
-
       if(!best || !best.calibration){
-        camera.setError("Não encontrei um quadro confiável nesta rajada. Mantenha cartão e dedo no enquadramento e tente novamente.");
-        return;
+        return {best:null,error:"Não encontrei um quadro confiável nesta rajada. Mantenha cartão e dedo no enquadramento e tente novamente."};
+      }
+      return {best,error:""};
+    };
+
+    // SERIE DE FOTOS: MULTI_SHOT_COUNT fotos ao longo de ~3 s. Cada foto e
+    // medida pelo MESMO pipeline de sempre; o aro sai da mediana.
+    if(useBurst && MULTI_SHOT_ENABLED){
+      const seriesId=++multiShotSeriesRef.current;
+      const alive=()=>multiShotSeriesRef.current===seriesId;
+
+      type RawShot={frames:BurstCandidate[]; device:typeof frozenDeviceQuality};
+      const rawShots:RawShot[]=[];
+      setMultiShot({...MULTI_SHOT_IDLE,status:"capturing",taken:0});
+      camera.setError("");
+      const startedAt=performance.now();
+      for(let index=0;index<MULTI_SHOT_COUNT;index++){
+        const wait=startedAt+index*MULTI_SHOT_INTERVAL_MS-performance.now();
+        if(wait>0) await sleep(wait);
+        if(!alive()) return;
+        const liveDevice=deviceQualityRef.current;
+        const frames=await grabFrames(MULTI_SHOT_FRAMES_PER_SHOT,60);
+        rawShots.push({
+          frames,
+          device:{
+            devicePitch:liveDevice?.devicePitch ?? null,
+            deviceRoll:liveDevice?.deviceRoll ?? null,
+            deviceMotion:liveDevice?.deviceMotion ?? null,
+            stabilityScore:liveDevice?.stabilityScore ?? null,
+          },
+        });
+        setMultiShot((current)=>({...current,taken:index+1}));
       }
 
+      setMultiShot((current)=>({...current,status:"analyzing",analyzed:0}));
+      const shots:MultiShotEntry[]=[];
+      const hintSet=new Set<string>();
+
+      for(let index=0;index<rawShots.length;index++){
+        if(!alive()) return;
+        const raw=rawShots[index];
+        const {best}=await pickBestFrame(raw.frames);
+        if(!best || !best.calibration){
+          shots.push({index,photo:null,mm:null,rawMm:null,ring:null,accepted:false,reason:"cartão não encontrado",angleDeg:null});
+          setMultiShot((current)=>({...current,analyzed:index+1,shots:[...shots]}));
+          continue;
+        }
+        resetMeasurementSession();
+        setCaptureDeviceQuality(raw.device);
+        await processSelectedPhoto(best.canvas,best.photo,best.calibration,true);
+        const probe=await waitForSettledProbe(best.photo,alive);
+        if(!alive()) return;
+        const snap=probe?.snapshot ?? null;
+        for(const hint of probe?.hints ?? []) hintSet.add(hint);
+        const accepted=!!snap && snap.gateAccepted && snap.widthSource==="borda-fisica";
+        shots.push({
+          index,
+          photo:best.photo,
+          mm:snap?.usedWidthMm ?? null,
+          rawMm:snap?.physicalRawMm ?? null,
+          ring:snap?.predictedRing ?? null,
+          accepted,
+          reason:accepted
+            ? ""
+            : snap
+              ? (snap.gateReasons[0] ?? "borda física indisponível")
+              : (probe?.blockedReason ?? "medição não estabilizou"),
+          angleDeg:snap?.fingerAngleDeg ?? null,
+        });
+        setMultiShot((current)=>({...current,analyzed:index+1,shots:[...shots]}));
+      }
+
+      const decision=decideSeries(shots,MULTI_SHOT_MIN_VALID,MULTI_SHOT_MAX_SPREAD_MM);
+      if(!decision.ok){
+        setMultiShot((current)=>({
+          ...current,
+          status:"failed",
+          shots:[...shots],
+          hints:decision.reason==="variacao-alta" ? [...hintSet,"steady"] : [...hintSet],
+          failReason:seriesFailMessage(decision,MULTI_SHOT_COUNT,MULTI_SHOT_MIN_VALID,MULTI_SHOT_MAX_SPREAD_MM),
+          spreadMm:decision.spreadMm,
+          validCount:decision.validCount,
+        }));
+        return;
+      }
+      const medianMm=decision.medianMm;
+      const spread=decision.spreadMm;
+      const chosen=shots[decision.chosenIndex];
+
+      // Reabre a foto mais proxima da mediana para a tela de resultado.
+      setMultiShot((current)=>({
+        ...current,
+        status:"done",
+        shots:[...shots],
+        medianMm,
+        spreadMm:spread,
+        validCount:decision.validCount,
+        photoKey:chosen.photo ?? "",
+        hints:[],
+        failReason:"",
+        outlierIndex:decision.outlierIndex,
+      }));
+      const chosenRaw=rawShots[chosen.index];
+      const rePick=await pickBestFrame(chosenRaw.frames);
+      if(!alive()) return;
+      if(rePick.best && rePick.best.calibration){
+        resetMeasurementSession();
+        setCaptureDeviceQuality(chosenRaw.device);
+        // Garante que photoKey bata com a foto reaberta.
+        setMultiShot((current)=>({...current,photoKey:rePick.best!.photo}));
+        await processSelectedPhoto(rePick.best.canvas,rePick.best.photo,rePick.best.calibration,true);
+      }
+      return;
+    }
+
+    let selectedCanvas:HTMLCanvasElement;
+    let capturedPhoto:string;
+    let selectedBurstCalibration:Awaited<ReturnType<typeof calibratePhoto>> | null=null;
+
+    if(useBurst){
+      camera.setError("Selecionando automaticamente o melhor quadro...");
+      const candidates=await grabFrames(8,65);
+      const {best,error}=await pickBestFrame(candidates);
+      if(!best || !best.calibration){
+        camera.setError(error);
+        return;
+      }
       selectedCanvas=best.canvas;
       capturedPhoto=best.photo;
       selectedBurstCalibration=best.calibration;
-      const ratioText=best.guide.fingerCardRatio===null
-        ? "n/d"
-        : best.guide.fingerCardRatio.toFixed(4);
       camera.setError("");
     }else{
       selectedCanvas=drawCurrentFrame();
       capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
     }
 
+    await processSelectedPhoto(selectedCanvas,capturedPhoto,selectedBurstCalibration,false);
+  };
+
+  // Mede UMA foto com o pipeline completo (cartao -> linhas do dedo -> borda).
+  // forceSinglePhotoBranch: usado pela serie de fotos para reprocessar cada
+  // foto no fluxo de 1 foto mesmo depois da primeira ja ter concluido.
+  const processSelectedPhoto = async (
+    selectedCanvas:HTMLCanvasElement,
+    capturedPhoto:string,
+    selectedBurstCalibration:Awaited<ReturnType<typeof calibratePhoto>> | null,
+    forceSinglePhotoBranch:boolean,
+  ) => {
     // Alias mantido para o restante do fluxo existente.
     const canvas=selectedCanvas;
     setPhoto(capturedPhoto);
@@ -567,7 +780,7 @@ export default function AppV2() {
     // 2) cartão sobre o dedo, reutilizando a mesma reta como gabarito e
     //    reajustando suas pontas na nova foto. A escala vem SOMENTE da
     //    reta ajustada na segunda foto.
-    if (measurementMode === "finger" && !diameterPhotoTestMode && fingerCardCalibrationStep !== "done") {
+    if (measurementMode === "finger" && !diameterPhotoTestMode && (forceSinglePhotoBranch || fingerCardCalibrationStep !== "done")) {
       setPixelsPerMm(null);
       setCalibrationConfidence(0);
       setPhase("card");
@@ -3623,8 +3836,21 @@ export default function AppV2() {
     physicalEdgeProfileTest.widthMm>0
       ? physicalEdgeProfileTest.widthMm + PHYSICAL_EDGE_OFFSET_MM
       : null;
-  const commercialWidthMm = physicalPrimaryWidthMm ?? result?.widthMm ?? null;
-  const commercialRingResolution = physicalPrimaryWidthMm!==null
+  const multiShotFinal =
+    multiShot.status==="done" &&
+    multiShot.medianMm!==null &&
+    multiShot.photoKey!=="" &&
+    multiShot.photoKey===photo
+      ? multiShot
+      : null;
+  const commercialWidthMm = multiShotFinal?.medianMm ?? physicalPrimaryWidthMm ?? result?.widthMm ?? null;
+  const commercialRingResolution = multiShotFinal
+    ? {
+        ringSize:classifyFingerWidthMm(multiShotFinal.medianMm as number).exactRingSize,
+        adjusted:false,
+        reason:`mediana de ${multiShotFinal.validCount} fotos · borda física`,
+      }
+    : physicalPrimaryWidthMm!==null
     ? {
         ringSize:classifyFingerWidthMm(physicalPrimaryWidthMm).exactRingSize,
         adjusted:false,
@@ -3843,24 +4069,35 @@ export default function AppV2() {
   // Em modo de teste (debugMode) o diagnostico continua exibindo tudo.
   // Enquanto os pixels da foto nao carregaram, a borda fisica ainda nao foi
   // medida: nao julgamos (evita piscar "refazer foto") nem mostramos o aro.
-  const validationPending = !photoPixelsReady;
+  const pixelsPending = !photoPixelsReady;
+  const multiShotActive = multiShot.status==="capturing" || multiShot.status==="analyzing";
+  const multiShotFailed = multiShot.status==="failed";
+  const validationPending = pixelsPending || multiShotActive;
   const captureRejectedByValidation =
     !validationPending &&
-    experimentalOperationalTest!==null &&
-    !experimentalOperationalTest.accepted;
+    (
+      multiShotFailed ||
+      (
+        multiShotFinal===null &&
+        experimentalOperationalTest!==null &&
+        !experimentalOperationalTest.accepted
+      )
+    );
   const ringVisibleToCustomer = !validationPending && !captureRejectedByValidation;
   const photoFingerAngleDeg = geometricStabilityTest?.fingerAngleDeg ?? null;
   const photoFingerAngleLabel = photoFingerAngleDeg===null
     ? null
     : `Ângulo do dedo na foto: ${Math.abs(photoFingerAngleDeg).toFixed(1).replace(".",",")}°${Math.abs(photoFingerAngleDeg)>5 ? " (limite 5°)" : ""}`;
-  const retakeHints = captureRejectedByValidation
-    ? experimentalOperationalTest!.hints
-    : [];
+  const retakeHints:string[] = !captureRejectedByValidation
+    ? []
+    : multiShotFailed
+      ? multiShot.hints
+      : (experimentalOperationalTest?.hints ?? []);
 
   // Dados da foto atual para o painel de calibracao V2 (modo de teste).
   const calibrationV2Snapshot: CalibrationV2Snapshot | null =
     measurementMode==="finger" &&
-    !validationPending &&
+    !pixelsPending &&
     commercialWidthMm!==null &&
     commercialRingSize!==null
       ? {
@@ -3882,9 +4119,27 @@ export default function AppV2() {
           perspective:geometricStabilityTest?.perspectiveScore ?? null,
           gateAccepted:experimentalOperationalTest?.accepted ?? false,
           gateReasons:experimentalOperationalTest?.reasons ?? [],
-          appVersion:`v2-borda+${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)}`,
+          appVersion:`v2-borda+${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)}${multiShotFinal ? `-serie${MULTI_SHOT_COUNT}` : ""}`,
+          shotWidthsMm:multiShotFinal ? multiShotFinal.shots.map((shot)=>shot.accepted ? shot.mm : null) : [],
+          shotOutlierIndex:multiShotFinal?.outlierIndex ?? null,
+          shotSpreadMm:multiShotFinal?.spreadMm ?? null,
+          shotValid:multiShotFinal?.validCount ?? null,
         }
       : null;
+
+  // Alimenta a sonda usada pela serie de fotos.
+  multiShotProbeRef.current = {
+    photo,
+    pixelsReady:photoPixelsReady,
+    snapshot:calibrationV2Snapshot,
+    hints:experimentalOperationalTest?.hints ?? [],
+    blockedReason:
+      photoPixelsReady && calibrationV2Snapshot===null
+        ? (phase!=="finger"
+            ? "cartão não localizado"
+            : (captureQualityGate.reasons[0] ?? "medida indisponível"))
+        : null,
+  };
 
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
@@ -4103,7 +4358,8 @@ export default function AppV2() {
           referenceCardWidthPercent={fingerCardCalibrationStep === "measurement" ? referenceCardWidthPercent : null}
           referenceCardAngleDeg={fingerCardCalibrationStep === "measurement" ? referenceCardAngleDeg : null}
           singlePhotoTestMode={singlePhotoTestMode}
-          onClose={() => { camera.stopCamera(); setStage("intro"); }}
+          seriesProgress={multiShot.status==="capturing" ? { taken:multiShot.taken, total:MULTI_SHOT_COUNT } : null}
+          onClose={() => { multiShotSeriesRef.current++; setMultiShot(MULTI_SHOT_IDLE); camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
           onRetry={() => void openCamera()}
         />
@@ -4610,7 +4866,10 @@ export default function AppV2() {
           {phase === "finger" && result && leftLocked && rightLocked && captureRejectedByValidation && (
             <div className="analysis-result" role="alert" style={{borderColor:"#e0a352"}}>
               <strong>Vamos tirar outra foto</strong>
-              <span>Esta foto não ficou boa o suficiente para medir seu aro com segurança.</span>
+              <span>{multiShotFailed ? multiShot.failReason : "Esta foto não ficou boa o suficiente para medir seu aro com segurança."}</span>
+              {retakeHints.includes("steady") && (
+                <span>• <strong>Fique parado durante os 3 segundos</strong>: não mexa a mão nem o cartão até o fim da contagem.</span>
+              )}
               {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
               {retakeHints.includes("finger") && (
                 <span>• <strong>Deixe o dedo reto</strong>, alinhado com as duas linhas da guia, sem girar a mão.</span>
@@ -4626,7 +4885,19 @@ export default function AppV2() {
               </button>
             </div>
           )}
-          {phase === "finger" && result && leftLocked && rightLocked && validationPending && (
+          {multiShotActive && (
+            <div className="analysis-result" aria-live="polite">
+              <strong>Analisando as fotos… {Math.min(multiShot.analyzed+1,MULTI_SHOT_COUNT)} de {MULTI_SHOT_COUNT}</strong>
+              <span style={{display:"flex",gap:8,fontSize:18}}>
+                {Array.from({length:MULTI_SHOT_COUNT},(_,index)=>{
+                  const shot=multiShot.shots[index];
+                  return <b key={index} style={{color:!shot ? "rgba(255,255,255,.35)" : shot.accepted ? "#52e0a3" : "#f0a35e"}}>{!shot ? "○" : shot.accepted ? "✓" : "✕"}</b>;
+                })}
+              </span>
+              <small>Cada foto é medida separadamente; o aro sai da medida do meio.</small>
+            </div>
+          )}
+          {!multiShotActive && phase === "finger" && result && leftLocked && rightLocked && validationPending && (
             <div className="analysis-result" aria-live="polite">
               <span>Conferindo a qualidade da foto…</span>
             </div>
@@ -4641,6 +4912,9 @@ export default function AppV2() {
                   Sua medida ficou na divisa entre o <strong>{ringBoundaryAdvice.smaller}</strong> e o <strong>{ringBoundaryAdvice.larger}</strong>. Se ficar em dúvida, prefira o <strong>{ringBoundaryAdvice.larger}</strong>, que fica mais confortável.
                 </span>
               )}
+              {multiShotFinal && (
+                <small>Medido em {multiShotFinal.validCount} fotos · variação entre elas {(multiShotFinal.spreadMm ?? 0).toFixed(2).replace(".",",")} mm</small>
+              )}
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
               {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
             </div>
@@ -4653,6 +4927,7 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(commercialWidthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm · {commercialRingResolution.reason}{physicalPrimaryWidthMm!==null ? ` (borda ${(physicalPrimaryWidthMm-PHYSICAL_EDGE_OFFSET_MM).toFixed(2)} + ${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)})` : ""}</span>
+              <span>Série: {multiShot.status==="idle" ? "desligada/sem série" : `${multiShot.status} · ` + multiShot.shots.map((shot)=>shot.accepted && shot.mm!==null ? shot.mm.toFixed(2)+(shot.index===multiShot.outlierIndex ? "(descartada)" : "") : `✕(${shot.reason})`).join(" / ") + (multiShot.medianMm!==null ? ` · mediana ${multiShot.medianMm.toFixed(3)} · variação ${(multiShot.spreadMm ?? 0).toFixed(3)}` : "")}</span>
               <span>Fronteira: {ringBoundaryAdvice ? `entre ${ringBoundaryAdvice.smaller} e ${ringBoundaryAdvice.larger} · ${ringBoundaryAdvice.distanceMm.toFixed(3)} mm da divisa` : "longe da divisa"}</span>
               <span>Método anterior (só comparação): {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm · aro "+(result?.ringSize ?? "n/d")}</span>
               {measurementAudit && (
