@@ -30,6 +30,10 @@ const CARD_WIDTH_MM = 85.6;
 const LOUPE_SIZE_PX = 132;
 const LOUPE_EXTRA_ZOOM = 2;
 const RING_HEIGHT_FALLBACK_OFFSET = 5;
+// medidordedov6: a medida usada e a distancia entre as linhas verdes que o
+// usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
+// inclinacao do eixo do dedo.
+const MANUAL_LINES_ONLY = true;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -2622,6 +2626,9 @@ export default function AppV2() {
 
   const widthAnalysis = useMemo(() => {
     const empty = {
+      manualMm:null as number|null,
+      autoMm:null as number|null,
+      manualAngleDeg:0,
       oldMm:null as number|null,
       newMm:null as number|null,
       stats:null as ReturnType<typeof robustWidthStats>|null,
@@ -2635,6 +2642,18 @@ export default function AppV2() {
       measurementSource:"intersection-85.60" as const,
     };
     if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
+
+    // Distancia entre as linhas manuais (lupa), no pixel da foto.
+    const manualRawMm=(()=>{
+      const stage=measureRef.current;
+      const source=photoPixelsRef.current;
+      if(!stage||!source) return null;
+      const rect=stage.getBoundingClientRect();
+      if(!rect.width) return null;
+      const toImageX=(p:number)=>(((p/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width;
+      const px=toImageX(rightLine)-toImageX(leftLine);
+      return px>0 ? px/pixelsPerMm : null;
+    })();
 
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     const currentDetectedRegionY=
@@ -2659,7 +2678,12 @@ export default function AppV2() {
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
-    if(!samples || samples.length<35) return empty;
+    if(!samples || samples.length<35){
+      return {...empty,manualMm:manualRawMm,newMm:MANUAL_LINES_ONLY?manualRawMm:null};
+    }
+    const sortedAngles=samples.map(sample=>sample.axisAngleDeg).filter(Number.isFinite).sort((a,b)=>a-b);
+    const manualAngleDeg=sortedAngles.length?sortedAngles[Math.floor(sortedAngles.length/2)]:0;
+    const manualMm=manualRawMm===null?null:manualRawMm*Math.cos(manualAngleDeg*Math.PI/180);
 
     const baseMmPerPx=1/pixelsPerMm;
 
@@ -2779,9 +2803,13 @@ export default function AppV2() {
     const activeStable=localStable;
     const activeRobust=localRobust;
 
+    const autoMm=VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable;
     return {
+      manualMm,
+      autoMm,
+      manualAngleDeg,
       oldMm:activeStable,
-      newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
+      newMm:MANUAL_LINES_ONLY && manualMm!==null ? manualMm : autoMm,
       stats:activeStats,
       homographyMm:directHomographyValue,
       localScaleMm:localValue,
@@ -4640,6 +4668,8 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              {widthAnalysis.manualMm!==null && <span>SÓ LUPA (usado): {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
+              {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
