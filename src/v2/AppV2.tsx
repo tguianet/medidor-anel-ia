@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
+import { calibratePhoto as calibratePhotoColor } from "./visionV2Color";
+import { refineCardEdgesNew } from "./detectorCompare";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useFrozenCameraStream } from "./FrozenCameraStream";
@@ -25,6 +27,15 @@ const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 // V2: mantido apenas para compatibilidade dos diagnosticos herdados. Sem correcao historica.
 const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
+const LOUPE_SIZE_PX = 132;
+const LOUPE_EXTRA_ZOOM = 2;
+const RING_HEIGHT_FALLBACK_OFFSET = 5;
+// medidordedov6: a medida usada e a distancia entre as linhas verdes que o
+// usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
+// inclinacao do eixo do dedo.
+const MANUAL_LINES_ONLY = true;
+// medidordedov7: largura maxima da copia em alta resolucao (retrato).
+const HI_RES_MAX_WIDTH = 2160;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -127,12 +138,19 @@ export default function AppV2() {
   const [photoPixelsReady, setPhotoPixelsReady] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
+  // medidordedov7: copia em ALTA RESOLUCAO do mesmo quadro, usada so para
+  // exibir (zoom e lupa). O processamento continua na foto 900x1200.
+  const [photoHiRes, setPhotoHiRes] = useState<{forPhoto:string;url:string;width:number;height:number;videoW:number;videoH:number}|null>(null);
+  const hiResBlobByCanvasRef = useRef(new WeakMap<HTMLCanvasElement,{blob:Promise<Blob|null>;width:number;height:number;videoW:number;videoH:number}>());
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
   const [calibrationConfidence, setCalibrationConfidence] = useState(0);
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
+  // DIAGNOSTICO v4: deteccao original x nova na MESMA foto (px no canvas).
+  type DetectorSide = { left:number; right:number; bottom:number; widthPx:number; refined:boolean; boxLeft:number; boxRight:number; boxBottom:number };
+  const [detectorCompare, setDetectorCompare] = useState<null|{ canvasW:number; canvasH:number; original:DetectorSide; nova:DetectorSide|null; error?:string }>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -162,7 +180,7 @@ export default function AppV2() {
   const [rightMagnetConfidence, setRightMagnetConfidence] = useState(0);
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
-  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number}|null>(null);
+  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number;stageW:number;stageH:number;zoom:number}|null>(null);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const [fingerLines, setFingerLines] = useState<Record<FingerSide, Line>>({
@@ -379,7 +397,32 @@ export default function AppV2() {
         sh = video.videoWidth / targetRatio;
         sy = (video.videoHeight - sh) / 2;
       }
-      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      // Quadro em resolucao nativa (limitado a 2160 px de largura).
+      const hiW=Math.round(Math.min(sw,HI_RES_MAX_WIDTH));
+      const hiH=Math.round(hiW/targetRatio);
+      const hi=document.createElement("canvas");
+      hi.width=hiW;
+      hi.height=hiH;
+      const hiCtx=hi.getContext("2d");
+      if(hiCtx){
+        hiCtx.imageSmoothingEnabled=true;
+        hiCtx.imageSmoothingQuality="high";
+        hiCtx.drawImage(video, sx, sy, sw, sh, 0, 0, hiW, hiH);
+        const ctx=canvas.getContext("2d");
+        if(ctx){
+          ctx.imageSmoothingEnabled=true;
+          ctx.imageSmoothingQuality="high";
+          ctx.drawImage(hi, 0, 0, hiW, hiH, 0, 0, canvas.width, canvas.height);
+        }
+        const blob=new Promise<Blob|null>((resolve)=>{
+          try{
+            hi.toBlob((b)=>{ resolve(b); hi.width=0; hi.height=0; },"image/jpeg",0.93);
+          }catch{ resolve(null); }
+        });
+        hiResBlobByCanvasRef.current.set(canvas,{blob,width:hiW,height:hiH,videoW:video.videoWidth,videoH:video.videoHeight});
+      }else{
+        canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      }
       return canvas;
     };
 
@@ -550,6 +593,17 @@ export default function AppV2() {
     // Alias mantido para o restante do fluxo existente.
     const canvas=selectedCanvas;
     setPhoto(capturedPhoto);
+    {
+      const hiEntry=hiResBlobByCanvasRef.current.get(selectedCanvas);
+      setPhotoHiRes((current)=>{ if(current) URL.revokeObjectURL(current.url); return null; });
+      if(hiEntry){
+        void hiEntry.blob.then((blob)=>{
+          if(!blob) return;
+          const url=URL.createObjectURL(blob);
+          setPhotoHiRes({forPhoto:capturedPhoto,url,width:hiEntry.width,height:hiEntry.height,videoW:hiEntry.videoW,videoH:hiEntry.videoH});
+        });
+      }
+    }
 
     // Modo dedo em duas fotos:
     // 1) cartão reto para definir a reta física de 85,60 mm;
@@ -735,6 +789,36 @@ export default function AppV2() {
         };
 
         const refined=refineCardEdges();
+
+        // DIAGNOSTICO v4: mesma foto, deteccao nova (nao altera o resultado).
+        setDetectorCompare(null);
+        {
+          const W=canvas.width, H=canvas.height;
+          const original:DetectorSide={
+            left:(refined?refined.left:detectedLeft)/100*W,
+            right:(refined?refined.right:detectedRight)/100*W,
+            bottom:(refined?refined.bottom:detectedBottom)/100*H,
+            widthPx:((refined?refined.right:detectedRight)-(refined?refined.left:detectedLeft))/100*W,
+            refined:!!refined,
+            boxLeft:detectedLeft/100*W, boxRight:detectedRight/100*W, boxBottom:detectedBottom/100*H,
+          };
+          void (async()=>{
+            try{
+              const colorCal=await calibratePhotoColor(capturedPhoto);
+              const bL=clamp(colorCal.cardBox.x*100,2,94);
+              const bR=clamp((colorCal.cardBox.x+colorCal.cardBox.width)*100,6,98);
+              const bB=clamp((colorCal.cardBox.y+colorCal.cardBox.height)*100,10,88);
+              const bT=clamp(colorCal.cardBox.y*100,3,bB-5);
+              const ctx=canvas.getContext("2d",{willReadFrequently:true});
+              if(!ctx) throw new Error("sem contexto");
+              const img=ctx.getImageData(0,0,W,H);
+              const n=refineCardEdgesNew({data:img.data,width:W,height:H},{leftPct:bL,rightPct:bR,topPct:bT,bottomPct:bB});
+              setDetectorCompare({canvasW:W,canvasH:H,original,nova:{...n,boxLeft:bL/100*W,boxRight:bR/100*W,boxBottom:bB/100*H}});
+            }catch(err){
+              setDetectorCompare({canvasW:W,canvasH:H,original,nova:null,error:String(err)});
+            }
+          })();
+        }
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -1023,7 +1107,12 @@ export default function AppV2() {
     setLeftLine(anchoredLeft);
     setRightLine(anchoredRight);
 
-    const nextMeasureY=clamp(baseBottom+17,42,76);
+    // ALTURA PADRAO DO ANEL quando o contorno/landmarks nao detectam a regiao:
+    // antes era base+17%, perto da dobra entre os dedos, onde o dedo alarga
+    // (foto do cartao azul: Y 64% = base 47% + 17 -> 21,88 mm, aro 26).
+    // Fotos que acertaram mediram em base+3,5% (contorno detectado).
+    // Agora o padrao fica dentro da mesma faixa anatomica (base+5%).
+    const nextMeasureY=clamp(baseBottom+RING_HEIGHT_FALLBACK_OFFSET,30,84);
     setMeasureY(nextMeasureY);
     setRingGuideY(nextMeasureY);
     setFingerLines({
@@ -1489,7 +1578,7 @@ export default function AppV2() {
       const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
-      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100),stageW:rect.width,stageH:rect.height,zoom});
     }
     if (target === "right") {
       if (fingerRefineDragRef.current !== "right") {
@@ -1504,7 +1593,7 @@ export default function AppV2() {
       const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
-      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100),stageW:rect.width,stageH:rect.height,zoom});
     }
     if (target === "height") {
       setLeftLocked(false);
@@ -2577,8 +2666,13 @@ export default function AppV2() {
     };
   },[anatomicalRegionOffsetHistoryY]);
 
+  const displayPhoto = photoHiRes && photoHiRes.forPhoto===photo ? photoHiRes.url : photo;
+
   const widthAnalysis = useMemo(() => {
     const empty = {
+      manualMm:null as number|null,
+      autoMm:null as number|null,
+      manualAngleDeg:0,
       oldMm:null as number|null,
       newMm:null as number|null,
       stats:null as ReturnType<typeof robustWidthStats>|null,
@@ -2592,6 +2686,18 @@ export default function AppV2() {
       measurementSource:"intersection-85.60" as const,
     };
     if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
+
+    // Distancia entre as linhas manuais (lupa), no pixel da foto.
+    const manualRawMm=(()=>{
+      const stage=measureRef.current;
+      const source=photoPixelsRef.current;
+      if(!stage||!source) return null;
+      const rect=stage.getBoundingClientRect();
+      if(!rect.width) return null;
+      const toImageX=(p:number)=>(((p/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width;
+      const px=toImageX(rightLine)-toImageX(leftLine);
+      return px>0 ? px/pixelsPerMm : null;
+    })();
 
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     const currentDetectedRegionY=
@@ -2616,7 +2722,12 @@ export default function AppV2() {
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
-    if(!samples || samples.length<35) return empty;
+    if(!samples || samples.length<35){
+      return {...empty,manualMm:manualRawMm,newMm:MANUAL_LINES_ONLY?manualRawMm:null};
+    }
+    const sortedAngles=samples.map(sample=>sample.axisAngleDeg).filter(Number.isFinite).sort((a,b)=>a-b);
+    const manualAngleDeg=sortedAngles.length?sortedAngles[Math.floor(sortedAngles.length/2)]:0;
+    const manualMm=manualRawMm===null?null:manualRawMm*Math.cos(manualAngleDeg*Math.PI/180);
 
     const baseMmPerPx=1/pixelsPerMm;
 
@@ -2736,9 +2847,13 @@ export default function AppV2() {
     const activeStable=localStable;
     const activeRobust=localRobust;
 
+    const autoMm=VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable;
     return {
+      manualMm,
+      autoMm,
+      manualAngleDeg,
       oldMm:activeStable,
-      newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
+      newMm:MANUAL_LINES_ONLY && manualMm!==null ? manualMm : autoMm,
       stats:activeStats,
       homographyMm:directHomographyValue,
       localScaleMm:localValue,
@@ -4146,7 +4261,7 @@ export default function AppV2() {
             onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
-            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={displayPhoto} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode ? (
               <svg
                 className="card-lines-overlay"
@@ -4205,17 +4320,19 @@ export default function AppV2() {
                       position:"absolute",
                       left:fingerLoupe.side==="left" ? "72%" : "28%",
                       top:"18%",
-                      width:"132px",
-                      height:"132px",
+                      width:`${LOUPE_SIZE_PX}px`,
+                      height:`${LOUPE_SIZE_PX}px`,
                       transform:"translate(-50%,-50%)",
                       borderRadius:"50%",
                       overflow:"hidden",
                       border:"3px solid #52e0a3",
                       boxShadow:"0 8px 28px rgba(0,0,0,.55)",
-                      backgroundImage:`url("${photo}")`,
+                      backgroundImage:`url("${displayPhoto}")`,
                       backgroundRepeat:"no-repeat",
-                      backgroundSize:"600% 600%",
-                      backgroundPosition:`${fingerLoupe.imageX}% ${fingerLoupe.imageY}%`,
+                      // Lupa centrada EXATAMENTE no cruzamento linha verde x linha amarela,
+                      // com aumento de 2x sobre o zoom atual da tela.
+                      backgroundSize:`${fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
+                      backgroundPosition:`${LOUPE_SIZE_PX/2-fingerLoupe.imageX/100*fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${LOUPE_SIZE_PX/2-fingerLoupe.imageY/100*fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
                       zIndex:12,
                       pointerEvents:"none",
                     }}
@@ -4250,7 +4367,7 @@ export default function AppV2() {
                       fontSize:"10px",
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                    }}>BORDA DA LINHA · 6×</span>
+                    }}>BORDA · {(fingerLoupe.zoom*LOUPE_EXTRA_ZOOM).toFixed(1)}×</span>
                   </div>
                 )}
                 {fingerMagnetSamples && (
@@ -4595,6 +4712,9 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
+              {widthAnalysis.manualMm!==null && <span>SÓ LUPA (usado): {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
+              {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
@@ -4675,6 +4795,29 @@ export default function AppV2() {
                       <small>Diagnóstico somente · nenhum destes testes altera o aro comercial.</small>
                     </div>
                   )}
+                  {detectorCompare && (()=>{
+                    const o=detectorCompare.original, nv=detectorCompare.nova;
+                    const fingerPx=geometricStabilityTest?.currentFingerPx ?? null;
+                    const ring=(mm:number|null)=>mm===null?"n/d":String(classifyFingerWidthMm(mm).exactRingSize);
+                    const mmO=fingerPx!==null?fingerPx*85.6/o.widthPx:null;
+                    const mmN=fingerPx!==null&&nv?fingerPx*85.6/nv.widthPx:null;
+                    const f=(v:number)=>v.toFixed(1);
+                    return (
+                      <div style={{border:"2px solid #1f6feb",padding:12,borderRadius:10,display:"grid",gap:6,background:"rgba(10,25,50,.6)"}}>
+                        <strong>COMPARAÇÃO DE DETECTORES · MESMA FOTO</strong>
+                        <span>Foto: {detectorCompare.canvasW}×{detectorCompare.canvasH} px</span>
+                        <span>ORIGINAL (usado): esq {f(o.left)} · dir {f(o.right)} · base {f(o.bottom)} · LARGURA {f(o.widthPx)} px {o.refined?"":"(sem refino)"}</span>
+                        <span>· caixa inicial: esq {f(o.boxLeft)} · dir {f(o.boxRight)} · base {f(o.boxBottom)}</span>
+                        {nv ? (<>
+                          <span>NOVO (v1/v2): esq {f(nv.left)} · dir {f(nv.right)} · base {f(nv.bottom)} · LARGURA {f(nv.widthPx)} px {nv.refined?"":"(sem refino)"}</span>
+                          <span>· caixa inicial: esq {f(nv.boxLeft)} · dir {f(nv.boxRight)} · base {f(nv.boxBottom)}</span>
+                          <span>DIFERENÇA novo−original: esq {f(nv.left-o.left)} · dir {f(nv.right-o.right)} · base {f(nv.bottom-o.bottom)} · largura {f(nv.widthPx-o.widthPx)} px ({((nv.widthPx/o.widthPx-1)*100).toFixed(2)}%)</span>
+                          <span>Mesmo dedo ({fingerPx===null?"n/d":f(fingerPx)+" px"}): original {mmO===null?"n/d":mmO.toFixed(2)+" mm"} → aro {ring(mmO)} · novo {mmN===null?"n/d":mmN.toFixed(2)+" mm"} → aro {ring(mmN)}</span>
+                        </>) : (<span>Novo detector: falhou {detectorCompare.error ?? ""}</span>)}
+                        <small>Diagnóstico somente · o resultado usa o detector ORIGINAL.</small>
+                      </div>
+                    );
+                  })()}
                   {geometricStabilityTest && (
                     <div
                       style={{
@@ -4691,6 +4834,7 @@ export default function AppV2() {
                       <span>Cartão: {geometricStabilityTest.cardPx.toFixed(1)} px · escala {geometricStabilityTest.mmPerPx.toFixed(4)} mm/px</span>
                       <span>Dedo atual: {geometricStabilityTest.currentFingerPx===null ? "n/d" : geometricStabilityTest.currentFingerPx.toFixed(1)+" px"} · razão dedo/cartão {geometricStabilityTest.currentRatio===null ? "n/d" : geometricStabilityTest.currentRatio.toFixed(4)}</span>
                       <span>Borda física: {geometricStabilityTest.physicalFingerPx===null ? "n/d" : geometricStabilityTest.physicalFingerPx.toFixed(1)+" px"} · razão física/cartão {geometricStabilityTest.physicalRatio===null ? "n/d" : geometricStabilityTest.physicalRatio.toFixed(4)}</span>
+                      <span>Fonte da altura: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "landmarks" : contourAnatomy?.detected ? "contorno anatômico" : `padrão (base + ${RING_HEIGHT_FALLBACK_OFFSET}%)`} · base do cartão {cardBaseYPercent.toFixed(1)}%</span>
                       <span>Altura anatômica Y: {geometricStabilityTest.anatomyY.toFixed(1)}% · ângulo dedo {geometricStabilityTest.fingerAngleDeg===null ? "n/d" : geometricStabilityTest.fingerAngleDeg.toFixed(2)+"°"}</span>
                       <span>Celular: pitch {geometricStabilityTest.pitch===null ? "n/d" : geometricStabilityTest.pitch.toFixed(1)+"°"} · roll {geometricStabilityTest.roll===null ? "n/d" : geometricStabilityTest.roll.toFixed(1)+"°"} · movimento {geometricStabilityTest.motion===null ? "n/d" : geometricStabilityTest.motion.toFixed(2)}</span>
                       <span>Stability {geometricStabilityTest.stability===null ? "n/d" : geometricStabilityTest.stability} · perspective {geometricStabilityTest.perspectiveScore}</span>
