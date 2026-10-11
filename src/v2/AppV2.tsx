@@ -15,6 +15,12 @@ import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./
 
 // Liga/desliga a borda fisica como medida principal do dedo.
 const USE_PHYSICAL_EDGE_AS_PRIMARY = true;
+// Alinha a borda fisica com o metodo em que a curva foi montada.
+// Mediana da diferenca (metodo anterior - borda fisica) em fotos reais: 0,05 mm.
+// 7 fotos de aro conhecido (25, 29, 30): borda pura 4/7, +0,05 -> 6/7.
+const PHYSICAL_EDGE_OFFSET_MM = 0.05;
+// Distancia ate a divisa entre dois aros em que avisamos o cliente.
+const RING_BOUNDARY_WARNING_MM = 0.03;
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
@@ -3614,7 +3620,7 @@ export default function AppV2() {
     physicalEdgeProfileTest.widthMm!==null &&
     Number.isFinite(physicalEdgeProfileTest.widthMm) &&
     physicalEdgeProfileTest.widthMm>0
-      ? physicalEdgeProfileTest.widthMm
+      ? physicalEdgeProfileTest.widthMm + PHYSICAL_EDGE_OFFSET_MM
       : null;
   const commercialWidthMm = physicalPrimaryWidthMm ?? result?.widthMm ?? null;
   const commercialRingResolution = physicalPrimaryWidthMm!==null
@@ -3629,6 +3635,22 @@ export default function AppV2() {
         reason:"método anterior (borda física indisponível) · curva principal direta",
       };
   const commercialRingSize=commercialRingResolution.ringSize;
+
+  // Aviso de fronteira: medida muito perto da divisa entre dois aros.
+  // Nao muda o aro exato; orienta a escolher o maior em caso de duvida.
+  const ringBoundaryAdvice = (() => {
+    if(measurementMode!=="finger" || commercialWidthMm===null || commercialRingSize===null) return null;
+    const classification=classifyFingerWidthMm(commercialWidthMm);
+    const toLower=commercialWidthMm-classification.lowerBoundaryMm;
+    const toUpper=classification.upperBoundaryMm-commercialWidthMm;
+    if(toUpper>=0 && toUpper<RING_BOUNDARY_WARNING_MM){
+      return { smaller:commercialRingSize, larger:commercialRingSize+1, distanceMm:toUpper };
+    }
+    if(toLower>=0 && toLower<RING_BOUNDARY_WARNING_MM){
+      return { smaller:commercialRingSize-1, larger:commercialRingSize, distanceMm:toLower };
+    }
+    return null;
+  })();
 
   const methodComparisonTest = (() => {
     if(
@@ -4584,6 +4606,11 @@ export default function AppV2() {
               <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {commercialRingSize}</strong>
               <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
+              {ringBoundaryAdvice && (
+                <span style={{marginTop:6,padding:"8px 10px",borderRadius:10,border:"1px solid #f2cf73",color:"#f5dfaa"}}>
+                  Sua medida ficou na divisa entre o <strong>{ringBoundaryAdvice.smaller}</strong> e o <strong>{ringBoundaryAdvice.larger}</strong>. Se ficar em dúvida, prefira o <strong>{ringBoundaryAdvice.larger}</strong>, que fica mais confortável.
+                </span>
+              )}
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
               {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
             </div>
@@ -4592,7 +4619,8 @@ export default function AppV2() {
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
-              <span>Medida final: {(commercialWidthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm · {commercialRingResolution.reason}</span>
+              <span>Medida final: {(commercialWidthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm · {commercialRingResolution.reason}{physicalPrimaryWidthMm!==null ? ` (borda ${(physicalPrimaryWidthMm-PHYSICAL_EDGE_OFFSET_MM).toFixed(2)} + ${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)})` : ""}</span>
+              <span>Fronteira: {ringBoundaryAdvice ? `entre ${ringBoundaryAdvice.smaller} e ${ringBoundaryAdvice.larger} · ${ringBoundaryAdvice.distanceMm.toFixed(3)} mm da divisa` : "longe da divisa"}</span>
               <span>Método anterior (só comparação): {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm · aro "+(result?.ringSize ?? "n/d")}</span>
               {measurementAudit && (
                 <>
