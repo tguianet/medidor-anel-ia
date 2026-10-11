@@ -25,10 +25,6 @@ type Props = {
   onRetry: () => void;
 };
 
-const FINGER_TILT_LIMIT_DEG = 5;
-const FINGER_TILT_BLOCK_CONFIDENCE = 60;
-const TILT_OVERRIDE_AFTER_MS = 8000;
-
 export default function FrozenCameraScreen({
   videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide,
   liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
@@ -73,36 +69,6 @@ export default function FrozenCameraScreen({
     deviceRoll !== null &&
     Math.abs(devicePitch) <= 6 &&
     Math.abs(deviceRoll) <= 3;
-
-  // Mesmo limite da validacao pos-foto (AppV2: angulo do dedo > 5 graus
-  // reprova a captura). Bloquear antes evita a foto que seria reprovada.
-  const fingerTiltKnown =
-    liveFingerTiltDeg !== null && liveFingerTiltConfidence >= 45;
-  const fingerTooTilted =
-    fingerTiltKnown && Math.abs(liveFingerTiltDeg as number) > FINGER_TILT_LIMIT_DEG;
-  // So trava o botao quando a leitura ao vivo e confiavel.
-  const fingerTiltBlocksRaw =
-    fingerTooTilted && liveFingerTiltConfidence >= FINGER_TILT_BLOCK_CONFIDENCE;
-
-  // Valvula de seguranca: se a leitura ao vivo travar o botao por muito tempo
-  // (ex.: deteccao errada do dedo), libera a foto manual. A validacao depois
-  // da foto continua protegendo o resultado.
-  const [tiltBlockedSince, setTiltBlockedSince] = useState<number | null>(null);
-  const [tiltOverride, setTiltOverride] = useState(false);
-  useEffect(() => {
-    if (!fingerTiltBlocksRaw) {
-      setTiltBlockedSince(null);
-      setTiltOverride(false);
-      return;
-    }
-    const since = tiltBlockedSince ?? Date.now();
-    if (tiltBlockedSince === null) setTiltBlockedSince(since);
-    const remaining = TILT_OVERRIDE_AFTER_MS - (Date.now() - since);
-    if (remaining <= 0) { setTiltOverride(true); return; }
-    const timer = window.setTimeout(() => setTiltOverride(true), remaining);
-    return () => window.clearTimeout(timer);
-  }, [fingerTiltBlocksRaw, tiltBlockedSince]);
-  const shutterBlocked = fingerTiltBlocksRaw && !tiltOverride;
 
   const levelReady =
     singlePhotoTestMode &&
@@ -331,57 +297,6 @@ export default function FrozenCameraScreen({
           </div>
         )}
 
-        {(() => {
-          // Angulo do dedo SEMPRE visivel na camera.
-          // verde  <= 1,5 graus  (ideal, mesmo criterio do nivel)
-          // amarelo ate 5 graus  (aceito pela validacao)
-          // laranja  > 5 graus   (validacao reprova; foto travada)
-          const tilt = fingerTiltKnown ? Math.abs(liveFingerTiltDeg as number) : null;
-          const tone =
-            tilt === null ? { border:"rgba(255,255,255,.45)", text:"#e8e2d4", bg:"rgba(12,12,12,.82)" }
-            : tilt <= 1.5 ? { border:"#52e0a3", text:"#52e0a3", bg:"rgba(6,24,16,.88)" }
-            : tilt <= FINGER_TILT_LIMIT_DEG ? { border:"#f2cf73", text:"#f5d477", bg:"rgba(24,20,6,.88)" }
-            : { border:"#f0a35e", text:"#ffd3a1", bg:"rgba(24,14,6,.9)" };
-          const label =
-            tilt === null ? "ÂNGULO DO DEDO: procurando…"
-            : tilt <= 1.5 ? `✓ DEDO RETO · ${tilt.toFixed(1)}°`
-            : tilt <= FINGER_TILT_LIMIT_DEG ? `ÂNGULO DO DEDO · ${tilt.toFixed(1)}°`
-            : `ENDIREITE O DEDO · ${tilt.toFixed(1)}°`;
-          return (
-            <div
-              role="status"
-              aria-live="polite"
-              style={{
-                position:"absolute",
-                left:"50%",
-                bottom:18,
-                transform:"translateX(-50%)",
-                zIndex:60,
-                minWidth:190,
-                maxWidth:"calc(100% - 28px)",
-                padding:"9px 16px",
-                borderRadius:14,
-                border:`2px solid ${tone.border}`,
-                background:tone.bg,
-                color:tone.text,
-                fontWeight:800,
-                fontVariantNumeric:"tabular-nums",
-                textAlign:"center",
-                lineHeight:1.25,
-                boxShadow:"0 4px 18px rgba(0,0,0,.45)",
-                pointerEvents:"none",
-                transition:"border-color .15s ease, color .15s ease",
-              }}
-            >
-              {label}
-              {fingerTooTilted && (
-                <div style={{fontWeight:600,fontSize:12,marginTop:3}}>
-                  Deixe o dedo reto, entre as duas linhas da guia
-                </div>
-              )}
-            </div>
-          );
-        })()}
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
           <div
@@ -453,9 +368,7 @@ export default function FrozenCameraScreen({
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{fingerTooTilted
-        ? `Seu dedo está inclinado ${Math.abs(liveFingerTiltDeg as number).toFixed(1)}°. Deixe-o reto, entre as duas linhas da guia, para liberar a foto.`
-        : cardReady
+      <p>{cardReady
         ? (singlePhotoTestMode
             ? "Tudo verde. Capture o cartão já posicionado sobre o dedo."
             : calibrationStep === "reference"
@@ -470,14 +383,7 @@ export default function FrozenCameraScreen({
               : calibrationStep === "reference"
                 ? "Coloque o cartão em uma base plana, enquadre na moldura e ajuste o ângulo até ficar verde."
                 : "Coloque o cartão sobre o dedo e ajuste a distância do celular até o cartão coincidir com a guia fantasma da Foto 1."}</p>
-      <button
-        className={`shutter${cardReady && !shutterBlocked ? " ready" : ""}`}
-        style={{display:"block",margin:"0 auto",opacity:shutterBlocked ? 0.35 : 1,cursor:shutterBlocked ? "not-allowed" : "pointer"}}
-        onClick={() => { if (!shutterBlocked) onCapture(); }}
-        disabled={shutterBlocked}
-        aria-disabled={shutterBlocked}
-        aria-label={shutterBlocked ? "Endireite o dedo para liberar a foto" : "Capturar foto manualmente"}
-      ><span /></button>
+      <button className={`shutter${cardReady ? " ready" : ""}`} style={{display:"block",margin:"0 auto"}} onClick={onCapture} aria-label="Capturar foto manualmente"><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
   );

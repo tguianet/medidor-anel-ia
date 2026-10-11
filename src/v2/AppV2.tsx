@@ -7,21 +7,11 @@ import { useFrozenCameraStream } from "./FrozenCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "../types";
 import { wearableRingImage } from "../types";
 import FrozenIntroScreen from "./FrozenIntroScreen";
-import CalibrationPanelV2, { type CalibrationV2Snapshot } from "./CalibrationPanelV2";
 import FrozenCameraScreen from "./FrozenCameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
-
-// Liga/desliga a borda fisica como medida principal do dedo.
-const USE_PHYSICAL_EDGE_AS_PRIMARY = true;
-// Alinha a borda fisica com o metodo em que a curva foi montada.
-// Mediana da diferenca (metodo anterior - borda fisica) em fotos reais: 0,05 mm.
-// 7 fotos de aro conhecido (25, 29, 30): borda pura 4/7, +0,05 -> 6/7.
-const PHYSICAL_EDGE_OFFSET_MM = 0.05;
-// Distancia ate a divisa entre dois aros em que avisamos o cliente.
-const RING_BOUNDARY_WARNING_MM = 0.03;
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
@@ -3604,54 +3594,12 @@ export default function AppV2() {
   // Desempates experimentais desativados.
   // O aro comercial deve refletir somente a curva principal enquanto
   // comparamos a curva historica em diagnostico.
-  // MEDIDA PRINCIPAL = BORDA FISICA (teste v2, 11/10/2026).
-  // Em 4 fotos do mesmo dedo (aro real 25) a borda fisica variou 0,06 mm
-  // (21,70-21,76 -> aro 25 em todas). O metodo anterior variou 0,21 mm e
-  // oscilava 25/26. Sem offset: a borda fisica ja cai no centro do aro real.
-  // So vale quando a borda fisica e forte e cobre >= 90% dos cortes;
-  // fora disso cai no metodo anterior (e a validacao pede nova foto).
-  // A curva MANUAL_FINGER_CURVE nao foi alterada.
-  const physicalPrimaryWidthMm =
-    USE_PHYSICAL_EDGE_AS_PRIMARY &&
-    measurementMode==="finger" &&
-    !diameterPhotoTestMode &&
-    result!==null &&
-    physicalEdgeProfileTest?.status==="forte" &&
-    physicalEdgeProfileTest.validPairPercent>=90 &&
-    physicalEdgeProfileTest.widthMm!==null &&
-    Number.isFinite(physicalEdgeProfileTest.widthMm) &&
-    physicalEdgeProfileTest.widthMm>0
-      ? physicalEdgeProfileTest.widthMm + PHYSICAL_EDGE_OFFSET_MM
-      : null;
-  const commercialWidthMm = physicalPrimaryWidthMm ?? result?.widthMm ?? null;
-  const commercialRingResolution = physicalPrimaryWidthMm!==null
-    ? {
-        ringSize:classifyFingerWidthMm(physicalPrimaryWidthMm).exactRingSize,
-        adjusted:false,
-        reason:"borda física · curva principal direta",
-      }
-    : {
-        ringSize:result?.ringSize ?? null,
-        adjusted:false,
-        reason:"método anterior (borda física indisponível) · curva principal direta",
-      };
+  const commercialRingResolution = {
+    ringSize:result?.ringSize ?? null,
+    adjusted:false,
+    reason:"desempate desativado · curva principal direta",
+  };
   const commercialRingSize=commercialRingResolution.ringSize;
-
-  // Aviso de fronteira: medida muito perto da divisa entre dois aros.
-  // Nao muda o aro exato; orienta a escolher o maior em caso de duvida.
-  const ringBoundaryAdvice = (() => {
-    if(measurementMode!=="finger" || commercialWidthMm===null || commercialRingSize===null) return null;
-    const classification=classifyFingerWidthMm(commercialWidthMm);
-    const toLower=commercialWidthMm-classification.lowerBoundaryMm;
-    const toUpper=classification.upperBoundaryMm-commercialWidthMm;
-    if(toUpper>=0 && toUpper<RING_BOUNDARY_WARNING_MM){
-      return { smaller:commercialRingSize, larger:commercialRingSize+1, distanceMm:toUpper };
-    }
-    if(toLower>=0 && toLower<RING_BOUNDARY_WARNING_MM){
-      return { smaller:commercialRingSize-1, larger:commercialRingSize, distanceMm:toLower };
-    }
-    return null;
-  })();
 
   const methodComparisonTest = (() => {
     if(
@@ -3769,8 +3717,6 @@ export default function AppV2() {
     }
 
     const reasons:string[]=[];
-    // Dicas para o cliente: o que fazer de diferente na proxima foto.
-    const hints=new Set<"finger"|"edge"|"phone">();
     const physicalMm=physicalEdgeProfileTest?.widthMm ?? null;
     const physicalSupport=physicalEdgeProfileTest?.validPairPercent ?? 0;
     const physicalStrong=physicalEdgeProfileTest?.status==="forte";
@@ -3782,36 +3728,29 @@ export default function AppV2() {
     // Gate experimental deliberadamente mais rigoroso que o comercial.
     // Todos os critérios abaixo descrevem qualidade/geometria da captura;
     // nenhum depende do tamanho real do dedo.
-    if(!physicalStrong){ reasons.push("borda física não forte"); hints.add("edge"); }
-    if(physicalSupport<90){ reasons.push(`suporte da borda ${physicalSupport}% < 90%`); hints.add("edge"); }
+    if(!physicalStrong) reasons.push("borda física não forte");
+    if(physicalSupport<90) reasons.push(`suporte da borda ${physicalSupport}% < 90%`);
     if(physicalDeltaMm===null || physicalDeltaMm>0.25){
       reasons.push(`divergência borda física ${physicalDeltaMm===null?"n/d":physicalDeltaMm.toFixed(2)+" mm"} > 0,25 mm`);
-      hints.add("edge");
     }
     if(geometricStabilityTest.stability!==null && geometricStabilityTest.stability<90){
       reasons.push(`stability ${geometricStabilityTest.stability} < 90`);
-      hints.add("phone");
     }
     if(geometricStabilityTest.perspectiveScore<93){
       reasons.push(`perspective ${geometricStabilityTest.perspectiveScore} < 93`);
-      hints.add("phone");
     }
     if(geometricStabilityTest.pitch!==null && Math.abs(geometricStabilityTest.pitch)>6){
       reasons.push(`pitch ${geometricStabilityTest.pitch.toFixed(1)}° > 6°`);
-      hints.add("phone");
     }
     if(geometricStabilityTest.roll!==null && Math.abs(geometricStabilityTest.roll)>3){
       reasons.push(`roll ${geometricStabilityTest.roll.toFixed(1)}° > 3°`);
-      hints.add("phone");
     }
     if(geometricStabilityTest.fingerAngleDeg!==null && Math.abs(geometricStabilityTest.fingerAngleDeg)>5){
       reasons.push(`ângulo do dedo ${geometricStabilityTest.fingerAngleDeg.toFixed(1)}° > 5°`);
-      hints.add("finger");
     }
 
-    const gateWidthMm=commercialWidthMm ?? widthSentToFormulaMm;
-    const historical=classifyFingerWidthMmExperimentalHigh(gateWidthMm);
-    const official=classifyFingerWidthMm(gateWidthMm);
+    const historical=classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
+    const official=classifyFingerWidthMm(widthSentToFormulaMm);
 
     // A curva histórica é experimental apenas na faixa alta. Abaixo de 29,
     // preservamos o classificador oficial para não contaminar a faixa baixa.
@@ -3827,7 +3766,6 @@ export default function AppV2() {
     return {
       accepted:reasons.length===0,
       reasons,
-      hints:[...hints],
       proposedRing,
       officialRing:official.exactRingSize,
       historicalRing:historical.exactRingSize,
@@ -3837,54 +3775,6 @@ export default function AppV2() {
       physicalDeltaMm,
     };
   })();
-
-  // Captura reprovada pela validacao: o cliente NAO ve o aro.
-  // Mostrar um numero de uma foto ruim leva a compra do aro errado.
-  // Em modo de teste (debugMode) o diagnostico continua exibindo tudo.
-  // Enquanto os pixels da foto nao carregaram, a borda fisica ainda nao foi
-  // medida: nao julgamos (evita piscar "refazer foto") nem mostramos o aro.
-  const validationPending = !photoPixelsReady;
-  const captureRejectedByValidation =
-    !validationPending &&
-    experimentalOperationalTest!==null &&
-    !experimentalOperationalTest.accepted;
-  const ringVisibleToCustomer = !validationPending && !captureRejectedByValidation;
-  const photoFingerAngleDeg = geometricStabilityTest?.fingerAngleDeg ?? null;
-  const photoFingerAngleLabel = photoFingerAngleDeg===null
-    ? null
-    : `Ângulo do dedo na foto: ${Math.abs(photoFingerAngleDeg).toFixed(1).replace(".",",")}°${Math.abs(photoFingerAngleDeg)>5 ? " (limite 5°)" : ""}`;
-  const retakeHints = captureRejectedByValidation
-    ? experimentalOperationalTest!.hints
-    : [];
-
-  // Dados da foto atual para o painel de calibracao V2 (modo de teste).
-  const calibrationV2Snapshot: CalibrationV2Snapshot | null =
-    measurementMode==="finger" &&
-    !validationPending &&
-    commercialWidthMm!==null &&
-    commercialRingSize!==null
-      ? {
-          usedWidthMm:commercialWidthMm,
-          predictedRing:commercialRingSize,
-          widthSource:physicalPrimaryWidthMm!==null ? "borda-fisica" : "metodo-anterior",
-          physicalRawMm:physicalEdgeProfileTest?.widthMm ?? null,
-          offsetMm:physicalPrimaryWidthMm!==null ? PHYSICAL_EDGE_OFFSET_MM : 0,
-          oldMethodMm:widthSentToFormulaMm,
-          oldMethodRing:result?.ringSize ?? null,
-          cardPx:geometricStabilityTest?.cardPx ?? null,
-          mmPerPx:geometricStabilityTest?.mmPerPx ?? null,
-          physicalRatio:geometricStabilityTest?.physicalRatio ?? null,
-          physicalSupport:physicalEdgeProfileTest?.validPairPercent ?? null,
-          fingerAngleDeg:geometricStabilityTest?.fingerAngleDeg ?? null,
-          pitch:geometricStabilityTest?.pitch ?? null,
-          roll:geometricStabilityTest?.roll ?? null,
-          stability:geometricStabilityTest?.stability ?? null,
-          perspective:geometricStabilityTest?.perspectiveScore ?? null,
-          gateAccepted:experimentalOperationalTest?.accepted ?? false,
-          gateReasons:experimentalOperationalTest?.reasons ?? [],
-          appVersion:`v2-borda+${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)}`,
-        }
-      : null;
 
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
@@ -4482,7 +4372,7 @@ export default function AppV2() {
                 </button>
               </>
             )}
-            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && ringVisibleToCustomer && (
+            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
                 <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
@@ -4607,54 +4497,19 @@ export default function AppV2() {
               <span>Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais.</span>
             </div>
           )}
-          {phase === "finger" && result && leftLocked && rightLocked && captureRejectedByValidation && (
-            <div className="analysis-result" role="alert" style={{borderColor:"#e0a352"}}>
-              <strong>Vamos tirar outra foto</strong>
-              <span>Esta foto não ficou boa o suficiente para medir seu aro com segurança.</span>
-              {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
-              {retakeHints.includes("finger") && (
-                <span>• <strong>Deixe o dedo reto</strong>, alinhado com as duas linhas da guia, sem girar a mão.</span>
-              )}
-              {retakeHints.includes("edge") && (
-                <span>• <strong>Use mais luz</strong> (pode ligar a lanterna) e mantenha a mão parada para o contorno do dedo ficar nítido.</span>
-              )}
-              {retakeHints.includes("phone") && (
-                <span>• <strong>Segure o celular reto</strong>, paralelo à mesa, e espere as bolinhas ficarem no centro.</span>
-              )}
-              <button type="button" onClick={resetPhoto} style={{marginTop:8}}>
-                Tirar nova foto
-              </button>
-            </div>
-          )}
-          {phase === "finger" && result && leftLocked && rightLocked && validationPending && (
-            <div className="analysis-result" aria-live="polite">
-              <span>Conferindo a qualidade da foto…</span>
-            </div>
-          )}
-          {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && ringVisibleToCustomer && (
+          {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
               <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {commercialRingSize}</strong>
               <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
-              {ringBoundaryAdvice && (
-                <span style={{marginTop:6,padding:"8px 10px",borderRadius:10,border:"1px solid #f2cf73",color:"#f5dfaa"}}>
-                  Sua medida ficou na divisa entre o <strong>{ringBoundaryAdvice.smaller}</strong> e o <strong>{ringBoundaryAdvice.larger}</strong>. Se ficar em dúvida, prefira o <strong>{ringBoundaryAdvice.larger}</strong>, que fica mais confortável.
-                </span>
-              )}
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
-              {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
             </div>
-          )}
-          {debugMode && phase === "finger" && leftLocked && rightLocked && measurementMode === "finger" && (
-            <CalibrationPanelV2 snapshot={calibrationV2Snapshot} />
           )}
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
-              <span>Medida final: {(commercialWidthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm · {commercialRingResolution.reason}{physicalPrimaryWidthMm!==null ? ` (borda ${(physicalPrimaryWidthMm-PHYSICAL_EDGE_OFFSET_MM).toFixed(2)} + ${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)})` : ""}</span>
-              <span>Fronteira: {ringBoundaryAdvice ? `entre ${ringBoundaryAdvice.smaller} e ${ringBoundaryAdvice.larger} · ${ringBoundaryAdvice.distanceMm.toFixed(3)} mm da divisa` : "longe da divisa"}</span>
-              <span>Método anterior (só comparação): {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm · aro "+(result?.ringSize ?? "n/d")}</span>
+              <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
@@ -4773,7 +4628,7 @@ export default function AppV2() {
                     >
                       <strong>VALIDAÇÃO · CURVA PRINCIPAL</strong>
                       <span>Gate geométrico: {experimentalOperationalTest.accepted ? "✓ ACEITA" : "✕ BLOQUEIA"}</span>
-                      <span>Medida usada: {commercialWidthMm===null?"n/d":commercialWidthMm.toFixed(2)+" mm"} · {physicalPrimaryWidthMm!==null ? "borda física" : "método anterior"}</span>
+                      <span>Medida usada: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                       <span>Validação física: {experimentalOperationalTest.physicalMm===null?"n/d":experimentalOperationalTest.physicalMm.toFixed(2)+" mm"} · suporte {experimentalOperationalTest.physicalSupport}% · diferença {experimentalOperationalTest.physicalDeltaMm===null?"n/d":experimentalOperationalTest.physicalDeltaMm.toFixed(2)+" mm"}</span>
                       <span>Curva principal: aro {experimentalOperationalTest.officialRing} · comparação histórica: aro {experimentalOperationalTest.historicalRing}</span>
                       <span>RESULTADO DA VALIDAÇÃO: {experimentalOperationalTest.accepted ? "ARO "+(commercialRingSize ?? experimentalOperationalTest.proposedRing) : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
@@ -4902,7 +4757,7 @@ export default function AppV2() {
                   <g>
                     <circle
                       cx={comparisonChart.x(clamp(commercialRingSize ?? result.ringSize,17,33))}
-                      cy={comparisonChart.y(clamp(commercialWidthMm ?? result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))}
+                      cy={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))}
                       r="5.2"
                       fill="none"
                       stroke="#ffffff"
@@ -4910,7 +4765,7 @@ export default function AppV2() {
                     />
                     <text
                       x={comparisonChart.x(clamp(commercialRingSize ?? result.ringSize,17,33))}
-                      y={comparisonChart.y(clamp(commercialWidthMm ?? result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))-8}
+                      y={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))-8}
                       textAnchor="middle"
                       fill="#ffffff"
                       fontSize="9"
@@ -4937,7 +4792,7 @@ export default function AppV2() {
             </span>
           </div>}
 
-          {tryOn && result && commercialRingSize!==null && ringVisibleToCustomer && (
+          {tryOn && result && commercialRingSize!==null && (
             <TryOnPanel
               ringSize={commercialRingSize}
               ringMetal={ringMetal}
@@ -4979,7 +4834,7 @@ export default function AppV2() {
           ringMetal={ringMetal}
           ringStyle={ringStyle}
           ringBandWidth={ringBandWidth}
-          ringSize={commercialRingSize ?? result?.ringSize ?? null}
+          ringSize={result?.ringSize ?? null}
           setShowcaseWidth={setShowcaseWidth}
           setShowcaseAngle={setShowcaseAngle}
           onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
