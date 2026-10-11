@@ -34,6 +34,8 @@ const RING_HEIGHT_FALLBACK_OFFSET = 5;
 // usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
 // inclinacao do eixo do dedo.
 const MANUAL_LINES_ONLY = true;
+// medidordedov7: largura maxima da copia em alta resolucao (retrato).
+const HI_RES_MAX_WIDTH = 2160;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -136,6 +138,10 @@ export default function AppV2() {
   const [photoPixelsReady, setPhotoPixelsReady] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
+  // medidordedov7: copia em ALTA RESOLUCAO do mesmo quadro, usada so para
+  // exibir (zoom e lupa). O processamento continua na foto 900x1200.
+  const [photoHiRes, setPhotoHiRes] = useState<{forPhoto:string;url:string;width:number;height:number;videoW:number;videoH:number}|null>(null);
+  const hiResBlobByCanvasRef = useRef(new WeakMap<HTMLCanvasElement,{blob:Promise<Blob|null>;width:number;height:number;videoW:number;videoH:number}>());
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
   const [calibrationConfidence, setCalibrationConfidence] = useState(0);
@@ -391,7 +397,32 @@ export default function AppV2() {
         sh = video.videoWidth / targetRatio;
         sy = (video.videoHeight - sh) / 2;
       }
-      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      // Quadro em resolucao nativa (limitado a 2160 px de largura).
+      const hiW=Math.round(Math.min(sw,HI_RES_MAX_WIDTH));
+      const hiH=Math.round(hiW/targetRatio);
+      const hi=document.createElement("canvas");
+      hi.width=hiW;
+      hi.height=hiH;
+      const hiCtx=hi.getContext("2d");
+      if(hiCtx){
+        hiCtx.imageSmoothingEnabled=true;
+        hiCtx.imageSmoothingQuality="high";
+        hiCtx.drawImage(video, sx, sy, sw, sh, 0, 0, hiW, hiH);
+        const ctx=canvas.getContext("2d");
+        if(ctx){
+          ctx.imageSmoothingEnabled=true;
+          ctx.imageSmoothingQuality="high";
+          ctx.drawImage(hi, 0, 0, hiW, hiH, 0, 0, canvas.width, canvas.height);
+        }
+        const blob=new Promise<Blob|null>((resolve)=>{
+          try{
+            hi.toBlob((b)=>{ resolve(b); hi.width=0; hi.height=0; },"image/jpeg",0.93);
+          }catch{ resolve(null); }
+        });
+        hiResBlobByCanvasRef.current.set(canvas,{blob,width:hiW,height:hiH,videoW:video.videoWidth,videoH:video.videoHeight});
+      }else{
+        canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      }
       return canvas;
     };
 
@@ -562,6 +593,17 @@ export default function AppV2() {
     // Alias mantido para o restante do fluxo existente.
     const canvas=selectedCanvas;
     setPhoto(capturedPhoto);
+    {
+      const hiEntry=hiResBlobByCanvasRef.current.get(selectedCanvas);
+      setPhotoHiRes((current)=>{ if(current) URL.revokeObjectURL(current.url); return null; });
+      if(hiEntry){
+        void hiEntry.blob.then((blob)=>{
+          if(!blob) return;
+          const url=URL.createObjectURL(blob);
+          setPhotoHiRes({forPhoto:capturedPhoto,url,width:hiEntry.width,height:hiEntry.height,videoW:hiEntry.videoW,videoH:hiEntry.videoH});
+        });
+      }
+    }
 
     // Modo dedo em duas fotos:
     // 1) cartão reto para definir a reta física de 85,60 mm;
@@ -2624,6 +2666,8 @@ export default function AppV2() {
     };
   },[anatomicalRegionOffsetHistoryY]);
 
+  const displayPhoto = photoHiRes && photoHiRes.forPhoto===photo ? photoHiRes.url : photo;
+
   const widthAnalysis = useMemo(() => {
     const empty = {
       manualMm:null as number|null,
@@ -4217,7 +4261,7 @@ export default function AppV2() {
             onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
-            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={displayPhoto} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode ? (
               <svg
                 className="card-lines-overlay"
@@ -4283,7 +4327,7 @@ export default function AppV2() {
                       overflow:"hidden",
                       border:"3px solid #52e0a3",
                       boxShadow:"0 8px 28px rgba(0,0,0,.55)",
-                      backgroundImage:`url("${photo}")`,
+                      backgroundImage:`url("${displayPhoto}")`,
                       backgroundRepeat:"no-repeat",
                       // Lupa centrada EXATAMENTE no cruzamento linha verde x linha amarela,
                       // com aumento de 2x sobre o zoom atual da tela.
@@ -4668,6 +4712,7 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
               {widthAnalysis.manualMm!==null && <span>SÓ LUPA (usado): {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
               {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
               {measurementAudit && (
