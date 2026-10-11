@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
+import { calibratePhoto as calibratePhotoColor } from "./visionV2Color";
+import { refineCardEdgesNew } from "./detectorCompare";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useFrozenCameraStream } from "./FrozenCameraStream";
@@ -133,6 +135,9 @@ export default function AppV2() {
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
+  // DIAGNOSTICO v4: deteccao original x nova na MESMA foto (px no canvas).
+  type DetectorSide = { left:number; right:number; bottom:number; widthPx:number; refined:boolean; boxLeft:number; boxRight:number; boxBottom:number };
+  const [detectorCompare, setDetectorCompare] = useState<null|{ canvasW:number; canvasH:number; original:DetectorSide; nova:DetectorSide|null; error?:string }>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -735,6 +740,36 @@ export default function AppV2() {
         };
 
         const refined=refineCardEdges();
+
+        // DIAGNOSTICO v4: mesma foto, deteccao nova (nao altera o resultado).
+        setDetectorCompare(null);
+        {
+          const W=canvas.width, H=canvas.height;
+          const original:DetectorSide={
+            left:(refined?refined.left:detectedLeft)/100*W,
+            right:(refined?refined.right:detectedRight)/100*W,
+            bottom:(refined?refined.bottom:detectedBottom)/100*H,
+            widthPx:((refined?refined.right:detectedRight)-(refined?refined.left:detectedLeft))/100*W,
+            refined:!!refined,
+            boxLeft:detectedLeft/100*W, boxRight:detectedRight/100*W, boxBottom:detectedBottom/100*H,
+          };
+          void (async()=>{
+            try{
+              const colorCal=await calibratePhotoColor(capturedPhoto);
+              const bL=clamp(colorCal.cardBox.x*100,2,94);
+              const bR=clamp((colorCal.cardBox.x+colorCal.cardBox.width)*100,6,98);
+              const bB=clamp((colorCal.cardBox.y+colorCal.cardBox.height)*100,10,88);
+              const bT=clamp(colorCal.cardBox.y*100,3,bB-5);
+              const ctx=canvas.getContext("2d",{willReadFrequently:true});
+              if(!ctx) throw new Error("sem contexto");
+              const img=ctx.getImageData(0,0,W,H);
+              const n=refineCardEdgesNew({data:img.data,width:W,height:H},{leftPct:bL,rightPct:bR,topPct:bT,bottomPct:bB});
+              setDetectorCompare({canvasW:W,canvasH:H,original,nova:{...n,boxLeft:bL/100*W,boxRight:bR/100*W,boxBottom:bB/100*H}});
+            }catch(err){
+              setDetectorCompare({canvasW:W,canvasH:H,original,nova:null,error:String(err)});
+            }
+          })();
+        }
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -4675,6 +4710,29 @@ export default function AppV2() {
                       <small>Diagnóstico somente · nenhum destes testes altera o aro comercial.</small>
                     </div>
                   )}
+                  {detectorCompare && (()=>{
+                    const o=detectorCompare.original, nv=detectorCompare.nova;
+                    const fingerPx=geometricStabilityTest?.currentFingerPx ?? null;
+                    const ring=(mm:number|null)=>mm===null?"n/d":String(classifyFingerWidthMm(mm).exactRingSize);
+                    const mmO=fingerPx!==null?fingerPx*85.6/o.widthPx:null;
+                    const mmN=fingerPx!==null&&nv?fingerPx*85.6/nv.widthPx:null;
+                    const f=(v:number)=>v.toFixed(1);
+                    return (
+                      <div style={{border:"2px solid #1f6feb",padding:12,borderRadius:10,display:"grid",gap:6,background:"rgba(10,25,50,.6)"}}>
+                        <strong>COMPARAÇÃO DE DETECTORES · MESMA FOTO</strong>
+                        <span>Foto: {detectorCompare.canvasW}×{detectorCompare.canvasH} px</span>
+                        <span>ORIGINAL (usado): esq {f(o.left)} · dir {f(o.right)} · base {f(o.bottom)} · LARGURA {f(o.widthPx)} px {o.refined?"":"(sem refino)"}</span>
+                        <span>· caixa inicial: esq {f(o.boxLeft)} · dir {f(o.boxRight)} · base {f(o.boxBottom)}</span>
+                        {nv ? (<>
+                          <span>NOVO (v1/v2): esq {f(nv.left)} · dir {f(nv.right)} · base {f(nv.bottom)} · LARGURA {f(nv.widthPx)} px {nv.refined?"":"(sem refino)"}</span>
+                          <span>· caixa inicial: esq {f(nv.boxLeft)} · dir {f(nv.boxRight)} · base {f(nv.boxBottom)}</span>
+                          <span>DIFERENÇA novo−original: esq {f(nv.left-o.left)} · dir {f(nv.right-o.right)} · base {f(nv.bottom-o.bottom)} · largura {f(nv.widthPx-o.widthPx)} px ({((nv.widthPx/o.widthPx-1)*100).toFixed(2)}%)</span>
+                          <span>Mesmo dedo ({fingerPx===null?"n/d":f(fingerPx)+" px"}): original {mmO===null?"n/d":mmO.toFixed(2)+" mm"} → aro {ring(mmO)} · novo {mmN===null?"n/d":mmN.toFixed(2)+" mm"} → aro {ring(mmN)}</span>
+                        </>) : (<span>Novo detector: falhou {detectorCompare.error ?? ""}</span>)}
+                        <small>Diagnóstico somente · o resultado usa o detector ORIGINAL.</small>
+                      </div>
+                    );
+                  })()}
                   {geometricStabilityTest && (
                     <div
                       style={{
