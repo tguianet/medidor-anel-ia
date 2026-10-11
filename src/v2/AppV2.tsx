@@ -29,6 +29,7 @@ const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
 const LOUPE_SIZE_PX = 132;
 const LOUPE_EXTRA_ZOOM = 2;
+const RING_HEIGHT_FALLBACK_OFFSET = 5;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -1060,7 +1061,12 @@ export default function AppV2() {
     setLeftLine(anchoredLeft);
     setRightLine(anchoredRight);
 
-    const nextMeasureY=clamp(baseBottom+17,42,76);
+    // ALTURA PADRAO DO ANEL quando o contorno/landmarks nao detectam a regiao:
+    // antes era base+17%, perto da dobra entre os dedos, onde o dedo alarga
+    // (foto do cartao azul: Y 64% = base 47% + 17 -> 21,88 mm, aro 26).
+    // Fotos que acertaram mediram em base+3,5% (contorno detectado).
+    // Agora o padrao fica dentro da mesma faixa anatomica (base+5%).
+    const nextMeasureY=clamp(baseBottom+RING_HEIGHT_FALLBACK_OFFSET,30,84);
     setMeasureY(nextMeasureY);
     setRingGuideY(nextMeasureY);
     setFingerLines({
@@ -4753,6 +4759,7 @@ export default function AppV2() {
                       <span>Cartão: {geometricStabilityTest.cardPx.toFixed(1)} px · escala {geometricStabilityTest.mmPerPx.toFixed(4)} mm/px</span>
                       <span>Dedo atual: {geometricStabilityTest.currentFingerPx===null ? "n/d" : geometricStabilityTest.currentFingerPx.toFixed(1)+" px"} · razão dedo/cartão {geometricStabilityTest.currentRatio===null ? "n/d" : geometricStabilityTest.currentRatio.toFixed(4)}</span>
                       <span>Borda física: {geometricStabilityTest.physicalFingerPx===null ? "n/d" : geometricStabilityTest.physicalFingerPx.toFixed(1)+" px"} · razão física/cartão {geometricStabilityTest.physicalRatio===null ? "n/d" : geometricStabilityTest.physicalRatio.toFixed(4)}</span>
+                      <span>Fonte da altura: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "landmarks" : contourAnatomy?.detected ? "contorno anatômico" : `padrão (base + ${RING_HEIGHT_FALLBACK_OFFSET}%)`} · base do cartão {cardBaseYPercent.toFixed(1)}%</span>
                       <span>Altura anatômica Y: {geometricStabilityTest.anatomyY.toFixed(1)}% · ângulo dedo {geometricStabilityTest.fingerAngleDeg===null ? "n/d" : geometricStabilityTest.fingerAngleDeg.toFixed(2)+"°"}</span>
                       <span>Celular: pitch {geometricStabilityTest.pitch===null ? "n/d" : geometricStabilityTest.pitch.toFixed(1)+"°"} · roll {geometricStabilityTest.roll===null ? "n/d" : geometricStabilityTest.roll.toFixed(1)+"°"} · movimento {geometricStabilityTest.motion===null ? "n/d" : geometricStabilityTest.motion.toFixed(2)}</span>
                       <span>Stability {geometricStabilityTest.stability===null ? "n/d" : geometricStabilityTest.stability} · perspective {geometricStabilityTest.perspectiveScore}</span>
