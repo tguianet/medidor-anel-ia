@@ -606,8 +606,15 @@ export default function AppV2() {
           const alongTo=bottom0-cardH*0.14;
           const leftEdge=findCardEdge(image,{side:"left",expected:left0,from:alongFrom,to:alongTo});
           const rightEdge=findCardEdge(image,{side:"right",expected:right0,from:alongFrom,to:alongTo});
-          const refinedLeft=Math.min(leftEdge.position,rightEdge.position-20);
-          const refinedRight=Math.max(rightEdge.position,leftEdge.position+20);
+          // COMPATIBILIDADE COM A CURVA: a curva de aros foi ajustada com o
+          // detector antigo, que (pela janela de ±3 px + "candidato mais
+          // externo") lia cada lateral ~1,75 px para FORA da borda real.
+          // Simulacao em 90 cenarios (5 cores x 3 fundos x 3 focos x sombra):
+          // mediana +3,5 px na largura do cartao. Reaplicamos esse mesmo vies
+          // fixo, para a escala bater com a curva sem voltar a depender da cor.
+          const LEGACY_CARD_EDGE_OUTWARD_PX=1.75;
+          const refinedLeft=Math.min(leftEdge.position,rightEdge.position-20)-LEGACY_CARD_EDGE_OUTWARD_PX;
+          const refinedRight=Math.max(rightEdge.position,leftEdge.position+20)+LEGACY_CARD_EDGE_OUTWARD_PX;
 
           const bottomEdge=findCardEdge(image,{
             side:"bottom",
