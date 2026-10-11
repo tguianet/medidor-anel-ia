@@ -58,16 +58,6 @@ export const sanitizeRecord = (body) => {
     hand: text(body.hand, 12, "não informada"),
     note: text(body.note, 180),
     appVersion: text(body.appVersion, 60, "v2"),
-    shotWidthsMm: Array.isArray(body.shotWidthsMm)
-      ? body.shotWidthsMm.slice(0, 8).map((value) => (value === null ? null : num(value, 10, 40)))
-      : [],
-    shotSpreadMm: num(body.shotSpreadMm, 0, 5),
-    shotValid: int(body.shotValid, 0, 8),
-    shotOutlierIndex: int(body.shotOutlierIndex, 0, 7),
-    cardSeriesPx: Array.isArray(body.cardSeriesPx)
-      ? body.cardSeriesPx.slice(0, 8).map((value) => (value === null ? null : num(value, 50, 10000, 1)))
-      : [],
-    cardSeriesSpreadPct: num(body.cardSeriesSpreadPct, 0, 100),
   };
 };
 
@@ -81,8 +71,7 @@ const CSV_COLUMNS = [
   "createdAt", "person", "finger", "hand", "realRing", "predictedRing", "error",
   "usedWidthMm", "widthSource", "physicalRawMm", "offsetMm", "oldMethodMm", "oldMethodRing",
   "cardPx", "mmPerPx", "physicalRatio", "physicalSupport", "fingerAngleDeg", "pitch", "roll",
-  "stability", "perspective", "gateAccepted", "gateReasons", "shotWidthsMm", "shotSpreadMm", "shotValid", "shotOutlierIndex", "cardSeriesPx", "cardSeriesSpreadPct",
-  "note", "appVersion", "id",
+  "stability", "perspective", "gateAccepted", "gateReasons", "note", "appVersion", "id",
 ];
 const csvCell = (value) => {
   const raw = Array.isArray(value) ? value.join(" | ") : value ?? "";

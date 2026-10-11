@@ -20,8 +20,6 @@ type Props = {
   referenceCardWidthPercent?: number | null;
   referenceCardAngleDeg?: number | null;
   singlePhotoTestMode?: boolean;
-  /** Serie de fotos em andamento: quantas ja foram tiradas de quantas. */
-  seriesProgress?: { taken: number; total: number } | null;
   onClose: () => void;
   onCapture: () => void;
   onRetry: () => void;
@@ -38,7 +36,6 @@ export default function FrozenCameraScreen({
   devicePitch = null, deviceRoll = null,
   cameraOpening, error,
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
-  seriesProgress = null,
   onClose, onCapture, onRetry,
 }: Props) {
   const autoCaptureTimerRef = useRef<number | null>(null);
@@ -105,11 +102,9 @@ export default function FrozenCameraScreen({
     const timer = window.setTimeout(() => setTiltOverride(true), remaining);
     return () => window.clearTimeout(timer);
   }, [fingerTiltBlocksRaw, tiltBlockedSince]);
-  const seriesRunning = seriesProgress !== null;
-  const shutterBlocked = (fingerTiltBlocksRaw && !tiltOverride) || seriesRunning;
+  const shutterBlocked = fingerTiltBlocksRaw && !tiltOverride;
 
   const levelReady =
-    !seriesRunning &&
     singlePhotoTestMode &&
     cardReady &&
     fingerReady &&
@@ -387,56 +382,6 @@ export default function FrozenCameraScreen({
             </div>
           );
         })()}
-        {seriesProgress && (
-          <div
-            role="status"
-            aria-live="assertive"
-            style={{
-              position:"absolute",
-              inset:0,
-              zIndex:70,
-              display:"grid",
-              placeItems:"center",
-              pointerEvents:"none",
-            }}
-          >
-            <div style={{
-              padding:"14px 22px",
-              borderRadius:18,
-              background:"rgba(8,8,8,.78)",
-              border:"2px solid #f2cf73",
-              color:"#f5dfaa",
-              textAlign:"center",
-              boxShadow:"0 6px 26px rgba(0,0,0,.5)",
-              minWidth:220,
-            }}>
-              <div style={{fontWeight:900,letterSpacing:".06em",fontSize:15}}>SEGURE FIRME</div>
-              <div style={{display:"flex",justifyContent:"center",gap:12,margin:"10px 0 8px"}}>
-                {Array.from({length:seriesProgress.total},(_,index)=>(
-                  <span key={index} style={{
-                    width:26,height:26,borderRadius:"50%",display:"grid",placeItems:"center",
-                    fontWeight:900,fontSize:13,
-                    background:index<seriesProgress.taken ? "#52e0a3" : "transparent",
-                    color:index<seriesProgress.taken ? "#071b14" : "#f5dfaa",
-                    border:`2px solid ${index<seriesProgress.taken ? "#52e0a3" : "rgba(245,223,170,.6)"}`,
-                    transition:"background .15s ease",
-                  }}>{index<seriesProgress.taken ? "✓" : index+1}</span>
-                ))}
-              </div>
-              <div style={{height:6,borderRadius:999,background:"rgba(255,255,255,.15)",overflow:"hidden"}}>
-                <div style={{
-                  height:"100%",
-                  width:`${Math.round(seriesProgress.taken/seriesProgress.total*100)}%`,
-                  background:"#52e0a3",
-                  transition:"width .8s linear",
-                }} />
-              </div>
-              <div style={{fontSize:12,marginTop:8,color:"#e8e2d4"}}>
-                Foto {Math.min(seriesProgress.taken+1,seriesProgress.total)} de {seriesProgress.total} · não mexa a mão nem o cartão
-              </div>
-            </div>
-          </div>
-        )}
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
           <div
@@ -531,7 +476,7 @@ export default function FrozenCameraScreen({
         onClick={() => { if (!shutterBlocked) onCapture(); }}
         disabled={shutterBlocked}
         aria-disabled={shutterBlocked}
-        aria-label={seriesRunning ? "Tirando a série de fotos" : shutterBlocked ? "Endireite o dedo para liberar a foto" : "Capturar foto manualmente"}
+        aria-label={shutterBlocked ? "Endireite o dedo para liberar a foto" : "Capturar foto manualmente"}
       ><span /></button>
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
