@@ -38,7 +38,6 @@ export function useFrozenCameraStream() {
       // medidordedov7: tenta primeiro ALTA RESOLUCAO. Em retrato, 720p deixa
       // so 720 px de largura (~0,15 mm por pixel); 4K/1440p/1080p dao 2-3x mais
       // detalhe na borda do dedo. Se o aparelho recusar, cai nas opcoes antigas.
-      { video: { facingMode: { exact: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false },
       { video: { facingMode: { exact: "environment" }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false },
       { video: { facingMode: { exact: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
       // Primeiro tenta a câmera traseira principal com resolução moderada.

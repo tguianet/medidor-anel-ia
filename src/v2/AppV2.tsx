@@ -35,7 +35,7 @@ const RING_HEIGHT_FALLBACK_OFFSET = 5;
 // inclinacao do eixo do dedo.
 const MANUAL_LINES_ONLY = true;
 // medidordedov7: largura maxima da copia em alta resolucao (retrato).
-const HI_RES_MAX_WIDTH = 2160;
+const HI_RES_MAX_WIDTH = 1440;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -141,7 +141,7 @@ export default function AppV2() {
   // medidordedov7: copia em ALTA RESOLUCAO do mesmo quadro, usada so para
   // exibir (zoom e lupa). O processamento continua na foto 900x1200.
   const [photoHiRes, setPhotoHiRes] = useState<{forPhoto:string;url:string;width:number;height:number;videoW:number;videoH:number}|null>(null);
-  const hiResBlobByCanvasRef = useRef(new WeakMap<HTMLCanvasElement,{blob:Promise<Blob|null>;width:number;height:number;videoW:number;videoH:number}>());
+  const hiResBlobByCanvasRef = useRef(new WeakMap<HTMLCanvasElement,{hi:HTMLCanvasElement;width:number;height:number;videoW:number;videoH:number}>());
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
   const [calibrationConfidence, setCalibrationConfidence] = useState(0);
@@ -414,12 +414,9 @@ export default function AppV2() {
           ctx.imageSmoothingQuality="high";
           ctx.drawImage(hi, 0, 0, hiW, hiH, 0, 0, canvas.width, canvas.height);
         }
-        const blob=new Promise<Blob|null>((resolve)=>{
-          try{
-            hi.toBlob((b)=>{ resolve(b); hi.width=0; hi.height=0; },"image/jpeg",0.93);
-          }catch{ resolve(null); }
-        });
-        hiResBlobByCanvasRef.current.set(canvas,{blob,width:hiW,height:hiH,videoW:video.videoWidth,videoH:video.videoHeight});
+        // So guarda o quadro; a compressao JPEG acontece apenas para o quadro
+        // ESCOLHIDO (antes eram 8 compressoes 4K por clique = lento).
+        hiResBlobByCanvasRef.current.set(canvas,{hi,width:hiW,height:hiH,videoW:video.videoWidth,videoH:video.videoHeight});
       }else{
         canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
       }
@@ -484,6 +481,7 @@ export default function AppV2() {
     let selectedCanvas:HTMLCanvasElement;
     let capturedPhoto:string;
     let selectedBurstCalibration:Awaited<ReturnType<typeof calibratePhoto>> | null=null;
+    const burstCanvasesForRelease:HTMLCanvasElement[]=[];
 
     if(useBurst){
       camera.setError("Selecionando automaticamente o melhor quadro...");
@@ -491,6 +489,7 @@ export default function AppV2() {
 
       for(let index=0;index<8;index++){
         const canvas=drawCurrentFrame();
+        burstCanvasesForRelease.push(canvas);
         const guide=analyzeLiveCardGuide(video);
         candidates.push({
           canvas,
@@ -595,13 +594,22 @@ export default function AppV2() {
     setPhoto(capturedPhoto);
     {
       const hiEntry=hiResBlobByCanvasRef.current.get(selectedCanvas);
+      // Libera os quadros em alta dos candidatos descartados.
+      for(const other of burstCanvasesForRelease){
+        if(other===selectedCanvas) continue;
+        const e=hiResBlobByCanvasRef.current.get(other);
+        if(e){ e.hi.width=0; e.hi.height=0; hiResBlobByCanvasRef.current.delete(other); }
+      }
       setPhotoHiRes((current)=>{ if(current) URL.revokeObjectURL(current.url); return null; });
       if(hiEntry){
-        void hiEntry.blob.then((blob)=>{
-          if(!blob) return;
-          const url=URL.createObjectURL(blob);
-          setPhotoHiRes({forPhoto:capturedPhoto,url,width:hiEntry.width,height:hiEntry.height,videoW:hiEntry.videoW,videoH:hiEntry.videoH});
-        });
+        try{
+          hiEntry.hi.toBlob((blob)=>{
+            hiEntry.hi.width=0; hiEntry.hi.height=0;
+            if(!blob) return;
+            const url=URL.createObjectURL(blob);
+            setPhotoHiRes({forPhoto:capturedPhoto,url,width:hiEntry.width,height:hiEntry.height,videoW:hiEntry.videoW,videoH:hiEntry.videoH});
+          },"image/jpeg",0.93);
+        }catch{ /* segue com a foto 900x1200 */ }
       }
     }
 
