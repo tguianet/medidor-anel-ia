@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
-import { calibratePhoto as calibratePhotoColor } from "./visionV2Color";
 import { refineCardEdgesNew } from "./detectorCompare";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
@@ -148,9 +147,10 @@ export default function AppV2() {
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
-  // DIAGNOSTICO v4: deteccao original x nova na MESMA foto (px no canvas).
-  type DetectorSide = { left:number; right:number; bottom:number; widthPx:number; refined:boolean; boxLeft:number; boxRight:number; boxBottom:number };
-  const [detectorCompare, setDetectorCompare] = useState<null|{ canvasW:number; canvasH:number; original:DetectorSide; nova:DetectorSide|null; error?:string; source?:string; legacyFail?:string }>(null);
+  // Fonte das bordas do cartao usadas na escala (diagnostico).
+  const [cardEdgeInfo, setCardEdgeInfo] = useState<{source:string;legacyFail:string}|null>(null);
+  // Tela de carregamento logo apos o disparo (a foto ja foi tirada).
+  const [captureProgress, setCaptureProgress] = useState<{pct:number;label:string}|null>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -350,6 +350,19 @@ export default function AppV2() {
   };
 
   const capture = async () => {
+    try{
+      await captureInner();
+    }finally{
+      setCaptureProgress(null);
+      // Se a captura falhou e a camera continua na tela, volta o preview.
+      const v=camera.videoRef.current;
+      if(v && v.paused && v.srcObject) void v.play().catch(()=>undefined);
+    }
+  };
+
+  const nextPaint = () => new Promise<void>((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+
+  const captureInner = async () => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
@@ -377,6 +390,8 @@ export default function AppV2() {
       stabilityScore: deviceQuality.stabilityScore,
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
+    setCaptureProgress({pct:6,label:"Capturando"});
+    await nextPaint();
 
     const video = camera.videoRef.current;
     if (!video?.videoWidth) {
@@ -499,10 +514,13 @@ export default function AppV2() {
           consistencyScore:0,
           calibration:null,
         });
+        setCaptureProgress({pct:6+Math.round((index+1)/8*24),label:"Capturando"});
         if(index<7){
           await new Promise<void>((resolve)=>window.setTimeout(resolve,65));
         }
       }
+      // Quadros capturados: pausa o preview para liberar o processador.
+      try{ video.pause(); }catch{ /* ignora */ }
 
       // Consistencia geométrica da própria rajada:
       // calculamos a mediana da razão dedo/cartão e penalizamos frames
@@ -535,7 +553,10 @@ export default function AppV2() {
       // Calibramos os 8 frames antes de escolher. Um frame só pode vencer
       // a rajada se também for elegível para o fluxo automático; assim não
       // escolhemos um quadro bonito/consistente que depois para na etapa do cartão.
-      for(const candidate of candidates){
+      for(let ci=0;ci<candidates.length;ci++){
+        const candidate=candidates[ci];
+        setCaptureProgress({pct:30+Math.round((ci+1)/candidates.length*50),label:"Analisando o cartão…"});
+        await nextPaint();
         try{
           candidate.calibration=await calibratePhoto(candidate.photo);
         }catch{
@@ -589,6 +610,8 @@ export default function AppV2() {
       capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
     }
 
+    setCaptureProgress({pct:88,label:"Preparando a medição…"});
+    await nextPaint();
     // Alias mantido para o restante do fluxo existente.
     const canvas=selectedCanvas;
     setPhoto(capturedPhoto);
@@ -827,35 +850,7 @@ export default function AppV2() {
           }catch{ /* mantem caixa aproximada */ }
         }
 
-        // DIAGNOSTICO v4: mesma foto, deteccao nova (nao altera o resultado).
-        setDetectorCompare(null);
-        {
-          const W=canvas.width, H=canvas.height;
-          const original:DetectorSide={
-            left:(refined?refined.left:detectedLeft)/100*W,
-            right:(refined?refined.right:detectedRight)/100*W,
-            bottom:(refined?refined.bottom:detectedBottom)/100*H,
-            widthPx:((refined?refined.right:detectedRight)-(refined?refined.left:detectedLeft))/100*W,
-            refined:!!refined,
-            boxLeft:detectedLeft/100*W, boxRight:detectedRight/100*W, boxBottom:detectedBottom/100*H,
-          };
-          void (async()=>{
-            try{
-              const colorCal=await calibratePhotoColor(capturedPhoto);
-              const bL=clamp(colorCal.cardBox.x*100,2,94);
-              const bR=clamp((colorCal.cardBox.x+colorCal.cardBox.width)*100,6,98);
-              const bB=clamp((colorCal.cardBox.y+colorCal.cardBox.height)*100,10,88);
-              const bT=clamp(colorCal.cardBox.y*100,3,bB-5);
-              const ctx=canvas.getContext("2d",{willReadFrequently:true});
-              if(!ctx) throw new Error("sem contexto");
-              const img=ctx.getImageData(0,0,W,H);
-              const n=refineCardEdgesNew({data:img.data,width:W,height:H},{leftPct:bL,rightPct:bR,topPct:bT,bottomPct:bB});
-              setDetectorCompare({canvasW:W,canvasH:H,original,nova:{...n,boxLeft:bL/100*W,boxRight:bR/100*W,boxBottom:bB/100*H},source:cardEdgeSource,legacyFail:legacyRefineFailReason});
-            }catch(err){
-              setDetectorCompare({canvasW:W,canvasH:H,original,nova:null,error:String(err),source:cardEdgeSource,legacyFail:legacyRefineFailReason});
-            }
-          })();
-        }
+        setCardEdgeInfo({source:cardEdgeSource,legacyFail:legacyRefineFailReason});
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -4136,6 +4131,37 @@ export default function AppV2() {
 
   return (
     <main className="app">
+      {captureProgress && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position:"fixed",inset:0,zIndex:2147483000,display:"grid",placeItems:"center",
+            background:"#14100b",color:"#f4e7c8",padding:24,
+          }}
+        >
+          <style>{`
+            @keyframes capbar{0%,100%{transform:scaleY(.35);opacity:.45}50%{transform:scaleY(1);opacity:1}}
+            @keyframes capshine{0%{transform:translateX(-100%)}100%{transform:translateX(220%)}}
+          `}</style>
+          <div style={{display:"grid",gap:22,justifyItems:"center",width:"min(320px,86vw)",textAlign:"center"}}>
+            <div style={{width:64,height:64,borderRadius:"50%",border:"3px solid #52e0a3",display:"grid",placeItems:"center",color:"#52e0a3",fontSize:34,fontWeight:900}}>✓</div>
+            <strong style={{fontSize:22,letterSpacing:".01em"}}>Foto tirada!</strong>
+            <div aria-hidden="true" style={{display:"flex",gap:7,alignItems:"center",height:44}}>
+              {[0,1,2,3,4].map(i=>(
+                <span key={i} style={{width:8,height:44,borderRadius:4,background:"#c9a967",animation:`capbar 1s ease-in-out ${i*0.12}s infinite`,transformOrigin:"center"}} />
+              ))}
+            </div>
+            <div style={{width:"100%",height:10,borderRadius:999,background:"#2c2318",overflow:"hidden",position:"relative"}}>
+              <div style={{width:`${captureProgress.pct}%`,height:"100%",borderRadius:999,background:"linear-gradient(90deg,#c9a967,#f0cd78)",transition:"width .25s ease",position:"relative",overflow:"hidden"}}>
+                <span style={{position:"absolute",inset:0,width:"45%",background:"linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent)",animation:"capshine 1.1s linear infinite"}} />
+              </div>
+            </div>
+            <span style={{fontSize:14,opacity:.85}}>{captureProgress.label} {captureProgress.pct}%</span>
+            <small style={{opacity:.7}}>{captureProgress.pct<30 ? "Segure firme mais um instante…" : "Pode tirar a mão. Estamos medindo."}</small>
+          </div>
+        </div>
+      )}
       <header className="brand">
         <button
           type="button"
@@ -4749,6 +4775,7 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
               <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
               {widthAnalysis.manualMm!==null && <span>SÓ LUPA (usado): {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
               {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
@@ -4832,30 +4859,6 @@ export default function AppV2() {
                       <small>Diagnóstico somente · nenhum destes testes altera o aro comercial.</small>
                     </div>
                   )}
-                  {detectorCompare && (()=>{
-                    const o=detectorCompare.original, nv=detectorCompare.nova;
-                    const fingerPx=geometricStabilityTest?.currentFingerPx ?? null;
-                    const ring=(mm:number|null)=>mm===null?"n/d":String(classifyFingerWidthMm(mm).exactRingSize);
-                    const mmO=fingerPx!==null?fingerPx*85.6/o.widthPx:null;
-                    const mmN=fingerPx!==null&&nv?fingerPx*85.6/nv.widthPx:null;
-                    const f=(v:number)=>v.toFixed(1);
-                    return (
-                      <div style={{border:"2px solid #1f6feb",padding:12,borderRadius:10,display:"grid",gap:6,background:"rgba(10,25,50,.6)"}}>
-                        <strong>COMPARAÇÃO DE DETECTORES · MESMA FOTO</strong>
-                        <span>Foto: {detectorCompare.canvasW}×{detectorCompare.canvasH} px</span>
-                        <span>BORDA DO CARTÃO USADA: {detectorCompare.source ?? "n/d"}{detectorCompare.legacyFail ? ` · refino original falhou: ${detectorCompare.legacyFail}` : ""}</span>
-                        <span>USADO: esq {f(o.left)} · dir {f(o.right)} · base {f(o.bottom)} · LARGURA {f(o.widthPx)} px {o.refined?"":"(sem refino)"}</span>
-                        <span>· caixa inicial: esq {f(o.boxLeft)} · dir {f(o.boxRight)} · base {f(o.boxBottom)}</span>
-                        {nv ? (<>
-                          <span>NOVO (v1/v2): esq {f(nv.left)} · dir {f(nv.right)} · base {f(nv.bottom)} · LARGURA {f(nv.widthPx)} px {nv.refined?"":"(sem refino)"}</span>
-                          <span>· caixa inicial: esq {f(nv.boxLeft)} · dir {f(nv.boxRight)} · base {f(nv.boxBottom)}</span>
-                          <span>DIFERENÇA novo−original: esq {f(nv.left-o.left)} · dir {f(nv.right-o.right)} · base {f(nv.bottom-o.bottom)} · largura {f(nv.widthPx-o.widthPx)} px ({((nv.widthPx/o.widthPx-1)*100).toFixed(2)}%)</span>
-                          <span>Mesmo dedo ({fingerPx===null?"n/d":f(fingerPx)+" px"}): original {mmO===null?"n/d":mmO.toFixed(2)+" mm"} → aro {ring(mmO)} · novo {mmN===null?"n/d":mmN.toFixed(2)+" mm"} → aro {ring(mmN)}</span>
-                        </>) : (<span>Novo detector: falhou {detectorCompare.error ?? ""}</span>)}
-                        <small>Diagnóstico somente · o resultado usa o detector ORIGINAL.</small>
-                      </div>
-                    );
-                  })()}
                   {geometricStabilityTest && (
                     <div
                       style={{
