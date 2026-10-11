@@ -12,6 +12,9 @@ import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
+
+// Liga/desliga a borda fisica como medida principal do dedo.
+const USE_PHYSICAL_EDGE_AS_PRIMARY = true;
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
@@ -3594,11 +3597,37 @@ export default function AppV2() {
   // Desempates experimentais desativados.
   // O aro comercial deve refletir somente a curva principal enquanto
   // comparamos a curva historica em diagnostico.
-  const commercialRingResolution = {
-    ringSize:result?.ringSize ?? null,
-    adjusted:false,
-    reason:"desempate desativado · curva principal direta",
-  };
+  // MEDIDA PRINCIPAL = BORDA FISICA (teste v2, 11/10/2026).
+  // Em 4 fotos do mesmo dedo (aro real 25) a borda fisica variou 0,06 mm
+  // (21,70-21,76 -> aro 25 em todas). O metodo anterior variou 0,21 mm e
+  // oscilava 25/26. Sem offset: a borda fisica ja cai no centro do aro real.
+  // So vale quando a borda fisica e forte e cobre >= 90% dos cortes;
+  // fora disso cai no metodo anterior (e a validacao pede nova foto).
+  // A curva MANUAL_FINGER_CURVE nao foi alterada.
+  const physicalPrimaryWidthMm =
+    USE_PHYSICAL_EDGE_AS_PRIMARY &&
+    measurementMode==="finger" &&
+    !diameterPhotoTestMode &&
+    result!==null &&
+    physicalEdgeProfileTest?.status==="forte" &&
+    physicalEdgeProfileTest.validPairPercent>=90 &&
+    physicalEdgeProfileTest.widthMm!==null &&
+    Number.isFinite(physicalEdgeProfileTest.widthMm) &&
+    physicalEdgeProfileTest.widthMm>0
+      ? physicalEdgeProfileTest.widthMm
+      : null;
+  const commercialWidthMm = physicalPrimaryWidthMm ?? result?.widthMm ?? null;
+  const commercialRingResolution = physicalPrimaryWidthMm!==null
+    ? {
+        ringSize:classifyFingerWidthMm(physicalPrimaryWidthMm).exactRingSize,
+        adjusted:false,
+        reason:"borda física · curva principal direta",
+      }
+    : {
+        ringSize:result?.ringSize ?? null,
+        adjusted:false,
+        reason:"método anterior (borda física indisponível) · curva principal direta",
+      };
   const commercialRingSize=commercialRingResolution.ringSize;
 
   const methodComparisonTest = (() => {
@@ -3757,8 +3786,9 @@ export default function AppV2() {
       hints.add("finger");
     }
 
-    const historical=classifyFingerWidthMmExperimentalHigh(widthSentToFormulaMm);
-    const official=classifyFingerWidthMm(widthSentToFormulaMm);
+    const gateWidthMm=commercialWidthMm ?? widthSentToFormulaMm;
+    const historical=classifyFingerWidthMmExperimentalHigh(gateWidthMm);
+    const official=classifyFingerWidthMm(gateWidthMm);
 
     // A curva histórica é experimental apenas na faixa alta. Abaixo de 29,
     // preservamos o classificador oficial para não contaminar a faixa baixa.
@@ -4562,7 +4592,8 @@ export default function AppV2() {
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
-              <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              <span>Medida final: {(commercialWidthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm · {commercialRingResolution.reason}</span>
+              <span>Método anterior (só comparação): {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm · aro "+(result?.ringSize ?? "n/d")}</span>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
@@ -4681,7 +4712,7 @@ export default function AppV2() {
                     >
                       <strong>VALIDAÇÃO · CURVA PRINCIPAL</strong>
                       <span>Gate geométrico: {experimentalOperationalTest.accepted ? "✓ ACEITA" : "✕ BLOQUEIA"}</span>
-                      <span>Medida usada: {widthSentToFormulaMm===null?"n/d":widthSentToFormulaMm.toFixed(2)+" mm"}</span>
+                      <span>Medida usada: {commercialWidthMm===null?"n/d":commercialWidthMm.toFixed(2)+" mm"} · {physicalPrimaryWidthMm!==null ? "borda física" : "método anterior"}</span>
                       <span>Validação física: {experimentalOperationalTest.physicalMm===null?"n/d":experimentalOperationalTest.physicalMm.toFixed(2)+" mm"} · suporte {experimentalOperationalTest.physicalSupport}% · diferença {experimentalOperationalTest.physicalDeltaMm===null?"n/d":experimentalOperationalTest.physicalDeltaMm.toFixed(2)+" mm"}</span>
                       <span>Curva principal: aro {experimentalOperationalTest.officialRing} · comparação histórica: aro {experimentalOperationalTest.historicalRing}</span>
                       <span>RESULTADO DA VALIDAÇÃO: {experimentalOperationalTest.accepted ? "ARO "+(commercialRingSize ?? experimentalOperationalTest.proposedRing) : "CAPTURA REPROVADA · REFAZER FOTO"}</span>
@@ -4810,7 +4841,7 @@ export default function AppV2() {
                   <g>
                     <circle
                       cx={comparisonChart.x(clamp(commercialRingSize ?? result.ringSize,17,33))}
-                      cy={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))}
+                      cy={comparisonChart.y(clamp(commercialWidthMm ?? result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))}
                       r="5.2"
                       fill="none"
                       stroke="#ffffff"
@@ -4818,7 +4849,7 @@ export default function AppV2() {
                     />
                     <text
                       x={comparisonChart.x(clamp(commercialRingSize ?? result.ringSize,17,33))}
-                      y={comparisonChart.y(clamp(result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))-8}
+                      y={comparisonChart.y(clamp(commercialWidthMm ?? result.widthMm,comparisonChart.minMm,comparisonChart.maxMm))-8}
                       textAnchor="middle"
                       fill="#ffffff"
                       fontSize="9"
@@ -4887,7 +4918,7 @@ export default function AppV2() {
           ringMetal={ringMetal}
           ringStyle={ringStyle}
           ringBandWidth={ringBandWidth}
-          ringSize={result?.ringSize ?? null}
+          ringSize={commercialRingSize ?? result?.ringSize ?? null}
           setShowcaseWidth={setShowcaseWidth}
           setShowcaseAngle={setShowcaseAngle}
           onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
