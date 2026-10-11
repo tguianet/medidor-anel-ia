@@ -3796,6 +3796,10 @@ export default function AppV2() {
     experimentalOperationalTest!==null &&
     !experimentalOperationalTest.accepted;
   const ringVisibleToCustomer = !validationPending && !captureRejectedByValidation;
+  const photoFingerAngleDeg = geometricStabilityTest?.fingerAngleDeg ?? null;
+  const photoFingerAngleLabel = photoFingerAngleDeg===null
+    ? null
+    : `Ângulo do dedo na foto: ${Math.abs(photoFingerAngleDeg).toFixed(1).replace(".",",")}°${Math.abs(photoFingerAngleDeg)>5 ? " (limite 5°)" : ""}`;
   const retakeHints = captureRejectedByValidation
     ? experimentalOperationalTest!.hints
     : [];
@@ -4525,6 +4529,7 @@ export default function AppV2() {
             <div className="analysis-result" role="alert" style={{borderColor:"#e0a352"}}>
               <strong>Vamos tirar outra foto</strong>
               <span>Esta foto não ficou boa o suficiente para medir seu aro com segurança.</span>
+              {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
               {retakeHints.includes("finger") && (
                 <span>• <strong>Deixe o dedo reto</strong>, alinhado com as duas linhas da guia, sem girar a mão.</span>
               )}
@@ -4550,6 +4555,7 @@ export default function AppV2() {
               <strong>Número exato: {commercialRingSize}</strong>
               <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
+              {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
             </div>
           )}
           {debugMode && phase === "finger" && leftLocked && rightLocked && (

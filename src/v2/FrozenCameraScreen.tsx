@@ -331,35 +331,57 @@ export default function FrozenCameraScreen({
           </div>
         )}
 
-        {fingerTooTilted && (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              position:"absolute",
-              left:"50%",
-              bottom:18,
-              transform:"translateX(-50%)",
-              zIndex:60,
-              maxWidth:"calc(100% - 28px)",
-              padding:"10px 16px",
-              borderRadius:14,
-              border:"2px solid #f0a35e",
-              background:"rgba(24,14,6,.9)",
-              color:"#ffd3a1",
-              fontWeight:800,
-              textAlign:"center",
-              lineHeight:1.25,
-              boxShadow:"0 4px 18px rgba(0,0,0,.45)",
-              pointerEvents:"none",
-            }}
-          >
-            ENDIREITE O DEDO · {Math.abs(liveFingerTiltDeg as number).toFixed(1)}°
-            <div style={{fontWeight:600,fontSize:12,marginTop:3}}>
-              Deixe o dedo reto, entre as duas linhas da guia
+        {(() => {
+          // Angulo do dedo SEMPRE visivel na camera.
+          // verde  <= 1,5 graus  (ideal, mesmo criterio do nivel)
+          // amarelo ate 5 graus  (aceito pela validacao)
+          // laranja  > 5 graus   (validacao reprova; foto travada)
+          const tilt = fingerTiltKnown ? Math.abs(liveFingerTiltDeg as number) : null;
+          const tone =
+            tilt === null ? { border:"rgba(255,255,255,.45)", text:"#e8e2d4", bg:"rgba(12,12,12,.82)" }
+            : tilt <= 1.5 ? { border:"#52e0a3", text:"#52e0a3", bg:"rgba(6,24,16,.88)" }
+            : tilt <= FINGER_TILT_LIMIT_DEG ? { border:"#f2cf73", text:"#f5d477", bg:"rgba(24,20,6,.88)" }
+            : { border:"#f0a35e", text:"#ffd3a1", bg:"rgba(24,14,6,.9)" };
+          const label =
+            tilt === null ? "ÂNGULO DO DEDO: procurando…"
+            : tilt <= 1.5 ? `✓ DEDO RETO · ${tilt.toFixed(1)}°`
+            : tilt <= FINGER_TILT_LIMIT_DEG ? `ÂNGULO DO DEDO · ${tilt.toFixed(1)}°`
+            : `ENDIREITE O DEDO · ${tilt.toFixed(1)}°`;
+          return (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position:"absolute",
+                left:"50%",
+                bottom:18,
+                transform:"translateX(-50%)",
+                zIndex:60,
+                minWidth:190,
+                maxWidth:"calc(100% - 28px)",
+                padding:"9px 16px",
+                borderRadius:14,
+                border:`2px solid ${tone.border}`,
+                background:tone.bg,
+                color:tone.text,
+                fontWeight:800,
+                fontVariantNumeric:"tabular-nums",
+                textAlign:"center",
+                lineHeight:1.25,
+                boxShadow:"0 4px 18px rgba(0,0,0,.45)",
+                pointerEvents:"none",
+                transition:"border-color .15s ease, color .15s ease",
+              }}
+            >
+              {label}
+              {fingerTooTilted && (
+                <div style={{fontWeight:600,fontSize:12,marginTop:3}}>
+                  Deixe o dedo reto, entre as duas linhas da guia
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
           <div
