@@ -150,7 +150,7 @@ export default function AppV2() {
   const [cardBottom, setCardBottom] = useState(58);
   // DIAGNOSTICO v4: deteccao original x nova na MESMA foto (px no canvas).
   type DetectorSide = { left:number; right:number; bottom:number; widthPx:number; refined:boolean; boxLeft:number; boxRight:number; boxBottom:number };
-  const [detectorCompare, setDetectorCompare] = useState<null|{ canvasW:number; canvasH:number; original:DetectorSide; nova:DetectorSide|null; error?:string }>(null);
+  const [detectorCompare, setDetectorCompare] = useState<null|{ canvasW:number; canvasH:number; original:DetectorSide; nova:DetectorSide|null; error?:string; source?:string; legacyFail?:string }>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -766,16 +766,18 @@ export default function AppV2() {
 
           // So aceitamos o refinamento se as 3 bordas possuem contraste real.
           // Caso contrario, mantemos o retangulo inicial como fallback.
-          if(
-            leftEdge.edge<7 ||
-            rightEdge.edge<7 ||
-            leftEdge.coverage<0.52 ||
-            rightEdge.coverage<0.52 ||
-            bottomEdge.score<7 ||
-            refinedRight-refinedLeft<cardW*0.92 ||
-            refinedRight-refinedLeft>cardW*1.10
-          ){
-            return null;
+          {
+            const reasons:string[]=[];
+            if(leftEdge.edge<7) reasons.push(`esq contraste ${leftEdge.edge.toFixed(1)}<7`);
+            if(rightEdge.edge<7) reasons.push(`dir contraste ${rightEdge.edge.toFixed(1)}<7`);
+            if(leftEdge.coverage<0.52) reasons.push(`esq cobertura ${leftEdge.coverage.toFixed(2)}<0,52`);
+            if(rightEdge.coverage<0.52) reasons.push(`dir cobertura ${rightEdge.coverage.toFixed(2)}<0,52`);
+            if(bottomEdge.score<7) reasons.push(`base ${bottomEdge.score.toFixed(1)}<7`);
+            if(refinedRight-refinedLeft<cardW*0.92 || refinedRight-refinedLeft>cardW*1.10) reasons.push(`largura ${(refinedRight-refinedLeft).toFixed(0)} fora de ${(cardW*0.92).toFixed(0)}–${(cardW*1.10).toFixed(0)}`);
+            if(reasons.length){
+              legacyRefineFailReason=reasons.join(" · ");
+              return null;
+            }
           }
 
           return {
@@ -788,7 +790,34 @@ export default function AppV2() {
           };
         };
 
-        const refined=refineCardEdges();
+        let legacyRefineFailReason="";
+        const legacyRefined=refineCardEdges();
+        // medidordedov8: se o refino ORIGINAL falhar, NAO cair na caixa
+        // aproximada (podia errar 10+ px e mudar 2 aros). Usa o detector novo
+        // de borda fisica a partir da mesma caixa.
+        let cardEdgeSource:"refino original"|"detector novo (fallback)"|"caixa aproximada"=legacyRefined?"refino original":"caixa aproximada";
+        let refined=legacyRefined;
+        if(!refined){
+          try{
+            const ctx2=canvas.getContext("2d",{willReadFrequently:true});
+            if(ctx2){
+              const W2=canvas.width,H2=canvas.height;
+              const img2=ctx2.getImageData(0,0,W2,H2);
+              const fb=refineCardEdgesNew({data:img2.data,width:W2,height:H2},{leftPct:detectedLeft,rightPct:detectedRight,topPct:detectedTop,bottomPct:detectedBottom});
+              if(fb.refined){
+                refined={
+                  left:clamp(fb.left/W2*100,2,94),
+                  right:clamp(fb.right/W2*100,6,98),
+                  bottom:clamp(fb.bottom/H2*100,10,88),
+                  leftShiftPx:fb.left-detectedLeft/100*W2,
+                  rightShiftPx:fb.right-detectedRight/100*W2,
+                  bottomShiftPx:fb.bottom-detectedBottom/100*H2,
+                };
+                cardEdgeSource="detector novo (fallback)";
+              }
+            }
+          }catch{ /* mantem caixa aproximada */ }
+        }
 
         // DIAGNOSTICO v4: mesma foto, deteccao nova (nao altera o resultado).
         setDetectorCompare(null);
@@ -813,9 +842,9 @@ export default function AppV2() {
               if(!ctx) throw new Error("sem contexto");
               const img=ctx.getImageData(0,0,W,H);
               const n=refineCardEdgesNew({data:img.data,width:W,height:H},{leftPct:bL,rightPct:bR,topPct:bT,bottomPct:bB});
-              setDetectorCompare({canvasW:W,canvasH:H,original,nova:{...n,boxLeft:bL/100*W,boxRight:bR/100*W,boxBottom:bB/100*H}});
+              setDetectorCompare({canvasW:W,canvasH:H,original,nova:{...n,boxLeft:bL/100*W,boxRight:bR/100*W,boxBottom:bB/100*H},source:cardEdgeSource,legacyFail:legacyRefineFailReason});
             }catch(err){
-              setDetectorCompare({canvasW:W,canvasH:H,original,nova:null,error:String(err)});
+              setDetectorCompare({canvasW:W,canvasH:H,original,nova:null,error:String(err),source:cardEdgeSource,legacyFail:legacyRefineFailReason});
             }
           })();
         }
@@ -4806,7 +4835,8 @@ export default function AppV2() {
                       <div style={{border:"2px solid #1f6feb",padding:12,borderRadius:10,display:"grid",gap:6,background:"rgba(10,25,50,.6)"}}>
                         <strong>COMPARAÇÃO DE DETECTORES · MESMA FOTO</strong>
                         <span>Foto: {detectorCompare.canvasW}×{detectorCompare.canvasH} px</span>
-                        <span>ORIGINAL (usado): esq {f(o.left)} · dir {f(o.right)} · base {f(o.bottom)} · LARGURA {f(o.widthPx)} px {o.refined?"":"(sem refino)"}</span>
+                        <span>BORDA DO CARTÃO USADA: {detectorCompare.source ?? "n/d"}{detectorCompare.legacyFail ? ` · refino original falhou: ${detectorCompare.legacyFail}` : ""}</span>
+                        <span>USADO: esq {f(o.left)} · dir {f(o.right)} · base {f(o.bottom)} · LARGURA {f(o.widthPx)} px {o.refined?"":"(sem refino)"}</span>
                         <span>· caixa inicial: esq {f(o.boxLeft)} · dir {f(o.boxRight)} · base {f(o.boxBottom)}</span>
                         {nv ? (<>
                           <span>NOVO (v1/v2): esq {f(nv.left)} · dir {f(nv.right)} · base {f(nv.bottom)} · LARGURA {f(nv.widthPx)} px {nv.refined?"":"(sem refino)"}</span>
