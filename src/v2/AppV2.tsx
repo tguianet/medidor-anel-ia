@@ -213,6 +213,13 @@ export default function AppV2() {
   // Altura (% da tela) do dedo do usuario ao soltar a linha: e ali que ele
   // alinhou a linha com a borda, entao o snap procura a borda nessa altura.
   const dragLineYRef = useRef<number|null>(null);
+  // Bordas grudadas nesta foto (pixels da foto). Com os dois lados, as duas
+  // linhas recebem a MESMA inclinacao: o eixo do dedo.
+  const fingerSnapStoreRef = useRef<{
+    photo:string;
+    left:{x0:number; y0:number; slope:number}|null;
+    right:{x0:number; y0:number; slope:number}|null;
+  }>({photo:"",left:null,right:null});
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
   const cardLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
@@ -2103,37 +2110,77 @@ export default function AppV2() {
         seedX,
         seedY,
         seedRadius:Math.round(18/Math.max(1,zoom))+4,
-        halfSpan:Math.min(160,source.height*0.13),
+        // Trecho curto perto do anel: mais abaixo o dedo alarga para a
+        // palma e as bordas deixam de ser paralelas.
+        halfSpan:Math.min(80,source.height*0.07),
+        maxTiltDeg:15,
         minY:minTrackY,
       });
       if(snap) break;
     }
     if(!snap){ vertical(); return null; }
 
-    // A reta cobre a foto inteira: qualquer altura usada na medicao
-    // (regiao do anel, contorno, auditoria) encontra a borda inclinada.
-    const top={x:snap.x0+snap.slope*(0-snap.y0),y:0};
-    const bottom={x:snap.x0+snap.slope*(source.height-snap.y0),y:source.height};
-    const line:Line={
-      a:{x:toScreenX(top.x),y:toScreenY(top.y)},
-      b:{x:toScreenX(bottom.x),y:toScreenY(bottom.y)},
-    };
-    const measureImageY=toImageY(measureY);
-    const centerPercent=clamp(toScreenX(snap.x0+snap.slope*(measureImageY-snap.y0)),2,98);
-    setFingerLines((current)=>({...current,[side]:line}));
-    if(side==="left"){
-      setLeftLine(centerPercent);
-      setLeftFingerTilt(snap.tiltDeg);
-      setLeftMagnetConfidence(snap.confidence);
-      setLeftManualRefined(false);
-      setLeftLocked(true);
-    }else{
-      setRightLine(centerPercent);
-      setRightFingerTilt(snap.tiltDeg);
-      setRightMagnetConfidence(snap.confidence);
-      setRightManualRefined(false);
-      setRightLocked(true);
+    // A inclinacao vale na ALTURA DO ANEL (linha amarela): e ali que o anel
+    // fica e onde a medida e feita. Se o usuario soltou a linha longe dessa
+    // altura (ex.: perto da palma, onde o dedo alarga), segue a mesma borda
+    // ate a altura do anel e mede a inclinacao ali.
+    const ringImageY=toImageY(ringGuideY);
+    if(Math.abs(ringImageY-snap.y0)>source.height*0.025){
+      const predictedX=snap.x0+snap.slope*(ringImageY-snap.y0);
+      const atRing=snapFingerEdge(source,{
+        side,
+        seedX:predictedX,
+        seedY:ringImageY,
+        seedRadius:Math.round(10/Math.max(1,zoom))+4,
+        halfSpan:Math.min(80,source.height*0.07),
+        maxTiltDeg:15,
+        minY:minTrackY,
+      });
+      if(atRing) snap=atRing;
     }
+
+    // Guarda a borda deste lado e calcula a inclinacao do EIXO do dedo:
+    // com os dois lados grudados, usa a media das duas bordas para as duas
+    // linhas (ficam paralelas e mostram a inclinacao real do dedo).
+    const store=fingerSnapStoreRef.current.photo===photo
+      ? fingerSnapStoreRef.current
+      : {photo,left:null,right:null};
+    store[side]={x0:snap.x0,y0:snap.y0,slope:snap.slope};
+    fingerSnapStoreRef.current=store;
+    const sharedSlope=store.left && store.right
+      ? (store.left.slope+store.right.slope)/2
+      : snap.slope;
+    const sharedTiltDeg=Math.atan(sharedSlope)*180/Math.PI;
+    const measureImageY=toImageY(measureY);
+
+    const applySide=(which:FingerSide, edge:{x0:number; y0:number}, confidence:number|null)=>{
+      // A reta cobre a foto inteira: qualquer altura usada na medicao
+      // (regiao do anel, contorno, auditoria) encontra a borda inclinada.
+      const top={x:edge.x0+sharedSlope*(0-edge.y0),y:0};
+      const bottom={x:edge.x0+sharedSlope*(source.height-edge.y0),y:source.height};
+      const line:Line={
+        a:{x:toScreenX(top.x),y:toScreenY(top.y)},
+        b:{x:toScreenX(bottom.x),y:toScreenY(bottom.y)},
+      };
+      const centerPercent=clamp(toScreenX(edge.x0+sharedSlope*(measureImageY-edge.y0)),2,98);
+      setFingerLines((current)=>({...current,[which]:line}));
+      if(which==="left"){
+        setLeftLine(centerPercent);
+        setLeftFingerTilt(sharedTiltDeg);
+        if(confidence!==null) setLeftMagnetConfidence(confidence);
+        setLeftManualRefined(false);
+        setLeftLocked(true);
+      }else{
+        setRightLine(centerPercent);
+        setRightFingerTilt(sharedTiltDeg);
+        if(confidence!==null) setRightMagnetConfidence(confidence);
+        setRightManualRefined(false);
+        setRightLocked(true);
+      }
+    };
+    applySide(side,store[side]!,snap.confidence);
+    const other:FingerSide=side==="left" ? "right" : "left";
+    if(store[other]) applySide(other,store[other]!,null);
     return snap;
   };
 
