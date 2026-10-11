@@ -7,6 +7,7 @@ import { useFrozenCameraStream } from "./FrozenCameraStream";
 import type { CardEdge, DragTarget, FingerSide, MeasurePhase, MeasurementMode, RingMetal, RingStyle, Stage } from "../types";
 import { wearableRingImage } from "../types";
 import FrozenIntroScreen from "./FrozenIntroScreen";
+import CalibrationPanelV2, { type CalibrationV2Snapshot } from "./CalibrationPanelV2";
 import FrozenCameraScreen from "./FrozenCameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
@@ -3856,6 +3857,35 @@ export default function AppV2() {
     ? experimentalOperationalTest!.hints
     : [];
 
+  // Dados da foto atual para o painel de calibracao V2 (modo de teste).
+  const calibrationV2Snapshot: CalibrationV2Snapshot | null =
+    measurementMode==="finger" &&
+    !validationPending &&
+    commercialWidthMm!==null &&
+    commercialRingSize!==null
+      ? {
+          usedWidthMm:commercialWidthMm,
+          predictedRing:commercialRingSize,
+          widthSource:physicalPrimaryWidthMm!==null ? "borda-fisica" : "metodo-anterior",
+          physicalRawMm:physicalEdgeProfileTest?.widthMm ?? null,
+          offsetMm:physicalPrimaryWidthMm!==null ? PHYSICAL_EDGE_OFFSET_MM : 0,
+          oldMethodMm:widthSentToFormulaMm,
+          oldMethodRing:result?.ringSize ?? null,
+          cardPx:geometricStabilityTest?.cardPx ?? null,
+          mmPerPx:geometricStabilityTest?.mmPerPx ?? null,
+          physicalRatio:geometricStabilityTest?.physicalRatio ?? null,
+          physicalSupport:physicalEdgeProfileTest?.validPairPercent ?? null,
+          fingerAngleDeg:geometricStabilityTest?.fingerAngleDeg ?? null,
+          pitch:geometricStabilityTest?.pitch ?? null,
+          roll:geometricStabilityTest?.roll ?? null,
+          stability:geometricStabilityTest?.stability ?? null,
+          perspective:geometricStabilityTest?.perspectiveScore ?? null,
+          gateAccepted:experimentalOperationalTest?.accepted ?? false,
+          gateReasons:experimentalOperationalTest?.reasons ?? [],
+          appVersion:`v2-borda+${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)}`,
+        }
+      : null;
+
   const measurementAudit = (() => {
     if(!fingerMagnetSamples?.length || liveWidthMm===null) return null;
 
@@ -4614,6 +4644,9 @@ export default function AppV2() {
               <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
               {photoFingerAngleLabel && <small>{photoFingerAngleLabel}</small>}
             </div>
+          )}
+          {debugMode && phase === "finger" && leftLocked && rightLocked && measurementMode === "finger" && (
+            <CalibrationPanelV2 snapshot={calibrationV2Snapshot} />
           )}
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
             <div className="analysis-result">
