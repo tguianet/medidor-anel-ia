@@ -31,6 +31,8 @@ export type CalibrationV2Snapshot = {
   shotSpreadMm?: number | null;
   shotValid?: number | null;
   shotOutlierIndex?: number | null;
+  cardSeriesPx?: (number | null)[];
+  cardSeriesSpreadPct?: number | null;
 };
 
 type RecordV2 = CalibrationV2Snapshot & {

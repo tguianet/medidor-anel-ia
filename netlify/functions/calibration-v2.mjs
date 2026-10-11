@@ -64,6 +64,10 @@ export const sanitizeRecord = (body) => {
     shotSpreadMm: num(body.shotSpreadMm, 0, 5),
     shotValid: int(body.shotValid, 0, 8),
     shotOutlierIndex: int(body.shotOutlierIndex, 0, 7),
+    cardSeriesPx: Array.isArray(body.cardSeriesPx)
+      ? body.cardSeriesPx.slice(0, 8).map((value) => (value === null ? null : num(value, 50, 10000, 1)))
+      : [],
+    cardSeriesSpreadPct: num(body.cardSeriesSpreadPct, 0, 100),
   };
 };
 
@@ -77,7 +81,7 @@ const CSV_COLUMNS = [
   "createdAt", "person", "finger", "hand", "realRing", "predictedRing", "error",
   "usedWidthMm", "widthSource", "physicalRawMm", "offsetMm", "oldMethodMm", "oldMethodRing",
   "cardPx", "mmPerPx", "physicalRatio", "physicalSupport", "fingerAngleDeg", "pitch", "roll",
-  "stability", "perspective", "gateAccepted", "gateReasons", "shotWidthsMm", "shotSpreadMm", "shotValid", "shotOutlierIndex",
+  "stability", "perspective", "gateAccepted", "gateReasons", "shotWidthsMm", "shotSpreadMm", "shotValid", "shotOutlierIndex", "cardSeriesPx", "cardSeriesSpreadPct",
   "note", "appVersion", "id",
 ];
 const csvCell = (value) => {

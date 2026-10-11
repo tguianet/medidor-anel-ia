@@ -243,3 +243,88 @@ export const colorDifference = (
   const db = data[offsetA + 2] - data[offsetB + 2];
   return Math.sqrt(dr * dr + dg * dg + db * db) / SQRT3;
 };
+
+// ---------------------------------------------------------------------------
+// Medida completa do cartao a partir da caixa aproximada do detector.
+// Mesma regra usada na tela de medicao (AppV2): refina esquerda, direita e
+// base pela borda fisica; se o refinamento nao for confiavel, usa a caixa.
+// Devolve posicoes em % da foto e a largura em px (= 85,60 mm).
+
+export type CardBoxFraction = { x: number; y: number; width: number; height: number };
+
+export type CardMeasurement = {
+  finalLeft: number;
+  finalRight: number;
+  finalBottom: number;
+  detectedTop: number;
+  widthPx: number;
+  refined: boolean;
+  debug: Record<string, unknown>;
+};
+
+const clampValue = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+export const measureCardFromBox = (image: RgbaImage, cardBox: CardBoxFraction): CardMeasurement => {
+  const detectedLeft = clampValue(cardBox.x * 100, 2, 94);
+  const detectedRight = clampValue((cardBox.x + cardBox.width) * 100, 6, 98);
+  const detectedBottom = clampValue((cardBox.y + cardBox.height) * 100, 10, 88);
+  const detectedTop = clampValue(cardBox.y * 100, 3, detectedBottom - 5);
+
+  const left0 = (detectedLeft / 100) * image.width;
+  const right0 = (detectedRight / 100) * image.width;
+  const top0 = (detectedTop / 100) * image.height;
+  const bottom0 = (detectedBottom / 100) * image.height;
+  const cardW = Math.max(40, right0 - left0);
+  const cardH = Math.max(30, bottom0 - top0);
+
+  const alongFrom = top0 + cardH * 0.14;
+  const alongTo = bottom0 - cardH * 0.14;
+  const leftEdge = findCardEdge(image, { side: "left", expected: left0, from: alongFrom, to: alongTo });
+  const rightEdge = findCardEdge(image, { side: "right", expected: right0, from: alongFrom, to: alongTo });
+  const refinedLeft = Math.min(leftEdge.position, rightEdge.position - 20);
+  const refinedRight = Math.max(rightEdge.position, leftEdge.position + 20);
+  const bottomEdge = findCardEdge(image, {
+    side: "bottom",
+    expected: bottom0,
+    from: refinedLeft + cardW * 0.1,
+    to: refinedRight - cardW * 0.1,
+    searchPx: 14,
+  });
+
+  const debug = {
+    left: { x: leftEdge.position, shift: leftEdge.shift, strength: leftEdge.strength, coverage: leftEdge.coverage, consistency: leftEdge.consistency, reliable: leftEdge.reliable },
+    right: { x: rightEdge.position, shift: rightEdge.shift, strength: rightEdge.strength, coverage: rightEdge.coverage, consistency: rightEdge.consistency, reliable: rightEdge.reliable },
+    bottom: { y: bottomEdge.position, shift: bottomEdge.shift, strength: bottomEdge.strength, reliable: bottomEdge.reliable },
+    cardWidthPx: refinedRight - refinedLeft,
+    canvasWidth: image.width,
+  };
+
+  const reliable =
+    leftEdge.reliable &&
+    rightEdge.reliable &&
+    bottomEdge.strength >= 7 &&
+    refinedRight - refinedLeft >= cardW * 0.92 &&
+    refinedRight - refinedLeft <= cardW * 1.1;
+
+  const refined = reliable
+    ? {
+        left: clampValue((refinedLeft / image.width) * 100, 2, 94),
+        right: clampValue((refinedRight / image.width) * 100, 6, 98),
+        bottom: clampValue((bottomEdge.position / image.height) * 100, 10, 88),
+      }
+    : null;
+
+  const finalLeft = refined ? Math.min(refined.left, refined.right - 5) : Math.min(detectedLeft, detectedRight - 5);
+  const finalRight = refined ? Math.max(refined.right, refined.left + 5) : Math.max(detectedRight, detectedLeft + 5);
+  const finalBottom = refined?.bottom ?? detectedBottom;
+
+  return {
+    finalLeft,
+    finalRight,
+    finalBottom,
+    detectedTop,
+    widthPx: ((finalRight - finalLeft) / 100) * image.width,
+    refined: refined !== null,
+    debug,
+  };
+};
