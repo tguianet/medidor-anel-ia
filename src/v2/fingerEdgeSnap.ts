@@ -83,34 +83,59 @@ export const snapFingerEdge = (img: SnapImage, options: FingerEdgeSnapOptions): 
   const maxY = Math.min(img.height - 6, options.maxY ?? img.height - 6);
   if (seedY < minY || seedY > maxY) return null;
 
-  // Polaridade esperada (fora x dentro): sinal do contraste mais forte na
-  // janela de busca. Funciona com a linha solta por dentro ou por fora.
-  let polarityRaw = 0;
-  for (let x = Math.round(seedX) - seedRadius; x <= Math.round(seedX) + seedRadius; x++) {
-    const signed = luminance(img, x + out * 4, seedY) - luminance(img, x - out * 4, seedY);
-    if (Math.abs(signed) > Math.abs(polarityRaw)) polarityRaw = signed;
+  // Contraste fino (+-2 px) entre o lado de fora e o de dentro do dedo.
+  const signedAt = (x: number, y: number) => luminance(img, x + out * 2, y) - luminance(img, x - out * 2, y);
+
+  // SEMENTE: a borda do dedo e a PRIMEIRA transicao forte vindo de dentro
+  // para fora. Uma sombra ao lado do dedo cria uma segunda transicao mais
+  // externa (as vezes mais forte); grudar nela deixava o dedo ~2% mais largo.
+  // Aceita os dois sentidos de contraste (sombra pode ser mais escura que a pele).
+  const seedPeaks: { x: number; signed: number; strength: number }[] = [];
+  {
+    const values: { x: number; signed: number; strength: number }[] = [];
+    for (let x = Math.round(seedX) - seedRadius - 1; x <= Math.round(seedX) + seedRadius + 1; x++) {
+      if (x < 6 || x >= img.width - 6) continue;
+      const signed = signedAt(x, seedY);
+      values.push({ x, signed, strength: Math.abs(signed) });
+    }
+    const maxStrength = Math.max(0, ...values.map((v) => v.strength));
+    const threshold = Math.max(8, maxStrength * 0.25);
+    for (let i = 1; i < values.length - 1; i++) {
+      const v = values[i];
+      if (v.strength < threshold) continue;
+      if (v.strength < values[i - 1].strength || v.strength < values[i + 1].strength) continue;
+      if (Math.abs(v.x - seedX) > seedRadius) continue;
+      seedPeaks.push(v);
+    }
   }
-  const polarity = Math.abs(polarityRaw) >= 6 ? Math.sign(polarityRaw) : 0;
+  if (!seedPeaks.length) return null;
+  // Mais para dentro: na borda esquerda o dedo fica a direita (maior x).
+  const inner = seedPeaks.reduce((best, peak) => (-out * peak.x > -out * best.x ? peak : best), seedPeaks[0]);
+  const polarity = Math.sign(inner.signed) || 1;
 
   const edgeAt = (center: number, y: number, radius: number) => {
     let best: { x: number; strength: number } | null = null;
-    const candidates: { x: number; strength: number }[] = [];
-    for (let x = Math.round(center) - radius; x <= Math.round(center) + radius; x++) {
+    const strengths = new Map<number, number>();
+    for (let x = Math.round(center) - radius - 1; x <= Math.round(center) + radius + 1; x++) {
       if (x < 6 || x >= img.width - 6) continue;
-      const signed = luminance(img, x + out * 4, y) - luminance(img, x - out * 4, y);
-      const strength = polarity === 0 ? Math.abs(signed) : Math.max(0, signed * polarity);
-      if (strength < 6) continue;
-      candidates.push({ x, strength });
-      if (!best || strength > best.strength) best = { x, strength };
+      const strength = Math.max(0, signedAt(x, y) * polarity);
+      strengths.set(x, strength);
+    }
+    for (let x = Math.round(center) - radius; x <= Math.round(center) + radius; x++) {
+      const v = strengths.get(x);
+      if (v === undefined || v < 6) continue;
+      if (!best || v > best.strength) best = { x, strength: v };
     }
     if (!best) return null;
-    // Grupo continuo em torno do pico, centro ponderado (subpixel).
-    const strong = candidates.filter((c) => c.strength >= best!.strength * 0.6 && Math.abs(c.x - best!.x) <= 4);
-    const weight = strong.reduce((s, c) => s + c.strength, 0);
-    return { x: strong.reduce((s, c) => s + c.x * c.strength, 0) / weight, strength: best.strength };
+    // Refinamento subpixel por parabola.
+    const a = strengths.get(best.x - 1) ?? best.strength;
+    const c = strengths.get(best.x + 1) ?? best.strength;
+    const denominator = a - 2 * best.strength + c;
+    const offset = Math.abs(denominator) > 1e-6 ? Math.max(-0.5, Math.min(0.5, (0.5 * (a - c)) / denominator)) : 0;
+    return { x: best.x + offset, strength: best.strength };
   };
 
-  const seed = edgeAt(seedX, seedY, seedRadius);
+  const seed = edgeAt(inner.x, seedY, 1);
   if (!seed) return null;
 
   const points: { x: number; y: number; strength: number }[] = [{ x: seed.x, y: seedY, strength: seed.strength }];

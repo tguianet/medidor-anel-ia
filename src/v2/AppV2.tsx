@@ -213,6 +213,9 @@ export default function AppV2() {
   // Altura (% da tela) do dedo do usuario ao soltar a linha: e ali que ele
   // alinhou a linha com a borda, entao o snap procura a borda nessa altura.
   const dragLineYRef = useRef<number|null>(null);
+  // Modo de teste: liga/desliga o snap inclinado das linhas (comparar com o
+  // posicionamento manual na mesma foto).
+  const [fingerSnapEnabled, setFingerSnapEnabled] = useState(true);
   // Bordas grudadas nesta foto (pixels da foto). Com os dois lados, as duas
   // linhas recebem a MESMA inclinacao: o eixo do dedo.
   const fingerSnapStoreRef = useRef<{
@@ -2081,7 +2084,7 @@ export default function AppV2() {
     const vertical=()=>{
       setFingerLines((current)=>({...current,[side]:{a:{x:screenXPercent,y:0},b:{x:screenXPercent,y:100}}}));
     };
-    if(!stage || !source){ vertical(); return null; }
+    if(!stage || !source || !fingerSnapEnabled){ vertical(); return null; }
     const rect=stage.getBoundingClientRect();
     const rw=rect.width || 1;
     const rh=rect.height || 1;
@@ -5241,7 +5244,10 @@ export default function AppV2() {
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(commercialWidthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm · {commercialRingResolution.reason}{physicalPrimaryWidthMm!==null ? ` (borda ${(physicalPrimaryWidthMm-PHYSICAL_EDGE_OFFSET_MM).toFixed(2)} + ${PHYSICAL_EDGE_OFFSET_MM.toFixed(2)})` : ""}</span>
               <span>Cartão nas {MULTI_SHOT_COUNT} fotos: {cardSeries ? cardSeries.widthsPx.map((w,i)=>w===null ? "✕" : `${w.toFixed(1)}${i===cardSeries.chosenIndex ? "★" : ""}`).join(" / ") + ` px · mediana ${cardSeries.medianPx.toFixed(1)} · variação ${cardSeries.spreadPct.toFixed(2)}% · ★ = foto usada` : "sem série"}</span>
-              <span>Inclinação das linhas: esquerda {leftFingerTilt.toFixed(1)}° · direita {rightFingerTilt.toFixed(1)}°</span>
+              <span>Inclinação das linhas: esquerda {leftFingerTilt.toFixed(1)}° · direita {rightFingerTilt.toFixed(1)}° · snap {fingerSnapEnabled ? "LIGADO" : "DESLIGADO"}</span>
+              <button type="button" className="secondary" style={{margin:"4px 0"}} onClick={() => setFingerSnapEnabled((value)=>!value)}>
+                {fingerSnapEnabled ? "Desligar snap das linhas (posicionar à mão)" : "Ligar snap das linhas"}
+              </button>
               <span>Série: {multiShot.status==="idle" ? "desligada/sem série" : `${multiShot.status} · ` + multiShot.shots.map((shot)=>shot.accepted && shot.mm!==null ? shot.mm.toFixed(2)+(shot.index===multiShot.outlierIndex ? "(descartada)" : "") : `✕(${shot.reason})`).join(" / ") + (multiShot.medianMm!==null ? ` · mediana ${multiShot.medianMm.toFixed(3)} · variação ${(multiShot.spreadMm ?? 0).toFixed(3)}` : "")}</span>
               <span>Fronteira: {ringBoundaryAdvice ? `entre ${ringBoundaryAdvice.smaller} e ${ringBoundaryAdvice.larger} · ${ringBoundaryAdvice.distanceMm.toFixed(3)} mm da divisa` : "longe da divisa"}</span>
               <span>Método anterior (só comparação): {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm · aro "+(result?.ringSize ?? "n/d")}</span>
