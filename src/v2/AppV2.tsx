@@ -25,7 +25,7 @@ const PHYSICAL_EDGE_OFFSET_MM = 0.05;
 const RING_BOUNDARY_WARNING_MM = 0.03;
 
 // SERIE DE FOTOS (1 toque = varias fotos ao longo de ~3 s; aro = mediana).
-const MULTI_SHOT_ENABLED = true;
+const MULTI_SHOT_ENABLED = false;
 const MULTI_SHOT_COUNT = 4;
 const MULTI_SHOT_INTERVAL_MS = 900; // 0 / 0,9 / 1,8 / 2,7 s
 const MULTI_SHOT_FRAMES_PER_SHOT = 3; // mini-rajada por foto contra borrado
