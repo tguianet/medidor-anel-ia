@@ -70,7 +70,7 @@ export const trackFinger = (
   startLeftX: number,
   startRightX: number,
   startY: number,
-  opts: { minY: number; maxY: number; samples?: number; scale?: number },
+  opts: { minY: number; maxY: number; samples?: number; scale?: number; windowPx?: number },
 ): FingerTrackResult | null => {
   const scale = opts.scale ?? 1; // fator da imagem em relacao a 900 px
   const h = 1.5 * scale;
@@ -113,10 +113,16 @@ export const trackFinger = (
   const down = track(1);
   const rows: Row[] = [...up, { y: startY, xl: l0.x, xr: r0.x }, ...down];
   if (rows.length < 8) return null;
-  const yStart = rows[0].y, yEnd = rows[rows.length - 1].y;
+  const yStart0 = rows[0].y, yEnd0 = rows[rows.length - 1].y;
+  // Janela de medida: so a faixa da altura do anel (+-windowPx em volta da
+  // linha amarela). O rastreamento longo serve so para guiar as bordas.
+  const win = opts.windowPx ?? Infinity;
+  const yStart = Math.max(yStart0, startY - win);
+  const yEnd = Math.min(yEnd0, startY + win);
+  if (yEnd - yStart < 4) return null;
 
   const interp = (y: number, key: "xl" | "xr") => {
-    const t = (y - yStart);
+    const t = (y - yStart0);
     const i = Math.max(0, Math.min(rows.length - 2, Math.floor(t)));
     const f = Math.max(0, Math.min(1, t - i));
     return rows[i][key] * (1 - f) + rows[i + 1][key] * f;

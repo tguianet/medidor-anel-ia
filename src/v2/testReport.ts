@@ -16,7 +16,7 @@ export type SavedTest = {
   cardRightCrop: string;
 };
 
-const STORAGE_KEY = "medidordedov15-tests";
+const STORAGE_KEY = "medidordedov-tests";
 const MAX_TESTS = 20;
 
 export const loadTests = (): SavedTest[] => {

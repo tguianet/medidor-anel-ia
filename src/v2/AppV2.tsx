@@ -47,6 +47,15 @@ const DENSE_TRACK_PRIMARY = true;
 const DENSE_TRACK_SAMPLES = 3000;
 // Disparo instantaneo: usa so o quadro do toque (sem rajada).
 const INSTANT_SHUTTER = true;
+// v16: os snaps medem so +-2 mm em volta da altura do anel; medida = mediana.
+const RING_ZONE_HALF_MM = 2;
+// v16: o refino fisico do cartao so pode mover cada lateral ate 6 px em
+// relacao ao detector original (evita grudar em faixas/bisel internos).
+const CARD_PHYSICAL_MAX_SHIFT_PX = 6;
+// v16: distancia da divisa (mm) para mostrar os dois aros ao cliente.
+const RING_BOUNDARY_MARGIN_MM = 0.04;
+const COMMERCIAL_MAX_FINGER_ANGLE = 5;
+const COMMERCIAL_MAX_EDGE_DIVERGENCE_MM = 0.30;
 // medidordedov7: largura maxima da copia em alta resolucao (retrato).
 const HI_RES_MAX_WIDTH = 1440;
 const CARD_HEIGHT_MM = 53.98;
@@ -865,7 +874,10 @@ export default function AppV2() {
               const yMid=(yU+yL)/2;
               const physWidth=rMid-lMid;
               // So aceita se ficar perto da leitura original (protege contra frisos).
-              if(Math.abs(physWidth-(rightEdge.x-leftEdge.x))<=cardW*0.03){
+              const lShift=lMid+slope*(yRef-yMid)-leftEdge.x;
+              const rShift=rMid+slope*(yRef-yMid)-rightEdge.x;
+              cardEdgeShifts=`E ${lShift>=0?"+":""}${lShift.toFixed(1)} D ${rShift>=0?"+":""}${rShift.toFixed(1)} px`;
+              if(Math.abs(lShift)<=CARD_PHYSICAL_MAX_SHIFT_PX && Math.abs(rShift)<=CARD_PHYSICAL_MAX_SHIFT_PX && Math.abs(physWidth-(rightEdge.x-leftEdge.x))<=cardW*0.03){
                 leftTilt={slope,xAt:(y:number)=>lMid+slope*(y-yMid)};
                 rightTilt={slope,xAt:(y:number)=>rMid+slope*(y-yMid)};
                 physicalCardEdgesUsed=true;
@@ -928,6 +940,7 @@ export default function AppV2() {
 
         let legacyRefineFailReason="";
         let physicalCardEdgesUsed=false;
+        let cardEdgeShifts="";
         const legacyRefined=refineCardEdges();
         // medidordedov8: se o refino ORIGINAL falhar, NAO cair na caixa
         // aproximada (podia errar 10+ px e mudar 2 aros). Usa o detector novo
@@ -958,7 +971,7 @@ export default function AppV2() {
           }catch{ /* mantem caixa aproximada */ }
         }
 
-        setCardEdgeInfo({source:(physicalCardEdgesUsed?"borda física real (+0,57% compat. curva)":cardEdgeSource)+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
+        setCardEdgeInfo({source:(physicalCardEdgesUsed?"borda física real (+0,57% compat. curva)":cardEdgeSource)+(cardEdgeShifts?` · física−original ${cardEdgeShifts}`:"")+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -2911,12 +2924,13 @@ export default function AppV2() {
         maxY:img.height-6,
         samples:DENSE_TRACK_SAMPLES,
         scale:sc,
+        windowPx:RING_ZONE_HALF_MM*pixelsPerMm*sc,
       });
       if(!result) return null;
       const pxPerMm=pixelsPerMm*sc;
       const pts=(path:{x:number;y:number}[])=>path.map(p=>`${toScreenX(p.x/sc).toFixed(2)},${toScreenY(p.y/sc).toFixed(2)}`).join(" ");
       return {
-        mm:result.meanPx/pxPerMm,
+        mm:result.medianPx/pxPerMm,
         medianMm:result.medianPx/pxPerMm,
         count:result.count,
         lengthMm:(result.yEnd-result.yStart)/pxPerMm,
@@ -3244,6 +3258,9 @@ export default function AppV2() {
     if(calibrationConfidence<MIN_CARD_CALIBRATION_CONFIDENCE){
       reasons.push(`calibração ${calibrationConfidence} < ${MIN_CARD_CALIBRATION_CONFIDENCE}`);
     }
+    if(cardEdgeInfo && cardEdgeInfo.source.startsWith("caixa aproximada")){
+      reasons.push("borda do cartão não encontrada");
+    }
     if(measurementMode==="finger" && !diameterPhotoTestMode && !anatomicalRegionReady){
       reasons.push("região anatômica do anel não detectada");
     }
@@ -3265,6 +3282,7 @@ export default function AppV2() {
     measurementMode,
     diameterPhotoTestMode,
     anatomicalRegionReady,
+    cardEdgeInfo,
   ]);
 
   useEffect(() => {
@@ -4008,8 +4026,37 @@ export default function AppV2() {
   // Desempates experimentais desativados.
   // O aro comercial deve refletir somente a curva principal enquanto
   // comparamos a curva historica em diagnostico.
+  // v16: validacao comercial (o que o cliente ve). Subconjunto objetivo das
+  // regras: cartao encontrado, dedo reto e medida coerente com a borda fisica.
+  const commercialValidation = (() => {
+    const reasons:{code:string;text:string}[]=[];
+    if(cardEdgeInfo && cardEdgeInfo.source.startsWith("caixa aproximada")){
+      reasons.push({code:"card",text:"Não encontrei a borda do cartão. Deixe o cartão inteiro na foto, sem reflexo."});
+    }
+    const angle=fingerMagnetSamples?.[0]?.axisAngleDeg ?? null;
+    if(angle!==null && Math.abs(angle)>COMMERCIAL_MAX_FINGER_ANGLE){
+      reasons.push({code:"angle",text:`O dedo está inclinado (${Math.abs(angle).toFixed(1)}°). Deixe o dedo reto, alinhado com a tela.`});
+    }
+    const phys=physicalEdgeProfileTest?.widthMm ?? null;
+    if(widthSentToFormulaMm!==null && phys!==null && Math.abs(phys-widthSentToFormulaMm)>COMMERCIAL_MAX_EDGE_DIVERGENCE_MM){
+      reasons.push({code:"edges",text:"As bordas do dedo ficaram pouco nítidas. Melhore a luz e confira as linhas na lupa."});
+    }
+    return {accepted:reasons.length===0,reasons};
+  })();
+
+  // Divisa entre dois aros: mostra os dois ao cliente em vez de "chutar".
+  const ringBoundary = (() => {
+    if(widthSentToFormulaMm===null) return null;
+    const c=classifyFingerWidthMm(widthSentToFormulaMm);
+    const dLow=widthSentToFormulaMm-c.lowerBoundaryMm;
+    const dUp=c.upperBoundaryMm-widthSentToFormulaMm;
+    if(dUp<=RING_BOUNDARY_MARGIN_MM) return {low:c.exactRingSize,high:c.exactRingSize+1};
+    if(dLow<=RING_BOUNDARY_MARGIN_MM) return {low:c.exactRingSize-1,high:c.exactRingSize};
+    return null;
+  })();
+
   const commercialRingResolution = {
-    ringSize:result?.ringSize ?? null,
+    ringSize:commercialValidation.accepted ? (result?.ringSize ?? null) : null,
     adjusted:false,
     reason:"desempate desativado · curva principal direta",
   };
@@ -4331,7 +4378,7 @@ export default function AppV2() {
       const g=geometricStabilityTest;
       const real=Number(realRingInput.replace(",","."));
       const lines=[
-        `RESULTADO: aro ${commercialRingSize ?? "n/d"} · medida usada ${f2(widthSentToFormulaMm)} mm · gate ${captureQualityGate.accepted?"ACEITA":"BLOQUEIA: "+captureQualityGate.reasons.join(" · ")}`,
+        `RESULTADO: aro ${ringBoundary?`${ringBoundary.low}/${ringBoundary.high} (divisa)`:(commercialRingSize ?? "n/d")}${commercialValidation.accepted?"":" · RECUSADA: "+commercialValidation.reasons.map(r=>r.code).join(",")} · medida usada ${f2(widthSentToFormulaMm)} mm · gate ${captureQualityGate.accepted?"ACEITA":"BLOQUEIA: "+captureQualityGate.reasons.join(" · ")}`,
         `3000 snaps: média ap. ${f2(track.mm)} · mediana ${f2(track.medianMm)} · mín ${f2(track.minMm)} máx ${f2(track.maxMm)}`,
         `  ${track.count} cortes em ${f2(track.lengthMm,1)} mm · na linha amarela ${f2(track.startMm)} · eixo ${f2(track.angleDeg,1)}°`,
         `Lupa ${f2(widthAnalysis.manualMm)} · automático ${f2(widthAnalysis.autoMm)} · borda física ${f2(physicalEdgeProfileTest?.widthMm)} mm`,
@@ -4360,7 +4407,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov15 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov16 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
@@ -4893,10 +4940,16 @@ export default function AppV2() {
             )}
             {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
-                <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
-                <span>NÚMERO EXATO:</span>
-                <strong>{commercialRingSize}</strong>
-                <small>Conforto: {clamp(commercialRingSize + 1, 1, 40)} · recomendado com folga</small>
+                {ringBoundary ? (<>
+                  <span>SEU ARO ESTÁ NA DIVISA</span>
+                  <strong>{ringBoundary.low} ou {ringBoundary.high}</strong>
+                  <small>{ringBoundary.low} = mais justo · {ringBoundary.high} = mais folga</small>
+                </>) : (<>
+                  <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
+                  <span>NÚMERO EXATO:</span>
+                  <strong>{commercialRingSize}</strong>
+                  <small>Conforto: {clamp(commercialRingSize + 1, 1, 40)} · recomendado com folga</small>
+                </>)}
               </div>
             )}
             {phase === "finger" && pixelsPerMm && tryOn && (
@@ -5016,12 +5069,26 @@ export default function AppV2() {
               <span>Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais.</span>
             </div>
           )}
+          {phase === "finger" && result && !commercialValidation.accepted && leftLocked && rightLocked && (
+            <div className="analysis-result" role="alert">
+              <strong>Vamos tirar outra foto</strong>
+              {commercialValidation.reasons.map(r=><span key={r.code}>{r.text}</span>)}
+              <button type="button" className="secondary" onClick={resetPhoto}>Tirar outra foto</button>
+            </div>
+          )}
           {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
-              <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
-              <strong>Número exato: {commercialRingSize}</strong>
-              <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
-              <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
+              {ringBoundary ? (<>
+                <span><strong>Mais justo: {ringBoundary.low}</strong></span>
+                <strong>Seu dedo está na divisa: {ringBoundary.low} ou {ringBoundary.high}</strong>
+                <span><strong>Mais folga: {ringBoundary.high}</strong></span>
+                <small>A medida caiu exatamente entre dois aros. Se gosta de anel firme, escolha {ringBoundary.low}; se prefere folga ou o dedo incha no calor, escolha {ringBoundary.high}.</small>
+              </>) : (<>
+                <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
+                <strong>Número exato: {commercialRingSize}</strong>
+                <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
+                <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
+              </>)}
             </div>
           )}
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
@@ -5045,7 +5112,7 @@ export default function AppV2() {
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
               <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
-              {widthAnalysis.track && <span>3000 SNAPS (usado): média aparada {widthAnalysis.track.mm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.track.mm).exactRingSize} · mediana {widthAnalysis.track.medianMm.toFixed(2)} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
+              {widthAnalysis.track && <span>3000 SNAPS ±2 mm (usado): mediana {widthAnalysis.track.mm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.track.mm).exactRingSize} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
               {!widthAnalysis.track && widthAnalysis.manualMm!==null && <span>3000 SNAPS: não conseguiu seguir a borda (usando as linhas da lupa)</span>}
               {widthAnalysis.manualMm!==null && <span>SÓ LUPA: {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
               {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
