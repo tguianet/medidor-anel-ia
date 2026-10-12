@@ -16,6 +16,10 @@ export type FingerTrackResult = {
   maxPx: number;
   widthAtStartPx: number;
   axisAngleDeg: number;
+  leftAngleDeg: number;
+  rightAngleDeg: number;
+  p10Px: number;
+  p90Px: number;
   // amostra reduzida para desenhar (coordenadas da imagem)
   leftPath: { x: number; y: number }[];
   rightPath: { x: number; y: number }[];
@@ -158,6 +162,10 @@ export const trackFinger = (
     maxPx: widths[n - 1],
     widthAtStartPx: wAt,
     axisAngleDeg: (Math.atan(b) * 180) / Math.PI,
+    leftAngleDeg: (Math.atan(fl.b) * 180) / Math.PI,
+    rightAngleDeg: (Math.atan(fr.b) * 180) / Math.PI,
+    p10Px: widths[Math.floor(n * 0.1)],
+    p90Px: widths[Math.min(n - 1, Math.floor(n * 0.9))],
     leftPath: leftPath.filter((_, i2) => i2 % every === 0),
     rightPath: rightPath.filter((_, i2) => i2 % every === 0),
   };

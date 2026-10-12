@@ -67,7 +67,11 @@ const SHARP_PHOTO_SCALE = 1.0279;
 const CARD_CHROMA_MIN_SATURATION = 0.35;
 // v16: distancia da divisa (mm) para mostrar os dois aros ao cliente.
 const RING_BOUNDARY_MARGIN_MM = 0.04;
-const COMMERCIAL_MAX_FINGER_ANGLE = 5;
+const COMMERCIAL_MAX_FINGER_ANGLE = 10;
+// v20: bordas esquerda e direita devem ser quase paralelas (graus) e a
+// largura nos snaps deve variar pouco (p90-p10, mm).
+const COMMERCIAL_MAX_EDGE_SPREAD_DEG = 6;
+const COMMERCIAL_MAX_WIDTH_SPREAD_MM = 0.35;
 const COMMERCIAL_MAX_EDGE_DIVERGENCE_MM = 0.30;
 // medidordedov7: largura maxima da copia em alta resolucao (retrato).
 const HI_RES_MAX_WIDTH = 2400;
@@ -2945,7 +2949,7 @@ export default function AppV2() {
 
   const widthAnalysis = useMemo(() => {
     const empty = {
-      track:null as null|{mm:number;medianMm:number;count:number;lengthMm:number;minMm:number;maxMm:number;startMm:number;angleDeg:number;hiRes:boolean;leftPts:string;rightPts:string;imgLeft:{x:number;y:number}[];imgRight:{x:number;y:number}[];lineLeftX:number;lineRightX:number;ringY:number},
+      track:null as null|{mm:number;medianMm:number;count:number;lengthMm:number;minMm:number;maxMm:number;startMm:number;angleDeg:number;edgeSpreadDeg:number;p10Mm:number;p90Mm:number;hiRes:boolean;leftPts:string;rightPts:string;imgLeft:{x:number;y:number}[];imgRight:{x:number;y:number}[];lineLeftX:number;lineRightX:number;ringY:number},
       manualMm:null as number|null,
       autoMm:null as number|null,
       manualAngleDeg:0,
@@ -3030,6 +3034,9 @@ export default function AppV2() {
         maxMm:result.maxPx/pxPerMm,
         startMm:result.widthAtStartPx/pxPerMm,
         angleDeg:result.axisAngleDeg,
+        edgeSpreadDeg:Math.abs(result.leftAngleDeg-result.rightAngleDeg),
+        p10Mm:result.p10Px/pxPerMm,
+        p90Mm:result.p90Px/pxPerMm,
         hiRes:!!hi,
         leftPts:pts(result.leftPath),
         rightPts:pts(result.rightPath),
@@ -4131,13 +4138,24 @@ export default function AppV2() {
     if(cardEdgeInfo && cardEdgeInfo.source.startsWith("caixa aproximada")){
       reasons.push({code:"card",text:"Não encontrei a borda do cartão. Deixe o cartão inteiro na foto, sem reflexo."});
     }
-    const angle=fingerMagnetSamples?.[0]?.axisAngleDeg ?? null;
-    if(angle!==null && Math.abs(angle)>COMMERCIAL_MAX_FINGER_ANGLE){
-      reasons.push({code:"angle",text:`O dedo está inclinado (${Math.abs(angle).toFixed(1)}°). Deixe o dedo reto, alinhado com a tela.`});
-    }
-    const phys=physicalEdgeProfileTest?.widthMm ?? null;
-    if(widthSentToFormulaMm!==null && phys!==null && Math.abs(phys*sharpScale-widthSentToFormulaMm)>COMMERCIAL_MAX_EDGE_DIVERGENCE_MM){
-      reasons.push({code:"edges",text:"As bordas do dedo ficaram pouco nítidas. Melhore a luz e confira as linhas na lupa."});
+    const track=widthAnalysis.track;
+    if(track){
+      // v20: angulo e qualidade vem dos proprios 3000 snaps. A medida ja e
+      // perpendicular ao eixo do dedo, entao a inclinacao e corrigida na conta.
+      if(Math.abs(track.angleDeg)>COMMERCIAL_MAX_FINGER_ANGLE){
+        reasons.push({code:"angle",text:`O dedo está muito inclinado (${Math.abs(track.angleDeg).toFixed(1)}°). Deixe o dedo mais alinhado com a tela.`});
+      }
+      if(track.edgeSpreadDeg>COMMERCIAL_MAX_EDGE_SPREAD_DEG){
+        reasons.push({code:"edges",text:"Uma das linhas pegou uma curva (dobra entre os dedos ou sombra). Confira as linhas verdes na lupa, bem na altura do anel."});
+      }
+      if(track.p90Mm-track.p10Mm>COMMERCIAL_MAX_WIDTH_SPREAD_MM){
+        reasons.push({code:"spread",text:"As bordas do dedo ficaram pouco nítidas nessa altura. Melhore a luz ou ajuste as linhas na lupa."});
+      }
+    }else{
+      const angle=fingerMagnetSamples?.[0]?.axisAngleDeg ?? null;
+      if(angle!==null && Math.abs(angle)>5){
+        reasons.push({code:"angle",text:`O dedo está inclinado (${Math.abs(angle).toFixed(1)}°). Deixe o dedo reto, alinhado com a tela.`});
+      }
     }
     return {accepted:reasons.length===0,reasons};
   })();
@@ -4487,7 +4505,7 @@ export default function AppV2() {
       const lines=[
         `RESULTADO: aro ${ringBoundary?`${ringBoundary.low}/${ringBoundary.high} (divisa)`:(commercialRingSize ?? "n/d")}${commercialValidation.accepted?"":" · RECUSADA: "+commercialValidation.reasons.map(r=>r.code).join(",")} · medida usada ${f2(widthSentToFormulaMm)} mm · gate ${captureQualityGate.accepted?"ACEITA":"BLOQUEIA: "+captureQualityGate.reasons.join(" · ")}`,
         `${sharpPhoto?`Correção foto nítida ×${SHARP_PHOTO_SCALE} (snaps brutos ×1) · `:""}3000 snaps: média ap. ${f2(track.mm)} · mediana ${f2(track.medianMm)} · mín ${f2(track.minMm)} máx ${f2(track.maxMm)}`,
-        `  ${track.count} cortes em ${f2(track.lengthMm,1)} mm · na linha amarela ${f2(track.startMm)} · eixo ${f2(track.angleDeg,1)}°`,
+        `  ${track.count} cortes em ${f2(track.lengthMm,1)} mm · na linha amarela ${f2(track.startMm)} · eixo ${f2(track.angleDeg,1)}° · bordas diferem ${f2(track.edgeSpreadDeg,1)}° · p10–p90 ${f2(track.p90Mm-track.p10Mm)} mm`,
         `Lupa ${f2(widthAnalysis.manualMm)} · automático ${f2(widthAnalysis.autoMm)} · borda física ${f2(physicalEdgeProfileTest?.widthMm)} mm`,
         `Cartão ${f2(g?.cardPx,1)} px · ${cardEdgeInfo?.source ?? "n/d"}`,
         `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}% (${contourAnatomy?.detected?"contorno":"padrão"})`,
@@ -4514,7 +4532,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov19 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov20 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
@@ -5283,7 +5301,7 @@ export default function AppV2() {
               {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
               {photoSourceInfo && <span>Origem da foto: {photoSourceInfo}{sharpPhoto?` · correção foto nítida ×${SHARP_PHOTO_SCALE.toFixed(4)}`:""}</span>}
               <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
-              {widthAnalysis.track && <span>3000 SNAPS ±2 mm (usado): mediana bruta {widthAnalysis.track.mm.toFixed(2)} mm{sharpPhoto?` × ${SHARP_PHOTO_SCALE} = ${(widthAnalysis.track.mm*SHARP_PHOTO_SCALE).toFixed(2)} mm`:""} → aro {classifyFingerWidthMm(widthAnalysis.track.mm*sharpScale).exactRingSize} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
+              {widthAnalysis.track && <span>3000 SNAPS ±2 mm (usado): mediana bruta {widthAnalysis.track.mm.toFixed(2)} mm{sharpPhoto?` × ${SHARP_PHOTO_SCALE} = ${(widthAnalysis.track.mm*SHARP_PHOTO_SCALE).toFixed(2)} mm`:""} → aro {classifyFingerWidthMm(widthAnalysis.track.mm*sharpScale).exactRingSize} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° (bordas diferem {widthAnalysis.track.edgeSpreadDeg.toFixed(1)}°) · variação p10–p90 {(widthAnalysis.track.p90Mm-widthAnalysis.track.p10Mm).toFixed(2)} mm · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
               {!widthAnalysis.track && widthAnalysis.manualMm!==null && <span>3000 SNAPS: não conseguiu seguir a borda (usando as linhas da lupa)</span>}
               {widthAnalysis.manualMm!==null && <span>SÓ LUPA: {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
               {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
