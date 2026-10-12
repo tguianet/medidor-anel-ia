@@ -58,6 +58,8 @@ const FULL_PHOTO_TIMEOUT_MS = 2500;
 const CARD_PHYSICAL_MAX_SHIFT_PX = 6;
 // v17: cartao colorido -> bordas pela cromaticidade (a sombra some).
 const CARD_CHROMA_EDGES = true;
+// v18: etapa de ajuste manual das laterais do cartao antes do dedo.
+const MANUAL_CARD_STEP = true;
 const CARD_CHROMA_MIN_SATURATION = 0.35;
 // v16: distancia da divisa (mm) para mostrar os dois aros ao cliente.
 const RING_BOUNDARY_MARGIN_MM = 0.04;
@@ -1081,6 +1083,15 @@ export default function AppV2() {
           setCardQuad(detectedQuad);
           setPerspectiveReady(true);
           setCalibrationConfidence(calibration.confidence);
+          // v18: o usuario confere/ajusta as laterais do cartao com zoom e lupa
+          // antes de medir o dedo. As linhas automaticas ficam como ponto de partida.
+          if(MANUAL_CARD_STEP){
+            setCardLineLocked({top:false,right:true,bottom:true,left:true});
+            setZoom(1); setPanX(0); setPanY(0);
+            setAnalyzingCard(false);
+            camera.setError("");
+            return;
+          }
           // IMPORTANTE: o detector leve apenas posiciona as 3 linhas.
           // A escala oficial NAO usa calibration.pixelsPerMm.
           // Voltamos à regra congelada: a distância entre as interseções
@@ -1547,7 +1558,10 @@ export default function AppV2() {
         leftPercent,
       ];
 
-      let pxPerMm=widthPx/CARD_WIDTH_MM;
+      // v18: linhas colocadas na borda real pelo usuario; reaplica o vies medio
+      // do detector original para manter a curva de aros.
+      let pxPerMm=widthPx*(MANUAL_CARD_STEP?CARD_LEGACY_SCALE:1)/CARD_WIDTH_MM;
+      if(MANUAL_CARD_STEP) setCardEdgeInfo({source:"ajuste manual nas laterais (+0,57% compat. curva)",legacyFail:""});
       let activeQuad=syntheticQuad;
       let activeHomography:Homography|null=null;
       let cardConfidence=96;
@@ -1707,17 +1721,37 @@ export default function AppV2() {
           delete next[edge];
           return next;
         });
+        let movedLine:Line|null=null;
         if(endpoint){
+          movedLine={...cardLines[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}};
           setCardLines((current)=>({...current,[edge]:{...current[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}}}));
         } else {
           const start=cardLineDragStartRef.current;
           if(start){
             const dx=imageX-start.pointer.x, dy=imageY-start.pointer.y;
+            movedLine={
+              a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
+              b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
+            };
             setCardLines((current)=>({...current,[edge]:{
               a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
               b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
             }}));
           }
+        }
+        // Lupa no ponto que define a escala: cruzamento da lateral com a base.
+        if(movedLine && measureRef.current){
+          const r=measureRef.current.getBoundingClientRect();
+          const base=edge==="bottom"?movedLine:cardLines.bottom;
+          const baseY=(base.a.y+base.b.y)/2;
+          let lx:number, ly:number;
+          if(edge==="bottom"){ lx=(movedLine.a.x+movedLine.b.x)/2; ly=baseY; }
+          else {
+            const dyl=movedLine.b.y-movedLine.a.y;
+            const t=Math.abs(dyl)<1e-6?0.5:(baseY-movedLine.a.y)/dyl;
+            lx=movedLine.a.x+(movedLine.b.x-movedLine.a.x)*t; ly=baseY;
+          }
+          setFingerLoupe({side:edge==="left"?"left":"right",imageX:clamp(lx,0,100),imageY:clamp(ly,0,100),stageW:r.width,stageH:r.height,zoom});
         }
         return;
       }
@@ -2212,7 +2246,10 @@ export default function AppV2() {
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match){
         const edge=match[1] as CardEdge;
-        snapCardLine(edge);
+        // v18: ajuste manual fica exatamente onde o usuario soltou (o ima
+        // podia puxar a linha para a sombra).
+        if(MANUAL_CARD_STEP) setCardLineLocked((current)=>({...current,[edge]:true}));
+        else snapCardLine(edge);
       }
     }
     draggingRef.current=null;
@@ -4364,9 +4401,9 @@ export default function AppV2() {
 
   const guideText = singlePhotoTestMode
     ? (guidedStep === 1
-        ? "Fotografe o cartão sobre o dedo. O detector aplica automaticamente as 3 linhas e calibra os 85,60 mm antes de abrir a medição."
+        ? (phase==="card" ? "Confira as laterais do cartão: dê zoom e encoste cada linha verde na borda do cartão usando a lupa. Depois toque em Cartão ajustado." : "Fotografe o cartão sobre o dedo. Depois você confere as laterais do cartão e as bordas do dedo.")
         : guidedStep === 2
-          ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos ficam concentrados nessa mesma altura."
+          ? "Dê zoom e encoste as linhas verdes nas bordas do dedo usando a lupa. Os 3000 snaps medem a faixa de 2 mm em volta da linha amarela."
           : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
@@ -4470,7 +4507,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov17 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov18 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
@@ -4703,7 +4740,69 @@ export default function AppV2() {
                   </g>;
                 })}
               </svg>
-            ) : phase === "card" ? (
+            ) : null}
+            {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && (
+              <>
+                {phase === "card" && fingerLoupe && photo && (
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position:"absolute",
+                      left:fingerLoupe.side==="left" ? "72%" : "28%",
+                      top:"18%",
+                      width:`${LOUPE_SIZE_PX}px`,
+                      height:`${LOUPE_SIZE_PX}px`,
+                      transform:"translate(-50%,-50%)",
+                      borderRadius:"50%",
+                      overflow:"hidden",
+                      border:"3px solid #52e0a3",
+                      boxShadow:"0 8px 28px rgba(0,0,0,.55)",
+                      backgroundImage:`url("${displayPhoto}")`,
+                      backgroundRepeat:"no-repeat",
+                      // Lupa centrada EXATAMENTE no cruzamento linha verde x linha amarela,
+                      // com aumento de 2x sobre o zoom atual da tela.
+                      backgroundSize:`${fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
+                      backgroundPosition:`${LOUPE_SIZE_PX/2-fingerLoupe.imageX/100*fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${LOUPE_SIZE_PX/2-fingerLoupe.imageY/100*fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
+                      zIndex:12,
+                      pointerEvents:"none",
+                    }}
+                  >
+                    <span style={{
+                      position:"absolute",
+                      left:"50%",
+                      top:0,
+                      bottom:0,
+                      width:"1px",
+                      background:"#ffd86b",
+                      transform:"translateX(-50%)",
+                    }} />
+                    <span style={{
+                      position:"absolute",
+                      top:"50%",
+                      left:0,
+                      right:0,
+                      height:"1px",
+                      background:"#ffd86b",
+                      transform:"translateY(-50%)",
+                    }} />
+                    <span style={{
+                      position:"absolute",
+                      left:"50%",
+                      bottom:"8px",
+                      transform:"translateX(-50%)",
+                      padding:"3px 7px",
+                      borderRadius:"999px",
+                      background:"rgba(0,0,0,.72)",
+                      color:"#fff",
+                      fontSize:"10px",
+                      fontWeight:700,
+                      whiteSpace:"nowrap",
+                    }}>CARTÃO · {(fingerLoupe.zoom*LOUPE_EXTRA_ZOOM).toFixed(1)}×</span>
+                  </div>
+                )}
+              </>
+            )}
+            {phase === "card" && !(measurementMode === "finger" && !diameterPhotoTestMode) ? (
               <svg
                 className="card-lines-overlay"
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
@@ -5051,7 +5150,7 @@ export default function AppV2() {
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
                 {singlePhotoTestMode
-                  ? "Calibrar esta foto e medir o dedo"
+                  ? "Cartão ajustado · medir o dedo"
                   : fingerCardCalibrationStep === "reference"
                     ? "Salvar 3 linhas e ir para a foto 2"
                     : "Calibrar cartão e medir o dedo"}
@@ -5068,7 +5167,7 @@ export default function AppV2() {
                     ? "Foto 1 — calibração do cartão"
                     : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>{singlePhotoTestMode
-                  ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão já posicionado sobre o dedo."
+                  ? "Dê zoom e encoste cada linha verde lateral exatamente na borda do cartão, usando a lupa. A lupa mostra o ponto onde a lateral cruza a base, que é o que define a medida."
                   : fingerCardCalibrationStep === "reference"
                     ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
                     : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo. Na captura, use a guia fantasma da Foto 1 para aproximar escala e ângulo."}</span>
@@ -5077,7 +5176,7 @@ export default function AppV2() {
                   : fingerCardCalibrationStep === "reference"
                     ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
                     : "A Foto 2 continua calculando sua própria escala, mas agora a captura é guiada para ficar o mais próxima possível da Foto 1."}</small>
-                <small>As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar.</small>
+                <small>{MANUAL_CARD_STEP ? "A linha fica exatamente onde você soltar." : "As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar."}</small>
               </div>
             </>
           )}
