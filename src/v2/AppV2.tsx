@@ -18,6 +18,7 @@ import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks
 import { analyzeFingerContourAnatomy } from "./fingerContourAnatomy";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
+import BatchReviewV2 from "./BatchReviewV2";
 import type { LightCardDetectionPayload } from "./LightCardDetectorTest";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
@@ -4215,7 +4216,8 @@ export default function AppV2() {
                       backgroundImage:`url("${photo}")`,
                       backgroundRepeat:"no-repeat",
                       backgroundSize:"600% 600%",
-                      backgroundPosition:`${fingerLoupe.imageX}% ${fingerLoupe.imageY}%`,
+                       // Center the actual image pixel within the 6x magnifier.
+                       backgroundPosition:`${(6*fingerLoupe.imageX/100-0.5)/5*100}% ${(6*fingerLoupe.imageY/100-0.5)/5*100}%`,
                       zIndex:12,
                       pointerEvents:"none",
                     }}
@@ -4888,6 +4890,15 @@ export default function AppV2() {
               onSelectStyle={setRingStyle}
               onClose={() => setTryOn(false)}
               onGoHandCamera={() => void openHandCamera()}
+            />
+          )}
+
+          {phase === "finger" && measurementMode === "finger" && !tryOn && (
+            <BatchReviewV2
+              ringSize={commercialRingSize}
+              widthMm={widthSentToFormulaMm}
+              calibrationConfidence={calibrationConfidence}
+              ready={Boolean(result && captureQualityGate.accepted && leftLocked && rightLocked)}
             />
           )}
 
