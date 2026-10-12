@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
 import { refineCardEdgesNew } from "./detectorCompare";
+import { findCardEdge } from "./cardEdges";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useFrozenCameraStream } from "./FrozenCameraStream";
@@ -31,6 +32,9 @@ const LOUPE_EXTRA_ZOOM = 2;
 const RING_HEIGHT_FALLBACK_OFFSET = 5;
 // Inclinacao maxima aceita para cada lateral do cartao (tan 5 graus).
 const CARD_EDGE_MAX_TILT = 0.0875;
+// Vies medio do detector original (le o cartao ~0,57% mais largo que a borda
+// real; medido nas fotos de 11/10). Mantem a compatibilidade com a curva.
+const CARD_LEGACY_SCALE = 1.0057;
 // medidordedov6: a medida usada e a distancia entre as linhas verdes que o
 // usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
 // inclinacao do eixo do dedo.
@@ -812,8 +816,37 @@ export default function AppV2() {
           const bothTilted=leftTiltRaw.slope!==0 && rightTiltRaw.slope!==0;
           const sharedSlope=bothTilted ? (leftTiltRaw.slope+rightTiltRaw.slope)/2 : 0;
           const yRef=(yA+yB)/2;
-          const leftTilt={slope:sharedSlope,xAt:(y:number)=>leftEdge.x+sharedSlope*(y-yRef)};
-          const rightTilt={slope:sharedSlope,xAt:(y:number)=>rightEdge.x+sharedSlope*(y-yRef)};
+          let leftTilt={slope:sharedSlope,xAt:(y:number)=>leftEdge.x+sharedSlope*(y-yRef)};
+          let rightTilt={slope:sharedSlope,xAt:(y:number)=>rightEdge.x+sharedSlope*(y-yRef)};
+
+          // BORDA FISICA REAL (medidordedov12): o detector original escolhe o
+          // candidato MAIS EXTERNO e costuma grudar na sombra/fundo alguns px
+          // fora do cartao (variavel por foto). Refinamos cada lateral com o
+          // detector de borda nitida (subpixel), na metade de cima e na de baixo,
+          // perto da borda original. A curva foi calibrada com o vies medio do
+          // original; ele e reaplicado SO na escala (CARD_LEGACY_SCALE).
+          {
+            const img={data:imageData.data,width:canvas.width,height:canvas.height};
+            const edgeHalf=(side:"left"|"right",expected:number,from:number,to:number)=>
+              findCardEdge(img,{side,expected,from,to,searchPx:8});
+            const lU=edgeHalf("left",leftEdge.x,yA,yM), lL=edgeHalf("left",leftEdge.x,yM,yB);
+            const rU=edgeHalf("right",rightEdge.x,yA,yM), rL=edgeHalf("right",rightEdge.x,yM,yB);
+            const yU=(yA+yM)/2, yL=(yM+yB)/2;
+            if(lU.reliable&&lL.reliable&&rU.reliable&&rL.reliable){
+              const sl=(lL.position-lU.position)/(yL-yU);
+              const sr=(rL.position-rU.position)/(yL-yU);
+              const slope=Math.abs(sl)<=CARD_EDGE_MAX_TILT&&Math.abs(sr)<=CARD_EDGE_MAX_TILT?(sl+sr)/2:0;
+              const lMid=(lU.position+lL.position)/2, rMid=(rU.position+rL.position)/2;
+              const yMid=(yU+yL)/2;
+              const physWidth=rMid-lMid;
+              // So aceita se ficar perto da leitura original (protege contra frisos).
+              if(Math.abs(physWidth-(rightEdge.x-leftEdge.x))<=cardW*0.03){
+                leftTilt={slope,xAt:(y:number)=>lMid+slope*(y-yMid)};
+                rightTilt={slope,xAt:(y:number)=>rMid+slope*(y-yMid)};
+                physicalCardEdgesUsed=true;
+              }
+            }
+          }
           const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
           const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
 
@@ -854,7 +887,7 @@ export default function AppV2() {
           // Bordas avaliadas NA ALTURA DA BASE (intersecoes A e B).
           const leftAtBase=leftTilt.xAt(bottomEdge.y);
           const rightAtBase=rightTilt.xAt(bottomEdge.y);
-          const useTilt=Math.abs((rightAtBase-leftAtBase)-(refinedRight-refinedLeft))<cardW*0.03;
+          const useTilt=physicalCardEdgesUsed || Math.abs((rightAtBase-leftAtBase)-(refinedRight-refinedLeft))<cardW*0.03;
           return {
             left:clamp((useTilt?leftAtBase:refinedLeft)/canvas.width*100,2,94),
             right:clamp((useTilt?rightAtBase:refinedRight)/canvas.width*100,6,98),
@@ -869,6 +902,7 @@ export default function AppV2() {
         };
 
         let legacyRefineFailReason="";
+        let physicalCardEdgesUsed=false;
         const legacyRefined=refineCardEdges();
         // medidordedov8: se o refino ORIGINAL falhar, NAO cair na caixa
         // aproximada (podia errar 10+ px e mudar 2 aros). Usa o detector novo
@@ -899,7 +933,7 @@ export default function AppV2() {
           }catch{ /* mantem caixa aproximada */ }
         }
 
-        setCardEdgeInfo({source:cardEdgeSource+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
+        setCardEdgeInfo({source:(physicalCardEdgesUsed?"borda física real (+0,57% compat. curva)":cardEdgeSource)+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -975,7 +1009,9 @@ export default function AppV2() {
             (finalRight-finalLeft)/100*canvas.width,
             0,
           );
-          const intersectionPixelsPerMm=intersectionWidthPx/CARD_WIDTH_MM;
+          // Linhas na borda real; a escala reaplica o vies medio do detector
+          // original (sobre o qual a curva de aros foi calibrada).
+          const intersectionPixelsPerMm=intersectionWidthPx*(physicalCardEdgesUsed?CARD_LEGACY_SCALE:1)/CARD_WIDTH_MM;
 
           setMeasurementCardLengthPx(intersectionWidthPx);
 
