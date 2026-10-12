@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
 import { refineCardEdgesNew } from "./detectorCompare";
 import { findCardEdge } from "./cardEdges";
+import { trackFinger } from "./fingerTrack";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useFrozenCameraStream } from "./FrozenCameraStream";
@@ -39,6 +40,10 @@ const CARD_LEGACY_SCALE = 1.0057;
 // usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
 // inclinacao do eixo do dedo.
 const MANUAL_LINES_ONLY = true;
+// medidordedov13: medida principal = media de 3000 cortes ao longo do dedo,
+// rastreados a partir das linhas da lupa.
+const DENSE_TRACK_PRIMARY = true;
+const DENSE_TRACK_SAMPLES = 3000;
 // medidordedov7: largura maxima da copia em alta resolucao (retrato).
 const HI_RES_MAX_WIDTH = 1440;
 const CARD_HEIGHT_MM = 53.98;
@@ -146,6 +151,8 @@ export default function AppV2() {
   // medidordedov7: copia em ALTA RESOLUCAO do mesmo quadro, usada so para
   // exibir (zoom e lupa). O processamento continua na foto 900x1200.
   const [photoHiRes, setPhotoHiRes] = useState<{forPhoto:string;url:string;width:number;height:number;videoW:number;videoH:number}|null>(null);
+  const hiPixelsRef = useRef<{forUrl:string;data:Uint8ClampedArray;width:number;height:number}|null>(null);
+  const [hiPixelsReady, setHiPixelsReady] = useState(0);
   const hiResBlobByCanvasRef = useRef(new WeakMap<HTMLCanvasElement,{hi:HTMLCanvasElement;width:number;height:number;videoW:number;videoH:number}>());
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
@@ -2793,8 +2800,29 @@ export default function AppV2() {
 
   const displayPhoto = photoHiRes && photoHiRes.forPhoto===photo ? photoHiRes.url : photo;
 
+  // Pixels da foto em alta para o rastreamento denso das bordas do dedo.
+  useEffect(() => {
+    if(!photoHiRes || photoHiRes.forPhoto!==photo) return;
+    let cancelled=false;
+    const image=new Image();
+    image.onload=()=>{
+      if(cancelled) return;
+      const c=document.createElement("canvas");
+      c.width=image.naturalWidth; c.height=image.naturalHeight;
+      const ctx=c.getContext("2d",{willReadFrequently:true});
+      if(!ctx) return;
+      ctx.drawImage(image,0,0);
+      const d=ctx.getImageData(0,0,c.width,c.height);
+      hiPixelsRef.current={forUrl:photoHiRes.url,data:d.data,width:c.width,height:c.height};
+      setHiPixelsReady((v)=>v+1);
+    };
+    image.src=photoHiRes.url;
+    return ()=>{ cancelled=true; };
+  },[photoHiRes,photo]);
+
   const widthAnalysis = useMemo(() => {
     const empty = {
+      track:null as null|{mm:number;medianMm:number;count:number;lengthMm:number;minMm:number;maxMm:number;startMm:number;angleDeg:number;hiRes:boolean;leftPts:string;rightPts:string},
       manualMm:null as number|null,
       autoMm:null as number|null,
       manualAngleDeg:0,
@@ -2846,9 +2874,46 @@ export default function AppV2() {
     // oficial deve ser medida SOMENTE perto dela. Não varremos mais +/-10%,
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
+    // RASTREAMENTO DENSO (3000 cortes) a partir das linhas da lupa.
+    const denseTrack=(()=>{
+      const stage=measureRef.current;
+      const base=photoPixelsRef.current;
+      if(!stage||!base) return null;
+      const rect=stage.getBoundingClientRect();
+      if(!rect.width) return null;
+      const hi=hiPixelsRef.current && photoHiRes && hiPixelsRef.current.forUrl===photoHiRes.url && photoHiRes.forPhoto===photo ? hiPixelsRef.current : null;
+      const img=hi ?? base;
+      const sc=img.width/base.width;
+      const toImageX=(p:number)=>(((p/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*base.width;
+      const toImageY=(p:number)=>(((p/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*base.height;
+      const toScreenX=(x:number)=>(rect.width/2+(x/base.width*rect.width-rect.width/2)*zoom+panX)/rect.width*100;
+      const toScreenY=(y:number)=>(rect.height/2+(y/base.height*rect.height-rect.height/2)*zoom+panY)/rect.height*100;
+      const result=trackFinger(img,toImageX(leftLine)*sc,toImageX(rightLine)*sc,toImageY(anatomicalGuideY)*sc,{
+        minY:(cardBottom/100*base.height+3)*sc,
+        maxY:img.height-6,
+        samples:DENSE_TRACK_SAMPLES,
+        scale:sc,
+      });
+      if(!result) return null;
+      const pxPerMm=pixelsPerMm*sc;
+      const pts=(path:{x:number;y:number}[])=>path.map(p=>`${toScreenX(p.x/sc).toFixed(2)},${toScreenY(p.y/sc).toFixed(2)}`).join(" ");
+      return {
+        mm:result.meanPx/pxPerMm,
+        medianMm:result.medianPx/pxPerMm,
+        count:result.count,
+        lengthMm:(result.yEnd-result.yStart)/pxPerMm,
+        minMm:result.minPx/pxPerMm,
+        maxMm:result.maxPx/pxPerMm,
+        startMm:result.widthAtStartPx/pxPerMm,
+        angleDeg:result.axisAngleDeg,
+        hiRes:!!hi,
+        leftPts:pts(result.leftPath),
+        rightPts:pts(result.rightPath),
+      };
+    })();
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
     if(!samples || samples.length<35){
-      return {...empty,manualMm:manualRawMm,newMm:MANUAL_LINES_ONLY?manualRawMm:null};
+      return {...empty,track:denseTrack,manualMm:manualRawMm,newMm:DENSE_TRACK_PRIMARY&&denseTrack?denseTrack.mm:MANUAL_LINES_ONLY?manualRawMm:null};
     }
     const sortedAngles=samples.map(sample=>sample.axisAngleDeg).filter(Number.isFinite).sort((a,b)=>a-b);
     const manualAngleDeg=sortedAngles.length?sortedAngles[Math.floor(sortedAngles.length/2)]:0;
@@ -2974,11 +3039,12 @@ export default function AppV2() {
 
     const autoMm=VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable;
     return {
+      track:denseTrack,
       manualMm,
       autoMm,
       manualAngleDeg,
       oldMm:activeStable,
-      newMm:MANUAL_LINES_ONLY && manualMm!==null ? manualMm : autoMm,
+      newMm:DENSE_TRACK_PRIMARY && denseTrack ? denseTrack.mm : MANUAL_LINES_ONLY && manualMm!==null ? manualMm : autoMm,
       stats:activeStats,
       homographyMm:directHomographyValue,
       localScaleMm:localValue,
@@ -2996,7 +3062,7 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
     anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY,
-    photoPixelsReady
+    photoPixelsReady,hiPixelsReady,photoHiRes,photo,cardBottom
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
@@ -4526,6 +4592,17 @@ export default function AppV2() {
                     }}>BORDA · {(fingerLoupe.zoom*LOUPE_EXTRA_ZOOM).toFixed(1)}×</span>
                   </div>
                 )}
+                {widthAnalysis.track && (
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:9}}
+                  >
+                    <polyline points={widthAnalysis.track.leftPts} fill="none" stroke="#00e5ff" strokeWidth={0.35} vectorEffect="non-scaling-stroke" style={{strokeWidth:2}} />
+                    <polyline points={widthAnalysis.track.rightPts} fill="none" stroke="#00e5ff" strokeWidth={0.35} vectorEffect="non-scaling-stroke" style={{strokeWidth:2}} />
+                  </svg>
+                )}
                 {fingerMagnetSamples && (
                   <svg
                     viewBox="0 0 100 100"
@@ -4870,7 +4947,9 @@ export default function AppV2() {
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
               <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
-              {widthAnalysis.manualMm!==null && <span>SÓ LUPA (usado): {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
+              {widthAnalysis.track && <span>3000 SNAPS (usado): média {widthAnalysis.track.mm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.track.mm).exactRingSize} · mediana {widthAnalysis.track.medianMm.toFixed(2)} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
+              {!widthAnalysis.track && widthAnalysis.manualMm!==null && <span>3000 SNAPS: não conseguiu seguir a borda (usando as linhas da lupa)</span>}
+              {widthAnalysis.manualMm!==null && <span>SÓ LUPA: {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
               {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
               {measurementAudit && (
                 <>
