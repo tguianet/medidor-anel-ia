@@ -65,10 +65,10 @@ const NATIVE_CAMERA_ONLY = true;
 // v21: raio de busca (px na foto 900) do botao automatico e do ima ao soltar.
 const CARD_AUTO_RADIUS_PX = 20;
 const CARD_MAGNET_RADIUS_PX = 10;
-// v19: foto NITIDA (camera do celular / foto completa) + cartao na borda real
-// mede o dedo ~2,8% menor que a foto de video sobre a qual a curva foi feita.
-// Fator medido em 12/10 (3 fotos, aro real 25: media 21,16 -> 21,75 mm).
-const SHARP_PHOTO_SCALE = 1.0279;
+// v22: foto NITIDA (camera do celular) + cartao ajustado na borda real.
+// Fator recalculado com 6 fotos em 4 montagens (aro real 25, 12/10):
+// media das montagens 21,47 mm -> 21,75 mm.
+const SHARP_PHOTO_SCALE = 1.013;
 const CARD_CHROMA_MIN_SATURATION = 0.35;
 // v16: distancia da divisa (mm) para mostrar os dois aros ao cliente.
 const RING_BOUNDARY_MARGIN_MM = 0.04;
@@ -4608,7 +4608,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov21 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov22 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
