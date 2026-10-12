@@ -45,7 +45,7 @@ const MANUAL_LINES_ONLY = true;
 // medidordedov13: medida principal = media de 3000 cortes ao longo do dedo,
 // rastreados a partir das linhas da lupa.
 const DENSE_TRACK_PRIMARY = true;
-const DENSE_TRACK_SAMPLES = 3000;
+const DENSE_TRACK_SAMPLES = 5;
 // Disparo instantaneo: usa so o quadro do toque (sem rajada).
 const INSTANT_SHUTTER = true;
 // v16: os snaps medem so +-2 mm em volta da altura do anel; medida = mediana.
@@ -60,6 +60,11 @@ const CARD_PHYSICAL_MAX_SHIFT_PX = 6;
 const CARD_CHROMA_EDGES = true;
 // v18: etapa de ajuste manual das laterais do cartao antes do dedo.
 const MANUAL_CARD_STEP = true;
+// v21: captura somente pela camera nativa do celular.
+const NATIVE_CAMERA_ONLY = true;
+// v21: raio de busca (px na foto 900) do botao automatico e do ima ao soltar.
+const CARD_AUTO_RADIUS_PX = 20;
+const CARD_MAGNET_RADIUS_PX = 10;
 // v19: foto NITIDA (camera do celular / foto completa) + cartao na borda real
 // mede o dedo ~2,8% menor que a foto de video sobre a qual a curva foi feita.
 // Fator medido em 12/10 (3 fotos, aro real 25: media 21,16 -> 21,75 mm).
@@ -194,6 +199,8 @@ export default function AppV2() {
   // Tela de carregamento logo apos o disparo (a foto ja foi tirada).
   const [captureProgress, setCaptureProgress] = useState<{pct:number;label:string}|null>(null);
   const externalPhotoRef = useRef<AlignedPhoto|null>(null);
+  // v21: linhas do cartao detectadas na foto (ponto de partida do botao automatico).
+  const autoCardLinesRef = useRef<Record<"left"|"right"|"bottom",Line>|null>(null);
   const [photoSourceInfo, setPhotoSourceInfo] = useState("");
   const sharpPhoto = photoSourceInfo.startsWith("câmera do celular") || photoSourceInfo.startsWith("foto completa");
   const sharpScale = sharpPhoto ? SHARP_PHOTO_SCALE : 1;
@@ -392,6 +399,8 @@ export default function AppV2() {
     setLiveCardFingerOffsetPx(null);
     setLiveOpticalCenterConfidence(0);
     setStage("camera");
+    // v21: so a camera nativa do celular (sem video do navegador).
+    if(NATIVE_CAMERA_ONLY) return;
     await camera.startCameraStream();
   };
 
@@ -418,7 +427,10 @@ export default function AppV2() {
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
+    // Foto da camera nativa: os sensores do momento nao valem para ela.
+    const nativeShot=!!externalPhotoRef.current;
     if(
+      !nativeShot &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 65
@@ -427,6 +439,7 @@ export default function AppV2() {
       return;
     }
     if(
+      !nativeShot &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 75
@@ -434,12 +447,14 @@ export default function AppV2() {
       camera.setError("Quase lá: mantenha o celular mais firme até a estabilidade chegar a 75 ou mais.");
       return;
     }
-    const frozenDeviceQuality = {
-      devicePitch: deviceQuality.devicePitch,
-      deviceRoll: deviceQuality.deviceRoll,
-      deviceMotion: deviceQuality.deviceMotion,
-      stabilityScore: deviceQuality.stabilityScore,
-    };
+    const frozenDeviceQuality = nativeShot
+      ? {devicePitch:null, deviceRoll:null, deviceMotion:null, stabilityScore:null}
+      : {
+          devicePitch: deviceQuality.devicePitch,
+          deviceRoll: deviceQuality.deviceRoll,
+          deviceMotion: deviceQuality.deviceMotion,
+          stabilityScore: deviceQuality.stabilityScore,
+        };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
     const video = camera.videoRef.current;
@@ -1096,6 +1111,7 @@ export default function AppV2() {
           // v18: o usuario confere/ajusta as laterais do cartao com zoom e lupa
           // antes de medir o dedo. As linhas automaticas ficam como ponto de partida.
           if(MANUAL_CARD_STEP){
+            autoCardLinesRef.current={left:detectedLeftLine,right:detectedRightLine,bottom:detectedBottomLine};
             setCardLineLocked({top:false,right:true,bottom:true,left:true});
             setZoom(1); setPanX(0); setPanY(0);
             setAnalyzingCard(false);
@@ -2120,6 +2136,59 @@ export default function AppV2() {
     }
   };
 
+  // v21: encaixa uma linha do cartao na borda fisica (cor sem brilho para
+  // cartao colorido). Mede a borda em 2 alturas e traca a reta pelos pontos.
+  const snapCardEdgePhysical = (edge:"left"|"right"|"bottom", radiusPx:number, base?:Line, ctx:typeof cardLines=cardLines):Line|null => {
+    const source=photoPixelsRef.current;
+    if(!source) return null;
+    const W=source.width, H=source.height;
+    const line=base ?? ctx[edge];
+    const toPx=(p:Point)=>({x:p.x/100*W,y:p.y/100*H});
+    const a=toPx(line.a), b=toPx(line.b);
+    const rgb={data:source.data,width:W,height:H};
+    const L=toPx(ctx.left.a), R=toPx(ctx.right.a);
+    const topY=Math.min(ctx.top.a.y,ctx.top.b.y)/100*H;
+    const botY=(ctx.bottom.a.y+ctx.bottom.b.y)/2/100*H;
+    const sat=regionSaturation(rgb,Math.min(L.x,R.x)+30,topY+20,Math.max(L.x,R.x)-30,botY-20);
+    const img=sat>=CARD_CHROMA_MIN_SATURATION?chromaticityImage(rgb):rgb;
+    const xAt=(y:number)=>{ const dy=b.y-a.y; return Math.abs(dy)<1e-6?(a.x+b.x)/2:a.x+(b.x-a.x)*(y-a.y)/dy; };
+    if(edge==="bottom"){
+      const yAtX=(x:number)=>{ const dx=b.x-a.x; return Math.abs(dx)<1e-6?(a.y+b.y)/2:a.y+(b.y-a.y)*(x-a.x)/dx; };
+      const x0=Math.min(L.x,R.x), x1=Math.max(L.x,R.x), w=x1-x0;
+      const p1=findCardEdge(img,{side:"bottom",expected:yAtX(x0+w*0.3),from:x0+w*0.12,to:x0+w*0.45,searchPx:radiusPx});
+      const p2=findCardEdge(img,{side:"bottom",expected:yAtX(x0+w*0.7),from:x0+w*0.55,to:x0+w*0.88,searchPx:radiusPx});
+      if(!p1.reliable||!p2.reliable) return null;
+      const xa=x0+w*0.285, xb=x0+w*0.715;
+      const k=(p2.position-p1.position)/(xb-xa);
+      const yA=p1.position+k*(a.x-xa), yB=p1.position+k*(b.x-xa);
+      return {a:{x:line.a.x,y:clamp(yA/H*100,1,99)},b:{x:line.b.x,y:clamp(yB/H*100,1,99)}};
+    }
+    const span=botY-topY;
+    const yA=topY+span*0.14, yM=topY+span*0.5, yB=topY+span*0.86;
+    const up=findCardEdge(img,{side:edge,expected:xAt((yA+yM)/2),from:yA,to:yM,searchPx:radiusPx});
+    const lo=findCardEdge(img,{side:edge,expected:xAt((yM+yB)/2),from:yM,to:yB,searchPx:radiusPx});
+    if(!up.reliable||!lo.reliable) return null;
+    const yU=(yA+yM)/2, yL=(yM+yB)/2;
+    let slope=(lo.position-up.position)/(yL-yU);
+    if(Math.abs(slope)>CARD_EDGE_MAX_TILT) return null;
+    const x=(y:number)=>up.position+slope*(y-yU);
+    return {a:{x:clamp(x(a.y)/W*100,1,99),y:line.a.y},b:{x:clamp(x(b.y)/W*100,1,99),y:line.b.y}};
+  };
+
+  const autoAdjustCardLines = () => {
+    const start=autoCardLinesRef.current;
+    const next={...cardLines,...(start ?? {})};
+    const notes:string[]=[];
+    for(const edge of ["left","right","bottom"] as const){
+      const snapped=snapCardEdgePhysical(edge,CARD_AUTO_RADIUS_PX,next[edge],next);
+      if(snapped){ next[edge]=snapped; } else notes.push(edge==="left"?"esquerda":edge==="right"?"direita":"base");
+    }
+    setCardLines(next);
+    setCardSnapLines({});
+    setCardLineLocked({top:false,left:true,right:true,bottom:true});
+    camera.setError(notes.length?`Não encontrei com segurança: ${notes.join(", ")}. Ajuste essa linha na lupa.`:"");
+  };
+
   const snapCardLine = (edge:CardEdge) => {
     const source=photoPixelsRef.current;
     if(!source) return;
@@ -2258,7 +2327,14 @@ export default function AppV2() {
         const edge=match[1] as CardEdge;
         // v18: ajuste manual fica exatamente onde o usuario soltou (o ima
         // podia puxar a linha para a sombra).
-        if(MANUAL_CARD_STEP) setCardLineLocked((current)=>({...current,[edge]:true}));
+        if(MANUAL_CARD_STEP){
+          // v21: ima curto na borda fisica; se nao achar, fica onde soltou.
+          if(edge==="left"||edge==="right"||edge==="bottom"){
+            const snapped=snapCardEdgePhysical(edge,CARD_MAGNET_RADIUS_PX);
+            if(snapped) setCardLines((current)=>({...current,[edge]:snapped}));
+          }
+          setCardLineLocked((current)=>({...current,[edge]:true}));
+        }
         else snapCardLine(edge);
       }
     }
@@ -4504,7 +4580,7 @@ export default function AppV2() {
       const real=Number(realRingInput.replace(",","."));
       const lines=[
         `RESULTADO: aro ${ringBoundary?`${ringBoundary.low}/${ringBoundary.high} (divisa)`:(commercialRingSize ?? "n/d")}${commercialValidation.accepted?"":" · RECUSADA: "+commercialValidation.reasons.map(r=>r.code).join(",")} · medida usada ${f2(widthSentToFormulaMm)} mm · gate ${captureQualityGate.accepted?"ACEITA":"BLOQUEIA: "+captureQualityGate.reasons.join(" · ")}`,
-        `${sharpPhoto?`Correção foto nítida ×${SHARP_PHOTO_SCALE} (snaps brutos ×1) · `:""}3000 snaps: média ap. ${f2(track.mm)} · mediana ${f2(track.medianMm)} · mín ${f2(track.minMm)} máx ${f2(track.maxMm)}`,
+        `${sharpPhoto?`Correção foto nítida ×${SHARP_PHOTO_SCALE} (snaps brutos ×1) · `:""}Snaps: média ap. ${f2(track.mm)} · mediana ${f2(track.medianMm)} · mín ${f2(track.minMm)} máx ${f2(track.maxMm)}`,
         `  ${track.count} cortes em ${f2(track.lengthMm,1)} mm · na linha amarela ${f2(track.startMm)} · eixo ${f2(track.angleDeg,1)}° · bordas diferem ${f2(track.edgeSpreadDeg,1)}° · p10–p90 ${f2(track.p90Mm-track.p10Mm)} mm`,
         `Lupa ${f2(widthAnalysis.manualMm)} · automático ${f2(widthAnalysis.autoMm)} · borda física ${f2(physicalEdgeProfileTest?.widthMm)} mm`,
         `Cartão ${f2(g?.cardPx,1)} px · ${cardEdgeInfo?.source ?? "n/d"}`,
@@ -4532,7 +4608,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov20 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov21 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
@@ -4650,7 +4726,24 @@ export default function AppV2() {
         </>
       )}
 
-      {stage === "camera" && (
+      {stage === "camera" && NATIVE_CAMERA_ONLY && (
+        <section className="camera-screen" style={{padding:"24px 18px",display:"grid",gap:18,justifyItems:"center",textAlign:"center"}}>
+          <button type="button" className="secondary" style={{justifySelf:"start"}} onClick={() => setStage("intro")}>× Voltar</button>
+          <h2 style={{margin:0}}>Tire a foto com a câmera do celular</h2>
+          <ol style={{textAlign:"left",margin:0,paddingLeft:20,lineHeight:1.6,maxWidth:360}}>
+            <li>Cartão sobre o dedo, mão apoiada na mesa.</li>
+            <li>Celular paralelo à mesa, bem de cima.</li>
+            <li>Cartão inteiro e o dedo aparecendo na foto.</li>
+            <li>Deixe o flash da câmera no automático.</li>
+          </ol>
+          <label style={{display:"block",width:"100%",maxWidth:360,padding:"18px 16px",borderRadius:16,background:"linear-gradient(90deg,#c9a967,#f0cd78)",color:"#171109",fontWeight:900,fontSize:18,cursor:"pointer"}}>
+            Abrir a câmera
+            <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={(e:{currentTarget:HTMLInputElement}) => { const f=e.currentTarget.files?.[0]; e.currentTarget.value=""; void onNativePhoto(f); }} />
+          </label>
+          {camera.error && <p className="error">{camera.error}</p>}
+        </section>
+      )}
+      {stage === "camera" && !NATIVE_CAMERA_ONLY && (
         <FrozenCameraScreen
           videoRef={camera.videoRef}
           torchOn={camera.torchOn}
@@ -5169,6 +5262,11 @@ export default function AppV2() {
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
+              {MANUAL_CARD_STEP && singlePhotoTestMode && (
+                <button className="secondary" type="button" onClick={autoAdjustCardLines} style={{width:"100%",marginBottom:8}}>
+                  Ajustar linhas automaticamente
+                </button>
+              )}
               <button
                 className="primary confirm-perspective"
                 type="button"
@@ -5201,7 +5299,7 @@ export default function AppV2() {
                   : fingerCardCalibrationStep === "reference"
                     ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
                     : "A Foto 2 continua calculando sua própria escala, mas agora a captura é guiada para ficar o mais próxima possível da Foto 1."}</small>
-                <small>{MANUAL_CARD_STEP ? "A linha fica exatamente onde você soltar." : "As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar."}</small>
+                <small>{MANUAL_CARD_STEP ? "Ao soltar, a linha gruda na borda do cartão mais próxima (ímã curto). A escala usa só os pontos onde as laterais cruzam a base." : "As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar."}</small>
               </div>
             </>
           )}
@@ -5299,9 +5397,10 @@ export default function AppV2() {
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
+              {measurementCardLengthPx ? <span>Escala: interseções A (esquerda×base) – B (direita×base) = {measurementCardLengthPx.toFixed(1)} px = 85,60 mm</span> : null}
               {photoSourceInfo && <span>Origem da foto: {photoSourceInfo}{sharpPhoto?` · correção foto nítida ×${SHARP_PHOTO_SCALE.toFixed(4)}`:""}</span>}
               <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
-              {widthAnalysis.track && <span>3000 SNAPS ±2 mm (usado): mediana bruta {widthAnalysis.track.mm.toFixed(2)} mm{sharpPhoto?` × ${SHARP_PHOTO_SCALE} = ${(widthAnalysis.track.mm*SHARP_PHOTO_SCALE).toFixed(2)} mm`:""} → aro {classifyFingerWidthMm(widthAnalysis.track.mm*sharpScale).exactRingSize} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° (bordas diferem {widthAnalysis.track.edgeSpreadDeg.toFixed(1)}°) · variação p10–p90 {(widthAnalysis.track.p90Mm-widthAnalysis.track.p10Mm).toFixed(2)} mm · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
+              {widthAnalysis.track && <span>SNAPS DO DEDO ±2 mm (usado): mediana bruta {widthAnalysis.track.mm.toFixed(2)} mm{sharpPhoto?` × ${SHARP_PHOTO_SCALE} = ${(widthAnalysis.track.mm*SHARP_PHOTO_SCALE).toFixed(2)} mm`:""} → aro {classifyFingerWidthMm(widthAnalysis.track.mm*sharpScale).exactRingSize} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° (bordas diferem {widthAnalysis.track.edgeSpreadDeg.toFixed(1)}°) · variação p10–p90 {(widthAnalysis.track.p90Mm-widthAnalysis.track.p10Mm).toFixed(2)} mm · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
               {!widthAnalysis.track && widthAnalysis.manualMm!==null && <span>3000 SNAPS: não conseguiu seguir a borda (usando as linhas da lupa)</span>}
               {widthAnalysis.manualMm!==null && <span>SÓ LUPA: {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
               {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}

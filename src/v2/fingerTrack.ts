@@ -79,7 +79,7 @@ const robustLine = (pts: { y: number; x: number }[]) => {
   let a = 0, b = 0;
   for (let it = 0; it < 4; it++) {
     const n = use.length;
-    if (n < 10) break;
+    if (n < 2) break;
     let sy = 0, sx = 0, syy = 0, sxy = 0;
     for (const p of use) { sy += p.y; sx += p.x; syy += p.y * p.y; sxy += p.y * p.x; }
     const den = n * syy - sy * sy;
@@ -88,6 +88,7 @@ const robustLine = (pts: { y: number; x: number }[]) => {
     const res = pts.map((p) => Math.abs(p.x - (a + b * p.y)));
     const mad = [...res].sort((u, v) => u - v)[Math.floor(res.length / 2)] || 0.1;
     const lim = Math.max(0.6, 2.5 * mad);
+    if (pts.length < 10) break; // poucos snaps: so minimos quadrados
     use = pts.filter((_, k) => res[k] <= lim);
   }
   const inl = new Set(use);
@@ -103,7 +104,7 @@ export const trackFinger = (
 ): FingerTrackResult | null => {
   const scale = opts.scale ?? 1;
   const h = 1.5 * scale;
-  const total = Math.max(50, Math.round(opts.samples ?? 3000));
+  const total = Math.max(3, Math.round(opts.samples ?? 3000));
   const win = Math.min(opts.windowPx ?? 40 * scale, 400 * scale);
   const yStart = Math.max(opts.minY, startY - win);
   const yEnd = Math.min(opts.maxY, startY + win);
@@ -145,7 +146,7 @@ export const trackFinger = (
     widths.push((Rt[k].x - L[k].x) * cosA);
     leftPath.push(L[k]); rightPath.push(Rt[k]);
   });
-  if (widths.length < Math.max(30, total * 0.2)) return null;
+  if (widths.length < Math.max(3, Math.min(30, Math.ceil(total * 0.2)))) return null;
   widths.sort((u, v) => u - v);
   const n = widths.length;
   const lo = Math.floor(n * 0.1), hi = Math.max(lo + 1, Math.ceil(n * 0.9));
