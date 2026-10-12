@@ -339,12 +339,43 @@ export default function AppV2() {
     await camera.startCameraStream();
   };
 
-  const capture = async () => {
+  // Câmera nativa do celular: abre o app de câmera do próprio aparelho
+  // (foto com o processamento de imagem do celular, mais nítida) e a foto
+  // entra no mesmo fluxo de medição da câmera do app.
+  const nativeInputRef = useRef<HTMLInputElement|null>(null);
+  const [nativeLoading, setNativeLoading] = useState(false);
+  const openNativeCamera = () => {
+    const input = nativeInputRef.current;
+    if (!input) { void openCamera(); return; }
+    input.value = "";
+    input.click();
+  };
+  const onNativePhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setNativeLoading(true);
+    camera.setError("");
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      await capture(img);
+    } catch {
+      camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
+      setStage("intro");
+    } finally {
+      URL.revokeObjectURL(url);
+      setNativeLoading(false);
+    }
+  };
+
+  const capture = async (source?: HTMLImageElement) => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
     if(
+      !source &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 65
@@ -353,6 +384,7 @@ export default function AppV2() {
       return;
     }
     if(
+      !source &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 75
@@ -368,26 +400,34 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
-    const video = camera.videoRef.current;
-    if (!video?.videoWidth) {
+    const video = camera.videoRef.current as HTMLVideoElement;
+    const frameSource: HTMLVideoElement | HTMLImageElement | null = source ?? (video?.videoWidth ? video : null);
+    if (!frameSource) {
       return;
     }
+    const sourceW = source ? source.naturalWidth : video.videoWidth;
+    const sourceH = source ? source.naturalHeight : video.videoHeight;
 
     const drawCurrentFrame = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 900;
       canvas.height = 1200;
       const targetRatio = canvas.width / canvas.height;
-      const sourceRatio = video.videoWidth / video.videoHeight;
-      let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+      const sourceRatio = sourceW / sourceH;
+      let sx = 0, sy = 0, sw = sourceW, sh = sourceH;
       if (sourceRatio > targetRatio) {
-        sw = video.videoHeight * targetRatio;
-        sx = (video.videoWidth - sw) / 2;
+        sw = sourceH * targetRatio;
+        sx = (sourceW - sw) / 2;
       } else {
-        sh = video.videoWidth / targetRatio;
-        sy = (video.videoHeight - sh) / 2;
+        sh = sourceW / targetRatio;
+        sy = (sourceH - sh) / 2;
       }
-      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      }
       return canvas;
     };
 
@@ -442,6 +482,7 @@ export default function AppV2() {
     };
 
     const useBurst =
+      !source &&
       singlePhotoTestMode &&
       measurementMode==="finger" &&
       !diameterPhotoTestMode;
@@ -3151,7 +3192,8 @@ export default function AppV2() {
     setRightManualRefined(false);
     camera.setError("");
     setHandPhoto("");
-    void openCamera();
+    setStage("intro");
+    openNativeCamera();
   };
 
   const lineXAtMeasureY = (line: Line, fallbackX: number) => {
@@ -4050,6 +4092,19 @@ export default function AppV2() {
 
   return (
     <main className="app">
+          <input
+            ref={nativeInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{display:"none"}}
+            onChange={(e:{target:{files:FileList|null}})=>void onNativePhoto(e.target.files?.[0] ?? undefined)}
+          />
+          {nativeLoading && (
+            <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(10,8,5,.88)",display:"grid",placeItems:"center",color:"#f4e7c8",fontWeight:700,fontSize:18}}>
+              Carregando foto…
+            </div>
+          )}
       <header className="brand">
         <button
           type="button"
@@ -4089,9 +4144,10 @@ export default function AppV2() {
               setReferenceCardAngleDeg(null);
               setMeasurementCardLengthPx(null);
               setPerspectiveMismatchPercent(null);
-              void openCamera();
+              openNativeCamera();
             }}
           />
+
           {debugMode && (
             <section className="panel" style={{marginTop:12}}>
               <span className="step">TESTE PRIVADO</span>
