@@ -803,8 +803,17 @@ export default function AppV2() {
               ? {slope, xAt:(y:number)=>upper.x+slope*(y-yU)}
               : {slope:0, xAt:(_y:number)=>edgeX};
           };
-          const leftTilt=sideTilt(leftEdge.x,"left");
-          const rightTilt=sideTilt(rightEdge.x,"right");
+          const leftTiltRaw=sideTilt(leftEdge.x,"left");
+          const rightTiltRaw=sideTilt(rightEdge.x,"right");
+          // As duas laterais usam a MESMA inclinacao (media): acompanha o cartao
+          // girado na foto sem abrir/fechar as linhas. Assim a largura na base
+          // continua igual a largura medida no meio do cartao (como no metodo
+          // original, sobre o qual a curva foi calibrada).
+          const bothTilted=leftTiltRaw.slope!==0 && rightTiltRaw.slope!==0;
+          const sharedSlope=bothTilted ? (leftTiltRaw.slope+rightTiltRaw.slope)/2 : 0;
+          const yRef=(yA+yB)/2;
+          const leftTilt={slope:sharedSlope,xAt:(y:number)=>leftEdge.x+sharedSlope*(y-yRef)};
+          const rightTilt={slope:sharedSlope,xAt:(y:number)=>rightEdge.x+sharedSlope*(y-yRef)};
           const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
           const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
 
