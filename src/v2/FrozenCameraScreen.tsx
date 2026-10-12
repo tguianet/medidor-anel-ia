@@ -243,23 +243,6 @@ export default function FrozenCameraScreen({
               />
 
               <span
-                title="Dedo"
-                style={{
-                  position:"absolute",
-                  left:`calc(50% + ${fingerX.toFixed(1)}px)`,
-                  top:`calc(50% + ${fingerY.toFixed(1)}px)`,
-                  width:18,
-                  height:18,
-                  borderRadius:"50%",
-                  transform:"translate(-50%,-50%)",
-                  background:fingerReady ? "#52e0a3" : "#f2cf73",
-                  border:"2px solid rgba(0,0,0,.55)",
-                  boxShadow:"0 0 9px rgba(242,207,115,.75)",
-                  transition:"left .10s linear, top .10s linear, background .15s ease",
-                }}
-              />
-
-              <span
                 title="Celular"
                 style={{
                   position:"absolute",
@@ -287,15 +270,36 @@ export default function FrozenCameraScreen({
                 letterSpacing:".04em",
               }}
             >
-              {levelReady ? "✓ ALINHADO" : "JUNTE AS DUAS BOLINHAS NO CENTRO"}
+              {phoneReady ? "✓ CELULAR CENTRALIZADO" : "CENTRALIZE A BOLINHA"}
             </strong>
 
-            <div style={{display:"flex",gap:10,fontSize:9,color:"#fff"}}>
-              <span><b style={{color:"#f2cf73"}}>●</b> dedo</span>
-              <span><b style={{color:"#79c8ff"}}>●</b> celular</span>
-            </div>
           </div>
         )}
+        {singlePhotoTestMode && (() => {
+          // PRUMO DO DEDO: ponteiro inclina junto com o dedo; verde quando reto.
+          const has=liveFingerTiltDeg!==null && liveFingerTiltConfidence>=45;
+          const deg=has ? Math.max(-15, Math.min(15, liveFingerTiltDeg as number)) : 0;
+          const ok=has && Math.abs(liveFingerTiltDeg as number)<=1.5;
+          const color=!has ? "rgba(255,255,255,.55)" : ok ? "#52e0a3" : Math.abs(liveFingerTiltDeg as number)<=5 ? "#f2cf73" : "#ff9f5a";
+          return (
+            <div
+              aria-label="Prumo do ângulo do dedo"
+              style={{position:"absolute",left:"50%",bottom:14,transform:"translateX(-50%)",zIndex:50,display:"grid",justifyItems:"center",gap:4,pointerEvents:"none"}}
+            >
+              <div style={{position:"relative",width:150,height:78,overflow:"hidden"}}>
+                <div style={{position:"absolute",left:0,right:0,top:0,height:150,borderRadius:"50%",border:`3px solid ${color}`,background:"rgba(8,8,8,.62)",boxShadow:ok?"0 0 18px rgba(82,224,163,.55)":"0 0 12px rgba(0,0,0,.45)"}} />
+                {[-10,-5,0,5,10].map(t=>(
+                  <span key={t} style={{position:"absolute",left:"50%",top:6,width:t===0?3:1.5,height:t===0?16:9,background:t===0?"#52e0a3":"rgba(255,255,255,.55)",transformOrigin:"50% 69px",transform:`translateX(-50%) rotate(${t*4}deg)`}} />
+                ))}
+                <span style={{position:"absolute",left:"50%",top:10,width:4,height:64,borderRadius:2,background:color,transformOrigin:"50% 64px",transform:`translateX(-50%) rotate(${(deg*4).toFixed(1)}deg)`,transition:"transform .12s linear, background .15s ease",boxShadow:`0 0 8px ${color}`}} />
+                <span style={{position:"absolute",left:"50%",top:66,width:14,height:14,borderRadius:"50%",background:color,transform:"translateX(-50%)",border:"2px solid rgba(0,0,0,.55)"}} />
+              </div>
+              <strong style={{padding:"4px 10px",borderRadius:999,fontSize:11,letterSpacing:".04em",color:ok?"#071b14":"#f5dfaa",background:ok?"#52e0a3":"rgba(10,9,7,.8)"}}>
+                {!has ? "DEDO: procurando…" : ok ? `✓ DEDO RETO · ${Math.abs(liveFingerTiltDeg as number).toFixed(1)}°` : `DEDO ${Math.abs(liveFingerTiltDeg as number).toFixed(1)}° · endireite até o ponteiro ficar verde`}
+              </strong>
+            </div>
+          );
+        })()}
 
         <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
