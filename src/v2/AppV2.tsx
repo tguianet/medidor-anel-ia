@@ -10,6 +10,7 @@ import FrozenCameraScreen from "./FrozenCameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
+import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
@@ -25,6 +26,8 @@ const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 // V2: mantido apenas para compatibilidade dos diagnosticos herdados. Sem correcao historica.
 const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
+const LOUPE_SIZE_PX = 132;
+const LOUPE_EXTRA_ZOOM = 2;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -133,6 +136,11 @@ export default function AppV2() {
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
+  // Testes salvos para conferencia em lote.
+  const [savedTests, setSavedTests] = useState<SavedTest[]>(() => loadTests());
+  const [realRingInput, setRealRingInput] = useState("");
+  const [testBusy, setTestBusy] = useState("");
+  const [reportUrl, setReportUrl] = useState<string|null>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -162,7 +170,7 @@ export default function AppV2() {
   const [rightMagnetConfidence, setRightMagnetConfidence] = useState(0);
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
-  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number}|null>(null);
+  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number;stageW:number;stageH:number;zoom:number}|null>(null);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const [fingerLines, setFingerLines] = useState<Record<FingerSide, Line>>({
@@ -331,12 +339,43 @@ export default function AppV2() {
     await camera.startCameraStream();
   };
 
-  const capture = async () => {
+  // Câmera nativa do celular: abre o app de câmera do próprio aparelho
+  // (foto com o processamento de imagem do celular, mais nítida) e a foto
+  // entra no mesmo fluxo de medição da câmera do app.
+  const nativeInputRef = useRef<HTMLInputElement|null>(null);
+  const [nativeLoading, setNativeLoading] = useState(false);
+  const openNativeCamera = () => {
+    const input = nativeInputRef.current;
+    if (!input) { void openCamera(); return; }
+    input.value = "";
+    input.click();
+  };
+  const onNativePhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setNativeLoading(true);
+    camera.setError("");
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      await capture(img);
+    } catch {
+      camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
+      setStage("intro");
+    } finally {
+      URL.revokeObjectURL(url);
+      setNativeLoading(false);
+    }
+  };
+
+  const capture = async (source?: HTMLImageElement) => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
     if(
+      !source &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 65
@@ -345,6 +384,7 @@ export default function AppV2() {
       return;
     }
     if(
+      !source &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 75
@@ -360,26 +400,34 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
-    const video = camera.videoRef.current;
-    if (!video?.videoWidth) {
+    const video = camera.videoRef.current as HTMLVideoElement;
+    const frameSource: HTMLVideoElement | HTMLImageElement | null = source ?? (video?.videoWidth ? video : null);
+    if (!frameSource) {
       return;
     }
+    const sourceW = source ? source.naturalWidth : video.videoWidth;
+    const sourceH = source ? source.naturalHeight : video.videoHeight;
 
     const drawCurrentFrame = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 900;
       canvas.height = 1200;
       const targetRatio = canvas.width / canvas.height;
-      const sourceRatio = video.videoWidth / video.videoHeight;
-      let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+      const sourceRatio = sourceW / sourceH;
+      let sx = 0, sy = 0, sw = sourceW, sh = sourceH;
       if (sourceRatio > targetRatio) {
-        sw = video.videoHeight * targetRatio;
-        sx = (video.videoWidth - sw) / 2;
+        sw = sourceH * targetRatio;
+        sx = (sourceW - sw) / 2;
       } else {
-        sh = video.videoWidth / targetRatio;
-        sy = (video.videoHeight - sh) / 2;
+        sh = sourceW / targetRatio;
+        sy = (sourceH - sh) / 2;
       }
-      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      }
       return canvas;
     };
 
@@ -434,6 +482,7 @@ export default function AppV2() {
     };
 
     const useBurst =
+      !source &&
       singlePhotoTestMode &&
       measurementMode==="finger" &&
       !diameterPhotoTestMode;
@@ -1489,7 +1538,7 @@ export default function AppV2() {
       const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
-      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100),stageW:rect.width,stageH:rect.height,zoom});
     }
     if (target === "right") {
       if (fingerRefineDragRef.current !== "right") {
@@ -1504,7 +1553,7 @@ export default function AppV2() {
       const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
-      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100),stageW:rect.width,stageH:rect.height,zoom});
     }
     if (target === "height") {
       setLeftLocked(false);
@@ -3143,7 +3192,8 @@ export default function AppV2() {
     setRightManualRefined(false);
     camera.setError("");
     setHandPhoto("");
-    void openCamera();
+    setStage("intro");
+    openNativeCamera();
   };
 
   const lineXAtMeasureY = (line: Line, fallbackX: number) => {
@@ -3982,8 +4032,79 @@ export default function AppV2() {
     return {width,height,left,right,top,bottom,minRing,maxRing,minMm,maxMm,x,y,path};
   })();
 
+  const saveTestForReview = async () => {
+    const stage=measureRef.current;
+    if(!photo || !stage || !pixelsPerMm){ setTestBusy("Tire a foto e posicione as linhas primeiro."); return; }
+    setTestBusy("Salvando…");
+    try{
+      const W=900, H=1200;
+      const rect=stage.getBoundingClientRect();
+      const toImageX=(p:number)=>(((p/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*W;
+      const toImageY=(p:number)=>(((p/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*H;
+      const toImg=(l:Line)=>({a:{x:l.a.x/100*W,y:l.a.y/100*H},b:{x:l.b.x/100*W,y:l.b.y/100*H}});
+      const crops=await makeCrops({
+        photoUrl:photo, photoWidth:W, baseWidth:W, baseHeight:H,
+        fingerLeftX:toImageX(leftLine), fingerRightX:toImageX(rightLine), ringY:toImageY(ringGuideY),
+        trackLeft:[], trackRight:[],
+        cardLeft:toImg(cardLines.left), cardRight:toImg(cardLines.right), cardBottomY:cardBottom/100*H,
+      });
+      const f2=(v:number|null|undefined,d=2)=>v===null||v===undefined||!Number.isFinite(v)?"n/d":v.toFixed(d);
+      const g=geometricStabilityTest;
+      const real=Number(realRingInput.replace(",","."));
+      const lines=[
+        `RESULTADO: aro ${commercialRingSize ?? "n/d"} · medida usada ${f2(widthSentToFormulaMm)} mm · gate ${captureQualityGate.accepted?"ACEITA":"BLOQUEIA: "+captureQualityGate.reasons.join(" · ")}`,
+        `Linhas da lupa ${f2(liveWidthMm)} mm · borda física ${f2(physicalEdgeProfileTest?.widthMm)} mm`,
+        `Cartão ${f2(g?.cardPx,1)} px · escala ${f2(pixelsPerMm,3)} px/mm`,
+        `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}%`,
+        `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
+        `Zoom ${zoom.toFixed(1)}×`,
+      ];
+      const test:SavedTest={
+        id:`${Date.now()}`,
+        createdAt:new Date().toLocaleString("pt-BR",{hour12:false}),
+        realRing:Number.isFinite(real)&&real>0?real:null,
+        lines,
+        ...crops,
+      };
+      let next=[...savedTests,test];
+      while(next.length && !storeTests(next)) next=next.slice(1);
+      setSavedTests(next);
+      setTestBusy(`Teste ${next.length} salvo.`);
+    }catch(err){
+      setTestBusy("Não consegui salvar este teste: "+String(err));
+    }
+  };
+
+  const generateTestReport = async () => {
+    if(!savedTests.length) return;
+    setTestBusy("Montando relatório…");
+    const blob=await buildReport(savedTests,`Medidor de anel · v2 · ${savedTests.length} testes`);
+    if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
+    const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
+    const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
+    if(nav.share && nav.canShare?.({files:[file]})){
+      try{ await nav.share({files:[file],title:"Relatório do medidor"}); setTestBusy("Relatório compartilhado."); return; }catch{ /* cai no download */ }
+    }
+    if(reportUrl) URL.revokeObjectURL(reportUrl);
+    setReportUrl(URL.createObjectURL(blob));
+    setTestBusy("Relatório pronto: toque em Baixar relatório.");
+  };
+
   return (
     <main className="app">
+          <input
+            ref={nativeInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{display:"none"}}
+            onChange={(e:{target:{files:FileList|null}})=>void onNativePhoto(e.target.files?.[0] ?? undefined)}
+          />
+          {nativeLoading && (
+            <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(10,8,5,.88)",display:"grid",placeItems:"center",color:"#f4e7c8",fontWeight:700,fontSize:18}}>
+              Carregando foto…
+            </div>
+          )}
       <header className="brand">
         <button
           type="button"
@@ -4023,9 +4144,10 @@ export default function AppV2() {
               setReferenceCardAngleDeg(null);
               setMeasurementCardLengthPx(null);
               setPerspectiveMismatchPercent(null);
-              void openCamera();
+              openNativeCamera();
             }}
           />
+
           {debugMode && (
             <section className="panel" style={{marginTop:12}}>
               <span className="step">TESTE PRIVADO</span>
@@ -4205,8 +4327,8 @@ export default function AppV2() {
                       position:"absolute",
                       left:fingerLoupe.side==="left" ? "72%" : "28%",
                       top:"18%",
-                      width:"132px",
-                      height:"132px",
+                      width:`${LOUPE_SIZE_PX}px`,
+                      height:`${LOUPE_SIZE_PX}px`,
                       transform:"translate(-50%,-50%)",
                       borderRadius:"50%",
                       overflow:"hidden",
@@ -4214,8 +4336,10 @@ export default function AppV2() {
                       boxShadow:"0 8px 28px rgba(0,0,0,.55)",
                       backgroundImage:`url("${photo}")`,
                       backgroundRepeat:"no-repeat",
-                      backgroundSize:"600% 600%",
-                      backgroundPosition:`${fingerLoupe.imageX}% ${fingerLoupe.imageY}%`,
+                      // Centro da lupa = ponto exato onde a linha verde cruza a
+                      // altura do anel; aumento de 2x sobre o zoom atual.
+                      backgroundSize:`${fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
+                      backgroundPosition:`${LOUPE_SIZE_PX/2-fingerLoupe.imageX/100*fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${LOUPE_SIZE_PX/2-fingerLoupe.imageY/100*fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
                       zIndex:12,
                       pointerEvents:"none",
                     }}
@@ -4250,7 +4374,7 @@ export default function AppV2() {
                       fontSize:"10px",
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                    }}>BORDA DA LINHA · 6×</span>
+                    }}>BORDA · {(fingerLoupe.zoom*LOUPE_EXTRA_ZOOM).toFixed(1)}×</span>
                   </div>
                 )}
                 {fingerMagnetSamples && (
@@ -4593,6 +4717,20 @@ export default function AppV2() {
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
+              <div style={{border:"2px solid #00e5ff",borderRadius:10,padding:10,display:"grid",gap:8,margin:"6px 0"}}>
+                <strong>CONFERÊNCIA EM LOTE · {savedTests.length} teste(s) salvo(s)</strong>
+                <label style={{display:"flex",gap:8,alignItems:"center"}}>
+                  Aro real:
+                  <input inputMode="numeric" value={realRingInput} onChange={(e:{target:{value:string}})=>setRealRingInput(e.target.value)} placeholder="ex: 25" style={{width:80,padding:"6px 8px",borderRadius:6,border:"1px solid #c9a967",background:"#14100b",color:"#f4e7c8"}} />
+                </label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button type="button" onClick={()=>void saveTestForReview()} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #00e5ff",background:"#0d2a30",color:"#e6fbff",fontWeight:700}}>Salvar teste</button>
+                  <button type="button" disabled={!savedTests.length} onClick={()=>void generateTestReport()} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #f0cd78",background:"#2a2112",color:"#f4e7c8",fontWeight:700}}>Gerar relatório</button>
+                  <button type="button" disabled={!savedTests.length} onClick={()=>{ if(window.confirm?.("Apagar todos os testes salvos?")===false) return; storeTests([]); setSavedTests([]); setReportUrl(null); setTestBusy("Testes apagados."); }} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #8a4b4b",background:"#2a1515",color:"#f4e7c8"}}>Limpar</button>
+                </div>
+                {reportUrl && <a href={reportUrl} download={`relatorio-medidor-${savedTests.length}-testes.jpg`} style={{color:"#00e5ff",fontWeight:700}}>Baixar relatório</a>}
+                {testBusy && <small>{testBusy}</small>}
+              </div>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {measurementAudit && (
