@@ -44,6 +44,8 @@ const MANUAL_LINES_ONLY = true;
 // rastreados a partir das linhas da lupa.
 const DENSE_TRACK_PRIMARY = true;
 const DENSE_TRACK_SAMPLES = 3000;
+// Disparo instantaneo: usa so o quadro do toque (sem rajada).
+const INSTANT_SHUTTER = true;
 // medidordedov7: largura maxima da copia em alta resolucao (retrato).
 const HI_RES_MAX_WIDTH = 1440;
 const CARD_HEIGHT_MM = 53.98;
@@ -403,8 +405,6 @@ export default function AppV2() {
       stabilityScore: deviceQuality.stabilityScore,
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
-    setCaptureProgress({pct:6,label:"Capturando"});
-    await nextPaint();
 
     const video = camera.videoRef.current;
     if (!video?.videoWidth) {
@@ -450,6 +450,14 @@ export default function AppV2() {
       }
       return canvas;
     };
+
+    // DISPARO INSTANTANEO: o quadro usado e o do exato momento do toque.
+    // Congela a imagem e so depois mostra a tela de carregamento; o usuario
+    // pode soltar a posicao imediatamente.
+    const tapCanvas=drawCurrentFrame();
+    try{ video.pause(); }catch{ /* ignora */ }
+    setCaptureProgress({pct:12,label:"Foto tirada"});
+    await nextPaint();
 
     type BurstCandidate={
       photo:string;
@@ -501,7 +509,9 @@ export default function AppV2() {
       return score;
     };
 
+    // Rajada de 8 quadros desligada: exigia segurar a posicao ~1 s.
     const useBurst =
+      !INSTANT_SHUTTER &&
       singlePhotoTestMode &&
       measurementMode==="finger" &&
       !diameterPhotoTestMode;
@@ -619,8 +629,10 @@ export default function AppV2() {
         : best.guide.fingerCardRatio.toFixed(4);
       camera.setError("");
     }else{
-      selectedCanvas=drawCurrentFrame();
+      selectedCanvas=tapCanvas;
       capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
+      setCaptureProgress({pct:40,label:"Analisando o cartão…"});
+      await nextPaint();
     }
 
     setCaptureProgress({pct:88,label:"Preparando a medição…"});
@@ -4317,7 +4329,7 @@ export default function AppV2() {
               </div>
             </div>
             <span style={{fontSize:14,opacity:.85}}>{captureProgress.label} {captureProgress.pct}%</span>
-            <small style={{opacity:.7}}>{captureProgress.pct<30 ? "Segure firme mais um instante…" : "Pode tirar a mão. Estamos medindo."}</small>
+            <small style={{opacity:.7}}>{"Pode tirar a mão. Estamos medindo."}</small>
           </div>
         </div>
       )}
