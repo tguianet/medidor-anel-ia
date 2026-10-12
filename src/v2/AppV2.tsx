@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
+import { refineCardEdgesNew } from "./detectorCompare";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useFrozenCameraStream } from "./FrozenCameraStream";
@@ -25,6 +26,17 @@ const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 // V2: mantido apenas para compatibilidade dos diagnosticos herdados. Sem correcao historica.
 const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
+const LOUPE_SIZE_PX = 132;
+const LOUPE_EXTRA_ZOOM = 2;
+const RING_HEIGHT_FALLBACK_OFFSET = 5;
+// Inclinacao maxima aceita para cada lateral do cartao (tan 5 graus).
+const CARD_EDGE_MAX_TILT = 0.0875;
+// medidordedov6: a medida usada e a distancia entre as linhas verdes que o
+// usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
+// inclinacao do eixo do dedo.
+const MANUAL_LINES_ONLY = true;
+// medidordedov7: largura maxima da copia em alta resolucao (retrato).
+const HI_RES_MAX_WIDTH = 1440;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -127,12 +139,20 @@ export default function AppV2() {
   const [photoPixelsReady, setPhotoPixelsReady] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [photo, setPhoto] = useState("");
+  // medidordedov7: copia em ALTA RESOLUCAO do mesmo quadro, usada so para
+  // exibir (zoom e lupa). O processamento continua na foto 900x1200.
+  const [photoHiRes, setPhotoHiRes] = useState<{forPhoto:string;url:string;width:number;height:number;videoW:number;videoH:number}|null>(null);
+  const hiResBlobByCanvasRef = useRef(new WeakMap<HTMLCanvasElement,{hi:HTMLCanvasElement;width:number;height:number;videoW:number;videoH:number}>());
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
   const [calibrationConfidence, setCalibrationConfidence] = useState(0);
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
+  // Fonte das bordas do cartao usadas na escala (diagnostico).
+  const [cardEdgeInfo, setCardEdgeInfo] = useState<{source:string;legacyFail:string}|null>(null);
+  // Tela de carregamento logo apos o disparo (a foto ja foi tirada).
+  const [captureProgress, setCaptureProgress] = useState<{pct:number;label:string}|null>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -162,7 +182,7 @@ export default function AppV2() {
   const [rightMagnetConfidence, setRightMagnetConfidence] = useState(0);
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
-  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number}|null>(null);
+  const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number;stageW:number;stageH:number;zoom:number}|null>(null);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const [fingerLines, setFingerLines] = useState<Record<FingerSide, Line>>({
@@ -332,6 +352,19 @@ export default function AppV2() {
   };
 
   const capture = async () => {
+    try{
+      await captureInner();
+    }finally{
+      setCaptureProgress(null);
+      // Se a captura falhou e a camera continua na tela, volta o preview.
+      const v=camera.videoRef.current;
+      if(v && v.paused && v.srcObject) void v.play().catch(()=>undefined);
+    }
+  };
+
+  const nextPaint = () => new Promise<void>((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+
+  const captureInner = async () => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
@@ -359,6 +392,8 @@ export default function AppV2() {
       stabilityScore: deviceQuality.stabilityScore,
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
+    setCaptureProgress({pct:6,label:"Capturando"});
+    await nextPaint();
 
     const video = camera.videoRef.current;
     if (!video?.videoWidth) {
@@ -379,7 +414,29 @@ export default function AppV2() {
         sh = video.videoWidth / targetRatio;
         sy = (video.videoHeight - sh) / 2;
       }
-      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      // Quadro em resolucao nativa (limitado a 2160 px de largura).
+      const hiW=Math.round(Math.min(sw,HI_RES_MAX_WIDTH));
+      const hiH=Math.round(hiW/targetRatio);
+      const hi=document.createElement("canvas");
+      hi.width=hiW;
+      hi.height=hiH;
+      const hiCtx=hi.getContext("2d");
+      if(hiCtx){
+        hiCtx.imageSmoothingEnabled=true;
+        hiCtx.imageSmoothingQuality="high";
+        hiCtx.drawImage(video, sx, sy, sw, sh, 0, 0, hiW, hiH);
+        const ctx=canvas.getContext("2d");
+        if(ctx){
+          ctx.imageSmoothingEnabled=true;
+          ctx.imageSmoothingQuality="high";
+          ctx.drawImage(hi, 0, 0, hiW, hiH, 0, 0, canvas.width, canvas.height);
+        }
+        // So guarda o quadro; a compressao JPEG acontece apenas para o quadro
+        // ESCOLHIDO (antes eram 8 compressoes 4K por clique = lento).
+        hiResBlobByCanvasRef.current.set(canvas,{hi,width:hiW,height:hiH,videoW:video.videoWidth,videoH:video.videoHeight});
+      }else{
+        canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      }
       return canvas;
     };
 
@@ -441,6 +498,7 @@ export default function AppV2() {
     let selectedCanvas:HTMLCanvasElement;
     let capturedPhoto:string;
     let selectedBurstCalibration:Awaited<ReturnType<typeof calibratePhoto>> | null=null;
+    const burstCanvasesForRelease:HTMLCanvasElement[]=[];
 
     if(useBurst){
       camera.setError("Selecionando automaticamente o melhor quadro...");
@@ -448,6 +506,7 @@ export default function AppV2() {
 
       for(let index=0;index<8;index++){
         const canvas=drawCurrentFrame();
+        burstCanvasesForRelease.push(canvas);
         const guide=analyzeLiveCardGuide(video);
         candidates.push({
           canvas,
@@ -457,10 +516,13 @@ export default function AppV2() {
           consistencyScore:0,
           calibration:null,
         });
+        setCaptureProgress({pct:6+Math.round((index+1)/8*24),label:"Capturando"});
         if(index<7){
           await new Promise<void>((resolve)=>window.setTimeout(resolve,65));
         }
       }
+      // Quadros capturados: pausa o preview para liberar o processador.
+      try{ video.pause(); }catch{ /* ignora */ }
 
       // Consistencia geométrica da própria rajada:
       // calculamos a mediana da razão dedo/cartão e penalizamos frames
@@ -493,7 +555,10 @@ export default function AppV2() {
       // Calibramos os 8 frames antes de escolher. Um frame só pode vencer
       // a rajada se também for elegível para o fluxo automático; assim não
       // escolhemos um quadro bonito/consistente que depois para na etapa do cartão.
-      for(const candidate of candidates){
+      for(let ci=0;ci<candidates.length;ci++){
+        const candidate=candidates[ci];
+        setCaptureProgress({pct:30+Math.round((ci+1)/candidates.length*50),label:"Analisando o cartão…"});
+        await nextPaint();
         try{
           candidate.calibration=await calibratePhoto(candidate.photo);
         }catch{
@@ -547,9 +612,31 @@ export default function AppV2() {
       capturedPhoto=selectedCanvas.toDataURL("image/jpeg",0.94);
     }
 
+    setCaptureProgress({pct:88,label:"Preparando a medição…"});
+    await nextPaint();
     // Alias mantido para o restante do fluxo existente.
     const canvas=selectedCanvas;
     setPhoto(capturedPhoto);
+    {
+      const hiEntry=hiResBlobByCanvasRef.current.get(selectedCanvas);
+      // Libera os quadros em alta dos candidatos descartados.
+      for(const other of burstCanvasesForRelease){
+        if(other===selectedCanvas) continue;
+        const e=hiResBlobByCanvasRef.current.get(other);
+        if(e){ e.hi.width=0; e.hi.height=0; hiResBlobByCanvasRef.current.delete(other); }
+      }
+      setPhotoHiRes((current)=>{ if(current) URL.revokeObjectURL(current.url); return null; });
+      if(hiEntry){
+        try{
+          hiEntry.hi.toBlob((blob)=>{
+            hiEntry.hi.width=0; hiEntry.hi.height=0;
+            if(!blob) return;
+            const url=URL.createObjectURL(blob);
+            setPhotoHiRes({forPhoto:capturedPhoto,url,width:hiEntry.width,height:hiEntry.height,videoW:hiEntry.videoW,videoH:hiEntry.videoH});
+          },"image/jpeg",0.93);
+        }catch{ /* segue com a foto 900x1200 */ }
+      }
+    }
 
     // Modo dedo em duas fotos:
     // 1) cartão reto para definir a reta física de 85,60 mm;
@@ -623,17 +710,23 @@ export default function AppV2() {
           //   esquerda -> o mais externo para a esquerda
           //   direita  -> o mais externo para a direita
           // Isso evita grudar em faixa, texto ou desenho interno do cartão.
-          const bestVertical=(expectedX:number,side:"left"|"right")=>{
+          const bestVertical=(
+            expectedX:number,
+            side:"left"|"right",
+            yFrom:number=top0+cardH*0.14,
+            yTo:number=bottom0-cardH*0.14,
+            radius:number=18,
+          )=>{
             const direction=side==="left" ? -1 : 1;
             const candidates:VerticalEdgeCandidate[]=[];
 
-            for(let dx=-18;dx<=18;dx+=1){
+            for(let dx=-radius;dx<=radius;dx+=1){
               const x=expectedX+dx;
               const contrasts:number[]=[];
               let strong=0;
               let samples=0;
 
-              for(let y=top0+cardH*0.14;y<=bottom0-cardH*0.14;y+=Math.max(4,cardH/24)){
+              for(let y=yFrom;y<=yTo;y+=Math.max(4,(yTo-yFrom)/12)){
                 const contrast=Math.abs(gray(x-3,y)-gray(x+3,y));
                 contrasts.push(contrast);
                 if(contrast>=10) strong++;
@@ -689,6 +782,38 @@ export default function AppV2() {
 
           const leftEdge=bestVertical(left0,"left");
           const rightEdge=bestVertical(right0,"right");
+
+          // INCLINACAO REAL DE CADA LATERAL: a borda do cartao quase nunca fica
+          // perfeitamente vertical na foto. Medimos a borda na metade de cima e
+          // na metade de baixo e tracamos a reta pelos dois pontos, para a
+          // intersecao com a base (onde valem os 85,60 mm) cair na borda real.
+          const yA=top0+cardH*0.14;
+          const yB=bottom0-cardH*0.14;
+          const yM=(yA+yB)/2;
+          const sideTilt=(edgeX:number,side:"left"|"right")=>{
+            const upper=bestVertical(edgeX,side,yA,yM,6);
+            const lower=bestVertical(edgeX,side,yM,yB,6);
+            const yU=(yA+yM)/2, yL=(yM+yB)/2;
+            const slope=(lower.x-upper.x)/Math.max(1,yL-yU); // px em x por px em y
+            const ok=
+              upper.edge>=7 && lower.edge>=7 &&
+              upper.coverage>=0.52 && lower.coverage>=0.52 &&
+              Math.abs(slope)<=CARD_EDGE_MAX_TILT;
+            return ok
+              ? {slope, xAt:(y:number)=>upper.x+slope*(y-yU)}
+              : {slope:0, xAt:(_y:number)=>edgeX};
+          };
+          const leftTiltRaw=sideTilt(leftEdge.x,"left");
+          const rightTiltRaw=sideTilt(rightEdge.x,"right");
+          // As duas laterais usam a MESMA inclinacao (media): acompanha o cartao
+          // girado na foto sem abrir/fechar as linhas. Assim a largura na base
+          // continua igual a largura medida no meio do cartao (como no metodo
+          // original, sobre o qual a curva foi calibrada).
+          const bothTilted=leftTiltRaw.slope!==0 && rightTiltRaw.slope!==0;
+          const sharedSlope=bothTilted ? (leftTiltRaw.slope+rightTiltRaw.slope)/2 : 0;
+          const yRef=(yA+yB)/2;
+          const leftTilt={slope:sharedSlope,xAt:(y:number)=>leftEdge.x+sharedSlope*(y-yRef)};
+          const rightTilt={slope:sharedSlope,xAt:(y:number)=>rightEdge.x+sharedSlope*(y-yRef)};
           const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
           const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
 
@@ -712,29 +837,69 @@ export default function AppV2() {
 
           // So aceitamos o refinamento se as 3 bordas possuem contraste real.
           // Caso contrario, mantemos o retangulo inicial como fallback.
-          if(
-            leftEdge.edge<7 ||
-            rightEdge.edge<7 ||
-            leftEdge.coverage<0.52 ||
-            rightEdge.coverage<0.52 ||
-            bottomEdge.score<7 ||
-            refinedRight-refinedLeft<cardW*0.92 ||
-            refinedRight-refinedLeft>cardW*1.10
-          ){
-            return null;
+          {
+            const reasons:string[]=[];
+            if(leftEdge.edge<7) reasons.push(`esq contraste ${leftEdge.edge.toFixed(1)}<7`);
+            if(rightEdge.edge<7) reasons.push(`dir contraste ${rightEdge.edge.toFixed(1)}<7`);
+            if(leftEdge.coverage<0.52) reasons.push(`esq cobertura ${leftEdge.coverage.toFixed(2)}<0,52`);
+            if(rightEdge.coverage<0.52) reasons.push(`dir cobertura ${rightEdge.coverage.toFixed(2)}<0,52`);
+            if(bottomEdge.score<7) reasons.push(`base ${bottomEdge.score.toFixed(1)}<7`);
+            if(refinedRight-refinedLeft<cardW*0.92 || refinedRight-refinedLeft>cardW*1.10) reasons.push(`largura ${(refinedRight-refinedLeft).toFixed(0)} fora de ${(cardW*0.92).toFixed(0)}–${(cardW*1.10).toFixed(0)}`);
+            if(reasons.length){
+              legacyRefineFailReason=reasons.join(" · ");
+              return null;
+            }
           }
 
+          // Bordas avaliadas NA ALTURA DA BASE (intersecoes A e B).
+          const leftAtBase=leftTilt.xAt(bottomEdge.y);
+          const rightAtBase=rightTilt.xAt(bottomEdge.y);
+          const useTilt=Math.abs((rightAtBase-leftAtBase)-(refinedRight-refinedLeft))<cardW*0.03;
           return {
-            left:clamp(refinedLeft/canvas.width*100,2,94),
-            right:clamp(refinedRight/canvas.width*100,6,98),
+            left:clamp((useTilt?leftAtBase:refinedLeft)/canvas.width*100,2,94),
+            right:clamp((useTilt?rightAtBase:refinedRight)/canvas.width*100,6,98),
             bottom:clamp(bottomEdge.y/canvas.height*100,10,88),
+            // inclinacao em unidades de % (dx% por dy%)
+            leftSlopePct:useTilt?leftTilt.slope*canvas.height/canvas.width:0,
+            rightSlopePct:useTilt?rightTilt.slope*canvas.height/canvas.width:0,
             leftShiftPx:leftEdge.shift,
             rightShiftPx:rightEdge.shift,
             bottomShiftPx:bottomEdge.shift,
           };
         };
 
-        const refined=refineCardEdges();
+        let legacyRefineFailReason="";
+        const legacyRefined=refineCardEdges();
+        // medidordedov8: se o refino ORIGINAL falhar, NAO cair na caixa
+        // aproximada (podia errar 10+ px e mudar 2 aros). Usa o detector novo
+        // de borda fisica a partir da mesma caixa.
+        let cardEdgeSource:"refino original"|"detector novo (fallback)"|"caixa aproximada"=legacyRefined?"refino original":"caixa aproximada";
+        let refined=legacyRefined;
+        if(!refined){
+          try{
+            const ctx2=canvas.getContext("2d",{willReadFrequently:true});
+            if(ctx2){
+              const W2=canvas.width,H2=canvas.height;
+              const img2=ctx2.getImageData(0,0,W2,H2);
+              const fb=refineCardEdgesNew({data:img2.data,width:W2,height:H2},{leftPct:detectedLeft,rightPct:detectedRight,topPct:detectedTop,bottomPct:detectedBottom});
+              if(fb.refined){
+                refined={
+                  left:clamp(fb.left/W2*100,2,94),
+                  right:clamp(fb.right/W2*100,6,98),
+                  bottom:clamp(fb.bottom/H2*100,10,88),
+                  leftShiftPx:fb.left-detectedLeft/100*W2,
+                  rightShiftPx:fb.right-detectedRight/100*W2,
+                  bottomShiftPx:fb.bottom-detectedBottom/100*H2,
+                  leftSlopePct:0,
+                  rightSlopePct:0,
+                };
+                cardEdgeSource="detector novo (fallback)";
+              }
+            }
+          }catch{ /* mantem caixa aproximada */ }
+        }
+
+        setCardEdgeInfo({source:cardEdgeSource+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -745,21 +910,29 @@ export default function AppV2() {
         const top = clamp(detectedTop, 3, finalBottom - 5);
         const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
 
+        // Laterais seguem a inclinacao real da borda e passam exatamente
+        // pelas intersecoes com a base (finalLeft/finalRight).
+        const leftSlopePct=refined?.leftSlopePct ?? 0;
+        const rightSlopePct=refined?.rightSlopePct ?? 0;
+        const leftXAt=(y:number)=>finalLeft+leftSlopePct*(y-finalBottom);
+        const rightXAt=(y:number)=>finalRight+rightSlopePct*(y-finalBottom);
+        const lineTopY=clamp(top-padY,1,99);
+        const lineBottomY=clamp(finalBottom+padY,1,99);
         const detectedLeftLine:Line={
-          a:{x:finalLeft,y:clamp(top-padY,1,99)},
-          b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)},
+          a:{x:leftXAt(lineTopY),y:lineTopY},
+          b:{x:leftXAt(lineBottomY),y:lineBottomY},
         };
         const detectedRightLine:Line={
-          a:{x:finalRight,y:clamp(top-padY,1,99)},
-          b:{x:finalRight,y:clamp(finalBottom+padY,1,99)},
+          a:{x:rightXAt(lineTopY),y:lineTopY},
+          b:{x:rightXAt(lineBottomY),y:lineBottomY},
         };
         const detectedBottomLine:Line={
           a:{x:finalLeft,y:finalBottom},
           b:{x:finalRight,y:finalBottom},
         };
         const detectedQuad:[Point,Point,Point,Point]=[
-          {x:finalLeft,y:top},
-          {x:finalRight,y:top},
+          {x:leftXAt(top),y:top},
+          {x:rightXAt(top),y:top},
           {x:finalRight,y:finalBottom},
           {x:finalLeft,y:finalBottom},
         ];
@@ -768,7 +941,7 @@ export default function AppV2() {
         setCardRight(finalRight);
         setCardBottom(finalBottom);
         setCardLines({
-          top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
+          top:{a:{x:leftXAt(top),y:top},b:{x:rightXAt(top),y:top}},
           right:detectedRightLine,
           bottom:detectedBottomLine,
           left:detectedLeftLine,
@@ -1023,7 +1196,12 @@ export default function AppV2() {
     setLeftLine(anchoredLeft);
     setRightLine(anchoredRight);
 
-    const nextMeasureY=clamp(baseBottom+17,42,76);
+    // ALTURA PADRAO DO ANEL quando o contorno/landmarks nao detectam a regiao:
+    // antes era base+17%, perto da dobra entre os dedos, onde o dedo alarga
+    // (foto do cartao azul: Y 64% = base 47% + 17 -> 21,88 mm, aro 26).
+    // Fotos que acertaram mediram em base+3,5% (contorno detectado).
+    // Agora o padrao fica dentro da mesma faixa anatomica (base+5%).
+    const nextMeasureY=clamp(baseBottom+RING_HEIGHT_FALLBACK_OFFSET,30,84);
     setMeasureY(nextMeasureY);
     setRingGuideY(nextMeasureY);
     setFingerLines({
@@ -1489,7 +1667,7 @@ export default function AppV2() {
       const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
-      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+      setFingerLoupe({side:"left",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100),stageW:rect.width,stageH:rect.height,zoom});
     }
     if (target === "right") {
       if (fingerRefineDragRef.current !== "right") {
@@ -1504,7 +1682,7 @@ export default function AppV2() {
       const lineImageX=((lineScreenX-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
       const guideScreenY=ringGuideY/100*rect.height;
       const guideImageY=((guideScreenY-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
-      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+      setFingerLoupe({side:"right",imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100),stageW:rect.width,stageH:rect.height,zoom});
     }
     if (target === "height") {
       setLeftLocked(false);
@@ -2577,8 +2755,13 @@ export default function AppV2() {
     };
   },[anatomicalRegionOffsetHistoryY]);
 
+  const displayPhoto = photoHiRes && photoHiRes.forPhoto===photo ? photoHiRes.url : photo;
+
   const widthAnalysis = useMemo(() => {
     const empty = {
+      manualMm:null as number|null,
+      autoMm:null as number|null,
+      manualAngleDeg:0,
       oldMm:null as number|null,
       newMm:null as number|null,
       stats:null as ReturnType<typeof robustWidthStats>|null,
@@ -2592,6 +2775,18 @@ export default function AppV2() {
       measurementSource:"intersection-85.60" as const,
     };
     if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
+
+    // Distancia entre as linhas manuais (lupa), no pixel da foto.
+    const manualRawMm=(()=>{
+      const stage=measureRef.current;
+      const source=photoPixelsRef.current;
+      if(!stage||!source) return null;
+      const rect=stage.getBoundingClientRect();
+      if(!rect.width) return null;
+      const toImageX=(p:number)=>(((p/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width;
+      const px=toImageX(rightLine)-toImageX(leftLine);
+      return px>0 ? px/pixelsPerMm : null;
+    })();
 
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     const currentDetectedRegionY=
@@ -2616,7 +2811,12 @@ export default function AppV2() {
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
-    if(!samples || samples.length<35) return empty;
+    if(!samples || samples.length<35){
+      return {...empty,manualMm:manualRawMm,newMm:MANUAL_LINES_ONLY?manualRawMm:null};
+    }
+    const sortedAngles=samples.map(sample=>sample.axisAngleDeg).filter(Number.isFinite).sort((a,b)=>a-b);
+    const manualAngleDeg=sortedAngles.length?sortedAngles[Math.floor(sortedAngles.length/2)]:0;
+    const manualMm=manualRawMm===null?null:manualRawMm*Math.cos(manualAngleDeg*Math.PI/180);
 
     const baseMmPerPx=1/pixelsPerMm;
 
@@ -2736,9 +2936,13 @@ export default function AppV2() {
     const activeStable=localStable;
     const activeRobust=localRobust;
 
+    const autoMm=VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable;
     return {
+      manualMm,
+      autoMm,
+      manualAngleDeg,
       oldMm:activeStable,
-      newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
+      newMm:MANUAL_LINES_ONLY && manualMm!==null ? manualMm : autoMm,
       stats:activeStats,
       homographyMm:directHomographyValue,
       localScaleMm:localValue,
@@ -3984,6 +4188,37 @@ export default function AppV2() {
 
   return (
     <main className="app">
+      {captureProgress && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position:"fixed",inset:0,zIndex:2147483000,display:"grid",placeItems:"center",
+            background:"#14100b",color:"#f4e7c8",padding:24,
+          }}
+        >
+          <style>{`
+            @keyframes capbar{0%,100%{transform:scaleY(.35);opacity:.45}50%{transform:scaleY(1);opacity:1}}
+            @keyframes capshine{0%{transform:translateX(-100%)}100%{transform:translateX(220%)}}
+          `}</style>
+          <div style={{display:"grid",gap:22,justifyItems:"center",width:"min(320px,86vw)",textAlign:"center"}}>
+            <div style={{width:64,height:64,borderRadius:"50%",border:"3px solid #52e0a3",display:"grid",placeItems:"center",color:"#52e0a3",fontSize:34,fontWeight:900}}>✓</div>
+            <strong style={{fontSize:22,letterSpacing:".01em"}}>Foto tirada!</strong>
+            <div aria-hidden="true" style={{display:"flex",gap:7,alignItems:"center",height:44}}>
+              {[0,1,2,3,4].map(i=>(
+                <span key={i} style={{width:8,height:44,borderRadius:4,background:"#c9a967",animation:`capbar 1s ease-in-out ${i*0.12}s infinite`,transformOrigin:"center"}} />
+              ))}
+            </div>
+            <div style={{width:"100%",height:10,borderRadius:999,background:"#2c2318",overflow:"hidden",position:"relative"}}>
+              <div style={{width:`${captureProgress.pct}%`,height:"100%",borderRadius:999,background:"linear-gradient(90deg,#c9a967,#f0cd78)",transition:"width .25s ease",position:"relative",overflow:"hidden"}}>
+                <span style={{position:"absolute",inset:0,width:"45%",background:"linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent)",animation:"capshine 1.1s linear infinite"}} />
+              </div>
+            </div>
+            <span style={{fontSize:14,opacity:.85}}>{captureProgress.label} {captureProgress.pct}%</span>
+            <small style={{opacity:.7}}>{captureProgress.pct<30 ? "Segure firme mais um instante…" : "Pode tirar a mão. Estamos medindo."}</small>
+          </div>
+        </div>
+      )}
       <header className="brand">
         <button
           type="button"
@@ -4146,7 +4381,7 @@ export default function AppV2() {
             onPointerUp={finishDrag}
             onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
-            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
+            {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={displayPhoto} alt="Fotografia para medição" draggable={false} />}
             {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode ? (
               <svg
                 className="card-lines-overlay"
@@ -4205,17 +4440,19 @@ export default function AppV2() {
                       position:"absolute",
                       left:fingerLoupe.side==="left" ? "72%" : "28%",
                       top:"18%",
-                      width:"132px",
-                      height:"132px",
+                      width:`${LOUPE_SIZE_PX}px`,
+                      height:`${LOUPE_SIZE_PX}px`,
                       transform:"translate(-50%,-50%)",
                       borderRadius:"50%",
                       overflow:"hidden",
                       border:"3px solid #52e0a3",
                       boxShadow:"0 8px 28px rgba(0,0,0,.55)",
-                      backgroundImage:`url("${photo}")`,
+                      backgroundImage:`url("${displayPhoto}")`,
                       backgroundRepeat:"no-repeat",
-                      backgroundSize:"600% 600%",
-                      backgroundPosition:`${fingerLoupe.imageX}% ${fingerLoupe.imageY}%`,
+                      // Lupa centrada EXATAMENTE no cruzamento linha verde x linha amarela,
+                      // com aumento de 2x sobre o zoom atual da tela.
+                      backgroundSize:`${fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
+                      backgroundPosition:`${LOUPE_SIZE_PX/2-fingerLoupe.imageX/100*fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${LOUPE_SIZE_PX/2-fingerLoupe.imageY/100*fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
                       zIndex:12,
                       pointerEvents:"none",
                     }}
@@ -4250,7 +4487,7 @@ export default function AppV2() {
                       fontSize:"10px",
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                    }}>BORDA DA LINHA · 6×</span>
+                    }}>BORDA · {(fingerLoupe.zoom*LOUPE_EXTRA_ZOOM).toFixed(1)}×</span>
                   </div>
                 )}
                 {fingerMagnetSamples && (
@@ -4595,6 +4832,10 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
+              <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
+              {widthAnalysis.manualMm!==null && <span>SÓ LUPA (usado): {widthAnalysis.manualMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.manualMm).exactRingSize} · inclinação corrigida {widthAnalysis.manualAngleDeg.toFixed(2)}°</span>}
+              {widthAnalysis.autoMm!==null && <span>Automático (comparação): {widthAnalysis.autoMm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.autoMm).exactRingSize}</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
@@ -4691,6 +4932,7 @@ export default function AppV2() {
                       <span>Cartão: {geometricStabilityTest.cardPx.toFixed(1)} px · escala {geometricStabilityTest.mmPerPx.toFixed(4)} mm/px</span>
                       <span>Dedo atual: {geometricStabilityTest.currentFingerPx===null ? "n/d" : geometricStabilityTest.currentFingerPx.toFixed(1)+" px"} · razão dedo/cartão {geometricStabilityTest.currentRatio===null ? "n/d" : geometricStabilityTest.currentRatio.toFixed(4)}</span>
                       <span>Borda física: {geometricStabilityTest.physicalFingerPx===null ? "n/d" : geometricStabilityTest.physicalFingerPx.toFixed(1)+" px"} · razão física/cartão {geometricStabilityTest.physicalRatio===null ? "n/d" : geometricStabilityTest.physicalRatio.toFixed(4)}</span>
+                      <span>Fonte da altura: {handLandmarkAnalysis?.measuredFinger && handLandmarkAnalysis.measuredFinger.confidence>=60 && handLandmarkAnalysis.measuredFinger.ringRegionY!==null ? "landmarks" : contourAnatomy?.detected ? "contorno anatômico" : `padrão (base + ${RING_HEIGHT_FALLBACK_OFFSET}%)`} · base do cartão {cardBaseYPercent.toFixed(1)}%</span>
                       <span>Altura anatômica Y: {geometricStabilityTest.anatomyY.toFixed(1)}% · ângulo dedo {geometricStabilityTest.fingerAngleDeg===null ? "n/d" : geometricStabilityTest.fingerAngleDeg.toFixed(2)+"°"}</span>
                       <span>Celular: pitch {geometricStabilityTest.pitch===null ? "n/d" : geometricStabilityTest.pitch.toFixed(1)+"°"} · roll {geometricStabilityTest.roll===null ? "n/d" : geometricStabilityTest.roll.toFixed(1)+"°"} · movimento {geometricStabilityTest.motion===null ? "n/d" : geometricStabilityTest.motion.toFixed(2)}</span>
                       <span>Stability {geometricStabilityTest.stability===null ? "n/d" : geometricStabilityTest.stability} · perspective {geometricStabilityTest.perspectiveScore}</span>
