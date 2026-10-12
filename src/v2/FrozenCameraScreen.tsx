@@ -25,6 +25,8 @@ type Props = {
   onRetry: () => void;
 };
 
+const AUTO_SHOT_HOLD_MS = 500;
+
 export default function FrozenCameraScreen({
   videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide,
   liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
@@ -77,32 +79,51 @@ export default function FrozenCameraScreen({
     phoneReady &&
     !cameraOpening;
 
+  // TRAVAS EM SEQUENCIA + DISPARO AUTOMATICO.
+  // Cada condicao trava quando fica boa e so destrava se piorar bem (histerese),
+  // para nao piscar. Quando as 3 estao travadas juntas por AUTO_SHOT_HOLD_MS,
+  // a foto e tirada sozinha (uma unica foto: cartao e dedo na mesma escala).
+  const [locks, setLocks] = useState({angle:false, phone:false, card:false});
+  const [holdPct, setHoldPct] = useState(0);
+  const onCaptureRef = useRef(onCapture);
+  onCaptureRef.current = onCapture;
+
   useEffect(() => {
-    if (!levelReady) {
-      if (autoCaptureTimerRef.current !== null) {
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current = null;
-      }
+    const tiltOk = liveFingerTiltDeg !== null && liveFingerTiltConfidence >= 45;
+    const t = tiltOk ? Math.abs(liveFingerTiltDeg as number) : 99;
+    const p = devicePitch === null ? 99 : Math.abs(devicePitch);
+    const r = deviceRoll === null ? 99 : Math.abs(deviceRoll);
+    setLocks((prev) => {
+      const angle = prev.angle ? t <= 2.5 : t <= 1.5;
+      const phone = prev.phone ? (p <= 8 && r <= 4.5) : (p <= 6 && r <= 3);
+      const card = cardReady;
+      return angle === prev.angle && phone === prev.phone && card === prev.card ? prev : {angle, phone, card};
+    });
+  }, [liveFingerTiltDeg, liveFingerTiltConfidence, devicePitch, deviceRoll, cardReady]);
+
+  const allLocked = singlePhotoTestMode && !cameraOpening && locks.angle && locks.phone && locks.card;
+
+  useEffect(() => {
+    if (!allLocked) {
+      setHoldPct(0);
       autoCaptureLockedRef.current = false;
       return;
     }
-
-    if (autoCaptureLockedRef.current || autoCaptureTimerRef.current !== null) return;
-
-    autoCaptureTimerRef.current = window.setTimeout(() => {
-      autoCaptureTimerRef.current = null;
-      if (!levelReady || autoCaptureLockedRef.current) return;
-      autoCaptureLockedRef.current = true;
-      onCapture();
-    }, 700);
-
-    return () => {
-      if (autoCaptureTimerRef.current !== null) {
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current = null;
+    if (autoCaptureLockedRef.current) return;
+    const start = performance.now();
+    const iv = window.setInterval(() => {
+      const pct = Math.min(100, ((performance.now() - start) / AUTO_SHOT_HOLD_MS) * 100);
+      setHoldPct(pct);
+      if (pct >= 100) {
+        window.clearInterval(iv);
+        if (!autoCaptureLockedRef.current) {
+          autoCaptureLockedRef.current = true;
+          onCaptureRef.current();
+        }
       }
-    };
-  }, [levelReady, onCapture]);
+    }, 40);
+    return () => window.clearInterval(iv);
+  }, [allLocked]);
 
   return (
     <section className="camera-screen">
@@ -216,9 +237,9 @@ export default function FrozenCameraScreen({
                 width:112,
                 height:112,
                 borderRadius:"50%",
-                border:`3px solid ${levelReady ? "#52e0a3" : "rgba(242,207,115,.88)"}`,
+                border:`3px solid ${phoneReady ? "#52e0a3" : "rgba(242,207,115,.88)"}`,
                 background:"rgba(8,8,8,.62)",
-                boxShadow:levelReady
+                boxShadow:phoneReady
                   ? "0 0 22px rgba(82,224,163,.55)"
                   : "0 0 16px rgba(0,0,0,.45)",
                 transition:"border-color .15s ease, box-shadow .15s ease",
@@ -236,9 +257,9 @@ export default function FrozenCameraScreen({
                   width:34,
                   height:34,
                   borderRadius:"50%",
-                  border:`2px solid ${levelReady ? "#52e0a3" : "rgba(255,255,255,.55)"}`,
+                  border:`2px solid ${phoneReady ? "#52e0a3" : "rgba(255,255,255,.55)"}`,
                   transform:"translate(-50%,-50%)",
-                  boxShadow:levelReady ? "0 0 12px rgba(82,224,163,.7)" : "none",
+                  boxShadow:phoneReady ? "0 0 12px rgba(82,224,163,.7)" : "none",
                 }}
               />
 
@@ -264,8 +285,8 @@ export default function FrozenCameraScreen({
               style={{
                 padding:"4px 9px",
                 borderRadius:999,
-                color:levelReady ? "#071b14" : "#f5dfaa",
-                background:levelReady ? "#52e0a3" : "rgba(10,9,7,.78)",
+                color:phoneReady ? "#071b14" : "#f5dfaa",
+                background:phoneReady ? "#52e0a3" : "rgba(10,9,7,.78)",
                 fontSize:10,
                 letterSpacing:".04em",
               }}
@@ -273,6 +294,30 @@ export default function FrozenCameraScreen({
               {phoneReady ? "✓ CELULAR CENTRALIZADO" : "CENTRALIZE A BOLINHA"}
             </strong>
 
+          </div>
+        )}
+        {singlePhotoTestMode && (
+          <div
+            aria-label="Travas para a foto automática"
+            style={{position:"absolute",left:"50%",bottom:128,transform:"translateX(-50%)",zIndex:51,display:"grid",gap:6,justifyItems:"center",pointerEvents:"none",width:"calc(100% - 24px)"}}
+          >
+            <div style={{display:"flex",gap:6,justifyContent:"center",flexWrap:"wrap"}}>
+              {([["angle","1 · Dedo reto"],["phone","2 · Celular"],["card","3 · Cartão"]] as const).map(([k,label]) => (
+                <span key={k} style={{padding:"5px 10px",borderRadius:999,fontSize:11,fontWeight:800,letterSpacing:".02em",
+                  color:locks[k] ? "#071b14" : "#f5dfaa",background:locks[k] ? "#52e0a3" : "rgba(10,9,7,.82)",
+                  border:`1px solid ${locks[k] ? "#52e0a3" : "rgba(242,207,115,.6)"}`}}>
+                  {locks[k] ? "🔒 " : "○ "}{label}
+                </span>
+              ))}
+            </div>
+            {allLocked && (
+              <div style={{width:180,height:8,borderRadius:999,background:"rgba(10,9,7,.8)",overflow:"hidden",border:"1px solid #52e0a3"}}>
+                <div style={{width:`${holdPct}%`,height:"100%",background:"#52e0a3",transition:"width .04s linear"}} />
+              </div>
+            )}
+            <small style={{padding:"3px 8px",borderRadius:999,background:"rgba(10,9,7,.75)",color:"#fff",fontSize:10}}>
+              {allLocked ? "Segure… a foto sai sozinha" : "Quando os 3 travarem, a foto sai sozinha"}
+            </small>
           </div>
         )}
         {singlePhotoTestMode && (() => {
