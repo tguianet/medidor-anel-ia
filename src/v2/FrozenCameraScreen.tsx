@@ -22,6 +22,7 @@ type Props = {
   singlePhotoTestMode?: boolean;
   onClose: () => void;
   onCapture: () => void;
+  onNativePhoto?: (file: File | undefined) => void;
   onRetry: () => void;
 };
 
@@ -32,7 +33,7 @@ export default function FrozenCameraScreen({
   devicePitch = null, deviceRoll = null,
   cameraOpening, error,
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
-  onClose, onCapture, onRetry,
+  onClose, onCapture, onRetry, onNativePhoto,
 }: Props) {
   const autoCaptureTimerRef = useRef<number | null>(null);
   const autoCaptureLockedRef = useRef(false);
@@ -384,6 +385,12 @@ export default function FrozenCameraScreen({
                 ? "Coloque o cartão em uma base plana, enquadre na moldura e ajuste o ângulo até ficar verde."
                 : "Coloque o cartão sobre o dedo e ajuste a distância do celular até o cartão coincidir com a guia fantasma da Foto 1."}</p>
       <button className={`shutter${cardReady ? " ready" : ""}`} style={{display:"block",margin:"0 auto"}} onClick={onCapture} aria-label="Capturar foto manualmente"><span /></button>
+      {onNativePhoto && (
+        <label style={{display:"block",textAlign:"center",margin:"12px auto 0",padding:"10px 14px",maxWidth:300,border:"1px solid #c9a967",borderRadius:999,color:"#f4e7c8",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+          Usar a câmera do celular (máxima qualidade)
+          <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={(e: { currentTarget: HTMLInputElement }) => { const f=e.currentTarget.files?.[0]; e.currentTarget.value=""; onNativePhoto(f); }} />
+        </label>
+      )}
       {error && <><p className="error">{error}</p><button className="secondary camera-retry" type="button" onClick={onRetry}>Tentar novamente</button></>}
     </section>
   );
