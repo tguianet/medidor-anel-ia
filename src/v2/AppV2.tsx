@@ -10,6 +10,7 @@ import FrozenCameraScreen from "./FrozenCameraScreen";
 import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
+import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
@@ -135,6 +136,11 @@ export default function AppV2() {
   const [cardLeft, setCardLeft] = useState(15);
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
+  // Testes salvos para conferencia em lote.
+  const [savedTests, setSavedTests] = useState<SavedTest[]>(() => loadTests());
+  const [realRingInput, setRealRingInput] = useState("");
+  const [testBusy, setTestBusy] = useState("");
+  const [reportUrl, setReportUrl] = useState<string|null>(null);
   const [cardLines, setCardLines] = useState<Record<CardEdge, Line>>({
     top: { a:{x:10,y:28}, b:{x:90,y:28} },
     right: { a:{x:85,y:22}, b:{x:85,y:64} },
@@ -3984,6 +3990,64 @@ export default function AppV2() {
     return {width,height,left,right,top,bottom,minRing,maxRing,minMm,maxMm,x,y,path};
   })();
 
+  const saveTestForReview = async () => {
+    const stage=measureRef.current;
+    if(!photo || !stage || !pixelsPerMm){ setTestBusy("Tire a foto e posicione as linhas primeiro."); return; }
+    setTestBusy("Salvando…");
+    try{
+      const W=900, H=1200;
+      const rect=stage.getBoundingClientRect();
+      const toImageX=(p:number)=>(((p/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*W;
+      const toImageY=(p:number)=>(((p/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*H;
+      const toImg=(l:Line)=>({a:{x:l.a.x/100*W,y:l.a.y/100*H},b:{x:l.b.x/100*W,y:l.b.y/100*H}});
+      const crops=await makeCrops({
+        photoUrl:photo, photoWidth:W, baseWidth:W, baseHeight:H,
+        fingerLeftX:toImageX(leftLine), fingerRightX:toImageX(rightLine), ringY:toImageY(ringGuideY),
+        trackLeft:[], trackRight:[],
+        cardLeft:toImg(cardLines.left), cardRight:toImg(cardLines.right), cardBottomY:cardBottom/100*H,
+      });
+      const f2=(v:number|null|undefined,d=2)=>v===null||v===undefined||!Number.isFinite(v)?"n/d":v.toFixed(d);
+      const g=geometricStabilityTest;
+      const real=Number(realRingInput.replace(",","."));
+      const lines=[
+        `RESULTADO: aro ${commercialRingSize ?? "n/d"} · medida usada ${f2(widthSentToFormulaMm)} mm · gate ${captureQualityGate.accepted?"ACEITA":"BLOQUEIA: "+captureQualityGate.reasons.join(" · ")}`,
+        `Linhas da lupa ${f2(liveWidthMm)} mm · borda física ${f2(physicalEdgeProfileTest?.widthMm)} mm`,
+        `Cartão ${f2(g?.cardPx,1)} px · escala ${f2(pixelsPerMm,3)} px/mm`,
+        `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}%`,
+        `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
+        `Zoom ${zoom.toFixed(1)}×`,
+      ];
+      const test:SavedTest={
+        id:`${Date.now()}`,
+        createdAt:new Date().toLocaleString("pt-BR",{hour12:false}),
+        realRing:Number.isFinite(real)&&real>0?real:null,
+        lines,
+        ...crops,
+      };
+      let next=[...savedTests,test];
+      while(next.length && !storeTests(next)) next=next.slice(1);
+      setSavedTests(next);
+      setTestBusy(`Teste ${next.length} salvo.`);
+    }catch(err){
+      setTestBusy("Não consegui salvar este teste: "+String(err));
+    }
+  };
+
+  const generateTestReport = async () => {
+    if(!savedTests.length) return;
+    setTestBusy("Montando relatório…");
+    const blob=await buildReport(savedTests,`Medidor de anel · v2 · ${savedTests.length} testes`);
+    if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
+    const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
+    const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
+    if(nav.share && nav.canShare?.({files:[file]})){
+      try{ await nav.share({files:[file],title:"Relatório do medidor"}); setTestBusy("Relatório compartilhado."); return; }catch{ /* cai no download */ }
+    }
+    if(reportUrl) URL.revokeObjectURL(reportUrl);
+    setReportUrl(URL.createObjectURL(blob));
+    setTestBusy("Relatório pronto: toque em Baixar relatório.");
+  };
+
   return (
     <main className="app">
       <header className="brand">
@@ -4597,6 +4661,20 @@ export default function AppV2() {
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
+              <div style={{border:"2px solid #00e5ff",borderRadius:10,padding:10,display:"grid",gap:8,margin:"6px 0"}}>
+                <strong>CONFERÊNCIA EM LOTE · {savedTests.length} teste(s) salvo(s)</strong>
+                <label style={{display:"flex",gap:8,alignItems:"center"}}>
+                  Aro real:
+                  <input inputMode="numeric" value={realRingInput} onChange={(e:{target:{value:string}})=>setRealRingInput(e.target.value)} placeholder="ex: 25" style={{width:80,padding:"6px 8px",borderRadius:6,border:"1px solid #c9a967",background:"#14100b",color:"#f4e7c8"}} />
+                </label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button type="button" onClick={()=>void saveTestForReview()} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #00e5ff",background:"#0d2a30",color:"#e6fbff",fontWeight:700}}>Salvar teste</button>
+                  <button type="button" disabled={!savedTests.length} onClick={()=>void generateTestReport()} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #f0cd78",background:"#2a2112",color:"#f4e7c8",fontWeight:700}}>Gerar relatório</button>
+                  <button type="button" disabled={!savedTests.length} onClick={()=>{ if(window.confirm?.("Apagar todos os testes salvos?")===false) return; storeTests([]); setSavedTests([]); setReportUrl(null); setTestBusy("Testes apagados."); }} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #8a4b4b",background:"#2a1515",color:"#f4e7c8"}}>Limpar</button>
+                </div>
+                {reportUrl && <a href={reportUrl} download={`relatorio-medidor-${savedTests.length}-testes.jpg`} style={{color:"#00e5ff",fontWeight:700}}>Baixar relatório</a>}
+                {testBusy && <small>{testBusy}</small>}
+              </div>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {measurementAudit && (
