@@ -243,3 +243,40 @@ export const colorDifference = (
   const db = data[offsetA + 2] - data[offsetB + 2];
   return Math.sqrt(dr * dr + dg * dg + db * db) / SQRT3;
 };
+
+/**
+ * Imagem de CROMATICIDADE (cor sem brilho): r/(r+g+b), g/(r+g+b), b/(r+g+b).
+ * Sombra escurece os 3 canais na mesma proporcao -> some nesta imagem; um
+ * cartao colorido continua com contraste forte contra o fundo.
+ */
+export const chromaticityImage = (image: RgbaImage, gain = 3 * 255): RgbaImage => {
+  const n = image.width * image.height;
+  const out = new Uint8ClampedArray(n * 4);
+  const d = image.data;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    const r = d[o], g = d[o + 1], b = d[o + 2];
+    const sum = r + g + b + 30; // +30 estabiliza pixels muito escuros
+    out[o] = (r / sum) * gain;
+    out[o + 1] = (g / sum) * gain;
+    out[o + 2] = (b / sum) * gain;
+    out[o + 3] = 255;
+  }
+  return { data: out, width: image.width, height: image.height };
+};
+
+/** Saturacao media (0-1) de uma regiao: diz se o cartao e colorido. */
+export const regionSaturation = (image: RgbaImage, x0: number, y0: number, x1: number, y1: number) => {
+  let acc = 0, n = 0;
+  const step = Math.max(2, Math.round((x1 - x0) / 40));
+  for (let y = Math.round(y0); y < y1; y += step) {
+    for (let x = Math.round(x0); x < x1; x += step) {
+      const o = (Math.round(y) * image.width + Math.round(x)) * 4;
+      const r = image.data[o], g = image.data[o + 1], b = image.data[o + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      acc += mx > 20 ? (mx - mn) / mx : 0;
+      n++;
+    }
+  }
+  return n ? acc / n : 0;
+};

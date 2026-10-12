@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
 import { refineCardEdgesNew } from "./detectorCompare";
-import { findCardEdge } from "./cardEdges";
+import { chromaticityImage, findCardEdge, regionSaturation } from "./cardEdges";
 import { trackFinger } from "./fingerTrack";
+import { alignPhotoToFrame, canTakeFullPhoto, decodePhoto, takeFullPhoto, wholePhotoAsFrame, type AlignedPhoto } from "./fullPhoto";
 import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
@@ -49,15 +50,21 @@ const DENSE_TRACK_SAMPLES = 3000;
 const INSTANT_SHUTTER = true;
 // v16: os snaps medem so +-2 mm em volta da altura do anel; medida = mediana.
 const RING_ZONE_HALF_MM = 2;
+// v17: foto completa do sensor (Chrome/Android) no toque.
+const FULL_PHOTO_ENABLED = true;
+const FULL_PHOTO_TIMEOUT_MS = 2500;
 // v16: o refino fisico do cartao so pode mover cada lateral ate 6 px em
 // relacao ao detector original (evita grudar em faixas/bisel internos).
 const CARD_PHYSICAL_MAX_SHIFT_PX = 6;
+// v17: cartao colorido -> bordas pela cromaticidade (a sombra some).
+const CARD_CHROMA_EDGES = true;
+const CARD_CHROMA_MIN_SATURATION = 0.35;
 // v16: distancia da divisa (mm) para mostrar os dois aros ao cliente.
 const RING_BOUNDARY_MARGIN_MM = 0.04;
 const COMMERCIAL_MAX_FINGER_ANGLE = 5;
 const COMMERCIAL_MAX_EDGE_DIVERGENCE_MM = 0.30;
 // medidordedov7: largura maxima da copia em alta resolucao (retrato).
-const HI_RES_MAX_WIDTH = 1440;
+const HI_RES_MAX_WIDTH = 2400;
 const CARD_HEIGHT_MM = 53.98;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
@@ -176,6 +183,8 @@ export default function AppV2() {
   const [cardEdgeInfo, setCardEdgeInfo] = useState<{source:string;legacyFail:string}|null>(null);
   // Tela de carregamento logo apos o disparo (a foto ja foi tirada).
   const [captureProgress, setCaptureProgress] = useState<{pct:number;label:string}|null>(null);
+  const externalPhotoRef = useRef<AlignedPhoto|null>(null);
+  const [photoSourceInfo, setPhotoSourceInfo] = useState("");
   // Testes salvos para conferencia em lote (medidordedov15).
   const [savedTests, setSavedTests] = useState<SavedTest[]>(() => loadTests());
   const [realRingInput, setRealRingInput] = useState("");
@@ -422,24 +431,40 @@ export default function AppV2() {
     setCaptureDeviceQuality(frozenDeviceQuality);
 
     const video = camera.videoRef.current;
-    if (!video?.videoWidth) {
+    const externalPhoto=externalPhotoRef.current;
+    externalPhotoRef.current=null;
+    if (!externalPhoto && !video?.videoWidth) {
       return;
     }
 
+    // Fonte do quadro: video ao vivo ou foto completa alinhada.
+    let aligned:AlignedPhoto|null=externalPhoto;
+    let photoSourceLabel=externalPhoto?"câmera do celular":"vídeo";
     const drawCurrentFrame = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 900;
       canvas.height = 1200;
       const targetRatio = canvas.width / canvas.height;
-      const sourceRatio = video.videoWidth / video.videoHeight;
-      let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
-      if (sourceRatio > targetRatio) {
-        sw = video.videoHeight * targetRatio;
-        sx = (video.videoWidth - sw) / 2;
-      } else {
-        sh = video.videoWidth / targetRatio;
-        sy = (video.videoHeight - sh) / 2;
+      let src:CanvasImageSource;
+      let sx = 0, sy = 0, sw:number, sh:number, srcW:number, srcH:number;
+      if(aligned){
+        src=aligned.source;
+        ({sx,sy,sw,sh}=aligned.crop);
+        srcW=aligned.source.width; srcH=aligned.source.height;
+      }else{
+        const v=video!;
+        src=v; srcW=v.videoWidth; srcH=v.videoHeight;
+        sw=srcW; sh=srcH;
+        const sourceRatio = srcW / srcH;
+        if (sourceRatio > targetRatio) {
+          sw = srcH * targetRatio;
+          sx = (srcW - sw) / 2;
+        } else {
+          sh = srcW / targetRatio;
+          sy = (srcH - sh) / 2;
+        }
       }
+      const videoW=srcW, videoH=srcH;
       // Quadro em resolucao nativa (limitado a 2160 px de largura).
       const hiW=Math.round(Math.min(sw,HI_RES_MAX_WIDTH));
       const hiH=Math.round(hiW/targetRatio);
@@ -450,7 +475,7 @@ export default function AppV2() {
       if(hiCtx){
         hiCtx.imageSmoothingEnabled=true;
         hiCtx.imageSmoothingQuality="high";
-        hiCtx.drawImage(video, sx, sy, sw, sh, 0, 0, hiW, hiH);
+        hiCtx.drawImage(src, sx, sy, sw, sh, 0, 0, hiW, hiH);
         const ctx=canvas.getContext("2d");
         if(ctx){
           ctx.imageSmoothingEnabled=true;
@@ -459,9 +484,9 @@ export default function AppV2() {
         }
         // So guarda o quadro; a compressao JPEG acontece apenas para o quadro
         // ESCOLHIDO (antes eram 8 compressoes 4K por clique = lento).
-        hiResBlobByCanvasRef.current.set(canvas,{hi,width:hiW,height:hiH,videoW:video.videoWidth,videoH:video.videoHeight});
+        hiResBlobByCanvasRef.current.set(canvas,{hi,width:hiW,height:hiH,videoW,videoH});
       }else{
-        canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        canvas.getContext("2d")?.drawImage(src, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
       }
       return canvas;
     };
@@ -469,9 +494,26 @@ export default function AppV2() {
     // DISPARO INSTANTANEO: o quadro usado e o do exato momento do toque.
     // Congela a imagem e so depois mostra a tela de carregamento; o usuario
     // pode soltar a posicao imediatamente.
-    const tapCanvas=drawCurrentFrame();
-    try{ video.pause(); }catch{ /* ignora */ }
-    setCaptureProgress({pct:12,label:"Foto tirada"});
+    let tapCanvas=drawCurrentFrame();
+    try{ video?.pause(); }catch{ /* ignora */ }
+
+    // FOTO COMPLETA (sensor inteiro) quando o navegador permite.
+    if(!externalPhoto && FULL_PHOTO_ENABLED && canTakeFullPhoto(camera.streamRef.current)){
+      setCaptureProgress({pct:8,label:"Segure firme · foto em alta"});
+      await nextPaint();
+      const blob=await takeFullPhoto(camera.streamRef.current!,FULL_PHOTO_TIMEOUT_MS);
+      const photoCanvas=blob ? await decodePhoto(blob) : null;
+      const match=photoCanvas ? alignPhotoToFrame(photoCanvas,tapCanvas) : null;
+      if(match){
+        aligned=match;
+        photoSourceLabel=`foto completa ${photoCanvas!.width}×${photoCanvas!.height} (alinhada, dif ${match.score.toFixed(1)})`;
+        tapCanvas=drawCurrentFrame();
+      }else{
+        photoSourceLabel=blob ? "vídeo (foto completa não alinhou: mão mexeu?)" : "vídeo (foto completa indisponível)";
+      }
+    }
+    setPhotoSourceInfo(photoSourceLabel);
+    setCaptureProgress({pct:20,label:"Foto tirada"});
     await nextPaint();
 
     type BurstCandidate={
@@ -543,7 +585,7 @@ export default function AppV2() {
       for(let index=0;index<8;index++){
         const canvas=drawCurrentFrame();
         burstCanvasesForRelease.push(canvas);
-        const guide=analyzeLiveCardGuide(video);
+        const guide=analyzeLiveCardGuide(video!);
         candidates.push({
           canvas,
           photo:canvas.toDataURL("image/jpeg",0.94),
@@ -558,7 +600,7 @@ export default function AppV2() {
         }
       }
       // Quadros capturados: pausa o preview para liberar o processador.
-      try{ video.pause(); }catch{ /* ignora */ }
+      try{ video?.pause(); }catch{ /* ignora */ }
 
       // Consistencia geométrica da própria rajada:
       // calculamos a mediana da razão dedo/cartão e penalizamos frames
@@ -860,9 +902,15 @@ export default function AppV2() {
           // perto da borda original. A curva foi calibrada com o vies medio do
           // original; ele e reaplicado SO na escala (CARD_LEGACY_SCALE).
           {
-            const img={data:imageData.data,width:canvas.width,height:canvas.height};
+            const rgbImg={data:imageData.data,width:canvas.width,height:canvas.height};
+            // Cartao colorido -> bordas na imagem de cromaticidade (sem sombra).
+            const cardSat=regionSaturation(rgbImg,leftEdge.x+cardW*0.15,yA,rightEdge.x-cardW*0.15,yB);
+            const useChroma=CARD_CHROMA_EDGES && cardSat>=CARD_CHROMA_MIN_SATURATION;
+            const img=useChroma?chromaticityImage(rgbImg):rgbImg;
+            cardEdgeMode=useChroma?`cromaticidade (sat ${cardSat.toFixed(2)})`:`brilho (sat ${cardSat.toFixed(2)})`;
+            const maxShift=useChroma?CARD_PHYSICAL_MAX_SHIFT_PX+2:CARD_PHYSICAL_MAX_SHIFT_PX;
             const edgeHalf=(side:"left"|"right",expected:number,from:number,to:number)=>
-              findCardEdge(img,{side,expected,from,to,searchPx:8});
+              findCardEdge(img,{side,expected,from,to,searchPx:useChroma?10:8});
             const lU=edgeHalf("left",leftEdge.x,yA,yM), lL=edgeHalf("left",leftEdge.x,yM,yB);
             const rU=edgeHalf("right",rightEdge.x,yA,yM), rL=edgeHalf("right",rightEdge.x,yM,yB);
             const yU=(yA+yM)/2, yL=(yM+yB)/2;
@@ -877,7 +925,7 @@ export default function AppV2() {
               const lShift=lMid+slope*(yRef-yMid)-leftEdge.x;
               const rShift=rMid+slope*(yRef-yMid)-rightEdge.x;
               cardEdgeShifts=`E ${lShift>=0?"+":""}${lShift.toFixed(1)} D ${rShift>=0?"+":""}${rShift.toFixed(1)} px`;
-              if(Math.abs(lShift)<=CARD_PHYSICAL_MAX_SHIFT_PX && Math.abs(rShift)<=CARD_PHYSICAL_MAX_SHIFT_PX && Math.abs(physWidth-(rightEdge.x-leftEdge.x))<=cardW*0.03){
+              if(Math.abs(lShift)<=maxShift && Math.abs(rShift)<=maxShift && Math.abs(physWidth-(rightEdge.x-leftEdge.x))<=cardW*0.03){
                 leftTilt={slope,xAt:(y:number)=>lMid+slope*(y-yMid)};
                 rightTilt={slope,xAt:(y:number)=>rMid+slope*(y-yMid)};
                 physicalCardEdgesUsed=true;
@@ -941,6 +989,7 @@ export default function AppV2() {
         let legacyRefineFailReason="";
         let physicalCardEdgesUsed=false;
         let cardEdgeShifts="";
+        let cardEdgeMode="";
         const legacyRefined=refineCardEdges();
         // medidordedov8: se o refino ORIGINAL falhar, NAO cair na caixa
         // aproximada (podia errar 10+ px e mudar 2 aros). Usa o detector novo
@@ -971,7 +1020,7 @@ export default function AppV2() {
           }catch{ /* mantem caixa aproximada */ }
         }
 
-        setCardEdgeInfo({source:(physicalCardEdgesUsed?"borda física real (+0,57% compat. curva)":cardEdgeSource)+(cardEdgeShifts?` · física−original ${cardEdgeShifts}`:"")+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
+        setCardEdgeInfo({source:(physicalCardEdgesUsed?"borda física real (+0,57% compat. curva)":cardEdgeSource)+(cardEdgeMode?` · ${cardEdgeMode}`:"")+(cardEdgeShifts?` · física−original ${cardEdgeShifts}`:"")+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -3103,6 +3152,8 @@ export default function AppV2() {
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
+  // Snaps densos validos: quantidade suficiente de cortes e eixo plausivel.
+  const denseTrackOk = !!widthAnalysis.track && widthAnalysis.track.count>=DENSE_TRACK_SAMPLES*0.5 && Math.abs(widthAnalysis.track.angleDeg)<=15;
 
   const preFormulaQuality = useMemo(() => {
     let perspectiveScore=100;
@@ -3163,7 +3214,7 @@ export default function AppV2() {
       liveWidthMm!==null &&
       Number.isFinite(liveWidthMm) &&
       liveWidthMm>0 &&
-      preFormulaQuality.edgeScore>=90 &&
+      (denseTrackOk || preFormulaQuality.edgeScore>=90) &&
       calibrationConfidence>=MIN_CARD_CALIBRATION_CONFIDENCE &&
       ringGuideY>=plausibleMin &&
       ringGuideY<=plausibleMax
@@ -3179,6 +3230,7 @@ export default function AppV2() {
     calibrationConfidence,
     cardBottom,
     ringGuideY,
+    denseTrackOk,
   ]);
 
   const anatomicalRegionReady = useMemo(() => {
@@ -3252,7 +3304,8 @@ export default function AppV2() {
     }
     // Pitch e roll continuam no diagnostico e no score da rajada.
     // Nao bloqueiam mais sozinhos o resultado comercial.
-    if(preFormulaQuality.edgeScore<70){
+    // v17: com os 3000 snaps validos, a qualidade das bordas vem deles.
+    if(!denseTrackOk && preFormulaQuality.edgeScore<70){
       reasons.push(`bordas ${preFormulaQuality.edgeScore} < 70`);
     }
     if(calibrationConfidence<MIN_CARD_CALIBRATION_CONFIDENCE){
@@ -3283,6 +3336,7 @@ export default function AppV2() {
     diameterPhotoTestMode,
     anatomicalRegionReady,
     cardEdgeInfo,
+    denseTrackOk,
   ]);
 
   useEffect(() => {
@@ -4358,6 +4412,15 @@ export default function AppV2() {
     return {width,height,left,right,top,bottom,minRing,maxRing,minMm,maxMm,x,y,path};
   })();
 
+  const onNativePhoto = async (file:File|undefined) => {
+    if(!file) return;
+    setCaptureProgress({pct:5,label:"Carregando a foto"});
+    const canvas=await decodePhoto(file);
+    if(!canvas){ setCaptureProgress(null); camera.setError("Não consegui abrir a foto. Tente novamente."); return; }
+    externalPhotoRef.current=wholePhotoAsFrame(canvas);
+    await capture();
+  };
+
   const saveTestForReview = async () => {
     const track=widthAnalysis.track;
     if(!track || !pixelsPerMm){ setTestBusy("Posicione as linhas primeiro (os snaps precisam aparecer)."); return; }
@@ -4384,7 +4447,7 @@ export default function AppV2() {
         `Lupa ${f2(widthAnalysis.manualMm)} · automático ${f2(widthAnalysis.autoMm)} · borda física ${f2(physicalEdgeProfileTest?.widthMm)} mm`,
         `Cartão ${f2(g?.cardPx,1)} px · ${cardEdgeInfo?.source ?? "n/d"}`,
         `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}% (${contourAnatomy?.detected?"contorno":"padrão"})`,
-        `Câmera ${photoHiRes?`${photoHiRes.videoW}×${photoHiRes.videoH}`:"900"} · pixel ${photoHiRes?f2(1/(pixelsPerMm*photoHiRes.width/900),3):f2(1/pixelsPerMm,3)} mm`,
+        `Origem ${photoSourceInfo} · câmera ${photoHiRes?`${photoHiRes.videoW}×${photoHiRes.videoH}`:"900"} · pixel ${photoHiRes?f2(1/(pixelsPerMm*photoHiRes.width/900),3):f2(1/pixelsPerMm,3)} mm`,
         `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
         `Escala ${f2(pixelsPerMm,3)} px/mm · zoom ${zoom.toFixed(1)}×`,
       ];
@@ -4407,7 +4470,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov16 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · medidordedov17 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
@@ -4548,6 +4611,7 @@ export default function AppV2() {
           singlePhotoTestMode={singlePhotoTestMode}
           onClose={() => { camera.stopCamera(); setStage("intro"); }}
           onCapture={() => void capture()}
+          onNativePhoto={(f:File|undefined) => void onNativePhoto(f)}
           onRetry={() => void openCamera()}
         />
       )}
@@ -5111,6 +5175,7 @@ export default function AppV2() {
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {cardEdgeInfo && <span>Bordas do cartão: {cardEdgeInfo.source}{cardEdgeInfo.legacyFail ? ` (refino original falhou: ${cardEdgeInfo.legacyFail})` : ""}</span>}
+              {photoSourceInfo && <span>Origem da foto: {photoSourceInfo}</span>}
               <span>Câmera: {photoHiRes ? `${photoHiRes.videoW}×${photoHiRes.videoH} · foto alta ${photoHiRes.width}×${photoHiRes.height}` : "alta resolução indisponível (usando 900×1200)"}{photoHiRes && pixelsPerMm ? ` · pixel real ≈ ${(1/(pixelsPerMm*photoHiRes.width/900)).toFixed(3)} mm` : ""}</span>
               {widthAnalysis.track && <span>3000 SNAPS ±2 mm (usado): mediana {widthAnalysis.track.mm.toFixed(2)} mm → aro {classifyFingerWidthMm(widthAnalysis.track.mm).exactRingSize} · {widthAnalysis.track.count} cortes em {widthAnalysis.track.lengthMm.toFixed(1)} mm de dedo · mín {widthAnalysis.track.minMm.toFixed(2)} máx {widthAnalysis.track.maxMm.toFixed(2)} · na linha amarela {widthAnalysis.track.startMm.toFixed(2)} · eixo {widthAnalysis.track.angleDeg.toFixed(1)}° · {widthAnalysis.track.hiRes?"foto alta":"foto 900"}</span>}
               {!widthAnalysis.track && widthAnalysis.manualMm!==null && <span>3000 SNAPS: não conseguiu seguir a borda (usando as linhas da lupa)</span>}
