@@ -21,6 +21,10 @@ export type FingerTrackResult = {
   rightPath: { x: number; y: number }[];
 };
 
+// Alargamento maximo aceito durante o rastreamento (3%): exclui a curva
+// onde o dedo se abre para a palma.
+const FLARE_LIMIT = 1.03;
+
 const grayAt = (img: PixelImage, x: number, y: number) => {
   const w = img.width, h = img.height;
   const xx = Math.max(0, Math.min(w - 1.001, x));
@@ -93,7 +97,10 @@ export const trackFinger = (
       const okL = el.g >= refL * 0.35 && Math.abs(el.x - pl) <= 2 * scale;
       const okR = er.g >= refR * 0.35 && Math.abs(er.x - pr) <= 2 * scale;
       const w = er.x - el.x;
-      const okW = w > width0 * 0.85 && w < width0 * 1.15;
+      // Referencia = mediana das larguras ja aceitas neste sentido (ou a inicial).
+      const ref = rows.length >= 9 ? [...rows.map((r) => r.xr - r.xl)].sort((a, b) => a - b)[Math.floor(rows.length / 2)] : width0;
+      // Para quando o dedo comeca a ALARGAR (curva da dobra/palma) ou afinar demais.
+      const okW = w > ref * 0.95 && w < ref * FLARE_LIMIT;
       if (okL && okR && okW) {
         misses = 0;
         pl = el.x; pr = er.x;
@@ -131,7 +138,10 @@ export const trackFinger = (
   const b = (n * sxy - sy * sx) / Math.max(1e-9, n * syy - sy * sy);
   const cosA = Math.cos(Math.atan(b));
   const widths = pts.map((p) => (p.xr - p.xl) * cosA).sort((x, y) => x - y);
-  const mean = widths.reduce((a, v) => a + v, 0) / n;
+  // Media aparada: descarta 10% mais estreitos e 10% mais largos.
+  const lo = Math.floor(n * 0.1), hi = Math.max(lo + 1, Math.ceil(n * 0.9));
+  const kept = widths.slice(lo, hi);
+  const mean = kept.reduce((a, v) => a + v, 0) / kept.length;
   const median = widths[Math.floor(n / 2)];
 
   const every = Math.max(1, Math.floor(n / 150));

@@ -4,9 +4,9 @@ import CommercialApp from "./commercial/CommercialApp";
 import AppV2 from "./v2/AppV2";
 import "./styles.css";
 
-// Versao de teste congelada: /medidordedov13 mostra a v2 com um selo fixo
+// Versao de teste congelada: /medidordedov14 mostra a v2 com um selo fixo
 // para o testador saber em qual versao esta.
-const VERSION_ROUTE = "/medidordedov13";
+const VERSION_ROUTE = "/medidordedov14";
 const path = window.location.pathname;
 const isVersionRoute = path.startsWith(VERSION_ROUTE);
 
@@ -21,7 +21,7 @@ createRoot(document.getElementById("root")!).render(
           padding: "6px 9px", borderRadius: 999, boxShadow: "0 2px 8px rgba(0,0,0,.35)",
         }}
       >
-        medidordedov13
+        medidordedov14
       </div>
     )}
   </StrictMode>,
