@@ -45,7 +45,7 @@ const MANUAL_LINES_ONLY = true;
 // medidordedov13: medida principal = media de 3000 cortes ao longo do dedo,
 // rastreados a partir das linhas da lupa.
 const DENSE_TRACK_PRIMARY = true;
-const DENSE_TRACK_SAMPLES = 5;
+const DENSE_TRACK_SAMPLES = 300;
 // Disparo instantaneo: usa so o quadro do toque (sem rajada).
 const INSTANT_SHUTTER = true;
 // v16: os snaps medem so +-2 mm em volta da altura do anel; medida = mediana.
