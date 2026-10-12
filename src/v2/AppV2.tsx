@@ -29,6 +29,8 @@ const CARD_WIDTH_MM = 85.6;
 const LOUPE_SIZE_PX = 132;
 const LOUPE_EXTRA_ZOOM = 2;
 const RING_HEIGHT_FALLBACK_OFFSET = 5;
+// Inclinacao maxima aceita para cada lateral do cartao (tan 5 graus).
+const CARD_EDGE_MAX_TILT = 0.0875;
 // medidordedov6: a medida usada e a distancia entre as linhas verdes que o
 // usuario posicionou com a lupa (sem refinamento automatico), corrigida pela
 // inclinacao do eixo do dedo.
@@ -708,17 +710,23 @@ export default function AppV2() {
           //   esquerda -> o mais externo para a esquerda
           //   direita  -> o mais externo para a direita
           // Isso evita grudar em faixa, texto ou desenho interno do cartão.
-          const bestVertical=(expectedX:number,side:"left"|"right")=>{
+          const bestVertical=(
+            expectedX:number,
+            side:"left"|"right",
+            yFrom:number=top0+cardH*0.14,
+            yTo:number=bottom0-cardH*0.14,
+            radius:number=18,
+          )=>{
             const direction=side==="left" ? -1 : 1;
             const candidates:VerticalEdgeCandidate[]=[];
 
-            for(let dx=-18;dx<=18;dx+=1){
+            for(let dx=-radius;dx<=radius;dx+=1){
               const x=expectedX+dx;
               const contrasts:number[]=[];
               let strong=0;
               let samples=0;
 
-              for(let y=top0+cardH*0.14;y<=bottom0-cardH*0.14;y+=Math.max(4,cardH/24)){
+              for(let y=yFrom;y<=yTo;y+=Math.max(4,(yTo-yFrom)/12)){
                 const contrast=Math.abs(gray(x-3,y)-gray(x+3,y));
                 contrasts.push(contrast);
                 if(contrast>=10) strong++;
@@ -774,6 +782,29 @@ export default function AppV2() {
 
           const leftEdge=bestVertical(left0,"left");
           const rightEdge=bestVertical(right0,"right");
+
+          // INCLINACAO REAL DE CADA LATERAL: a borda do cartao quase nunca fica
+          // perfeitamente vertical na foto. Medimos a borda na metade de cima e
+          // na metade de baixo e tracamos a reta pelos dois pontos, para a
+          // intersecao com a base (onde valem os 85,60 mm) cair na borda real.
+          const yA=top0+cardH*0.14;
+          const yB=bottom0-cardH*0.14;
+          const yM=(yA+yB)/2;
+          const sideTilt=(edgeX:number,side:"left"|"right")=>{
+            const upper=bestVertical(edgeX,side,yA,yM,6);
+            const lower=bestVertical(edgeX,side,yM,yB,6);
+            const yU=(yA+yM)/2, yL=(yM+yB)/2;
+            const slope=(lower.x-upper.x)/Math.max(1,yL-yU); // px em x por px em y
+            const ok=
+              upper.edge>=7 && lower.edge>=7 &&
+              upper.coverage>=0.52 && lower.coverage>=0.52 &&
+              Math.abs(slope)<=CARD_EDGE_MAX_TILT;
+            return ok
+              ? {slope, xAt:(y:number)=>upper.x+slope*(y-yU)}
+              : {slope:0, xAt:(_y:number)=>edgeX};
+          };
+          const leftTilt=sideTilt(leftEdge.x,"left");
+          const rightTilt=sideTilt(rightEdge.x,"right");
           const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
           const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
 
@@ -811,10 +842,17 @@ export default function AppV2() {
             }
           }
 
+          // Bordas avaliadas NA ALTURA DA BASE (intersecoes A e B).
+          const leftAtBase=leftTilt.xAt(bottomEdge.y);
+          const rightAtBase=rightTilt.xAt(bottomEdge.y);
+          const useTilt=Math.abs((rightAtBase-leftAtBase)-(refinedRight-refinedLeft))<cardW*0.03;
           return {
-            left:clamp(refinedLeft/canvas.width*100,2,94),
-            right:clamp(refinedRight/canvas.width*100,6,98),
+            left:clamp((useTilt?leftAtBase:refinedLeft)/canvas.width*100,2,94),
+            right:clamp((useTilt?rightAtBase:refinedRight)/canvas.width*100,6,98),
             bottom:clamp(bottomEdge.y/canvas.height*100,10,88),
+            // inclinacao em unidades de % (dx% por dy%)
+            leftSlopePct:useTilt?leftTilt.slope*canvas.height/canvas.width:0,
+            rightSlopePct:useTilt?rightTilt.slope*canvas.height/canvas.width:0,
             leftShiftPx:leftEdge.shift,
             rightShiftPx:rightEdge.shift,
             bottomShiftPx:bottomEdge.shift,
@@ -843,6 +881,8 @@ export default function AppV2() {
                   leftShiftPx:fb.left-detectedLeft/100*W2,
                   rightShiftPx:fb.right-detectedRight/100*W2,
                   bottomShiftPx:fb.bottom-detectedBottom/100*H2,
+                  leftSlopePct:0,
+                  rightSlopePct:0,
                 };
                 cardEdgeSource="detector novo (fallback)";
               }
@@ -850,7 +890,7 @@ export default function AppV2() {
           }catch{ /* mantem caixa aproximada */ }
         }
 
-        setCardEdgeInfo({source:cardEdgeSource,legacyFail:legacyRefineFailReason});
+        setCardEdgeInfo({source:cardEdgeSource+(refined && (refined.leftSlopePct||refined.rightSlopePct) ? ` · laterais inclinadas E ${(Math.atan((refined.leftSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}° D ${(Math.atan((refined.rightSlopePct??0)*canvas.width/canvas.height)*180/Math.PI).toFixed(1)}°` : ""),legacyFail:legacyRefineFailReason});
         const finalLeft = refined
           ? Math.min(refined.left, refined.right - 5)
           : Math.min(detectedLeft, detectedRight - 5);
@@ -861,21 +901,29 @@ export default function AppV2() {
         const top = clamp(detectedTop, 3, finalBottom - 5);
         const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
 
+        // Laterais seguem a inclinacao real da borda e passam exatamente
+        // pelas intersecoes com a base (finalLeft/finalRight).
+        const leftSlopePct=refined?.leftSlopePct ?? 0;
+        const rightSlopePct=refined?.rightSlopePct ?? 0;
+        const leftXAt=(y:number)=>finalLeft+leftSlopePct*(y-finalBottom);
+        const rightXAt=(y:number)=>finalRight+rightSlopePct*(y-finalBottom);
+        const lineTopY=clamp(top-padY,1,99);
+        const lineBottomY=clamp(finalBottom+padY,1,99);
         const detectedLeftLine:Line={
-          a:{x:finalLeft,y:clamp(top-padY,1,99)},
-          b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)},
+          a:{x:leftXAt(lineTopY),y:lineTopY},
+          b:{x:leftXAt(lineBottomY),y:lineBottomY},
         };
         const detectedRightLine:Line={
-          a:{x:finalRight,y:clamp(top-padY,1,99)},
-          b:{x:finalRight,y:clamp(finalBottom+padY,1,99)},
+          a:{x:rightXAt(lineTopY),y:lineTopY},
+          b:{x:rightXAt(lineBottomY),y:lineBottomY},
         };
         const detectedBottomLine:Line={
           a:{x:finalLeft,y:finalBottom},
           b:{x:finalRight,y:finalBottom},
         };
         const detectedQuad:[Point,Point,Point,Point]=[
-          {x:finalLeft,y:top},
-          {x:finalRight,y:top},
+          {x:leftXAt(top),y:top},
+          {x:rightXAt(top),y:top},
           {x:finalRight,y:finalBottom},
           {x:finalLeft,y:finalBottom},
         ];
@@ -884,7 +932,7 @@ export default function AppV2() {
         setCardRight(finalRight);
         setCardBottom(finalBottom);
         setCardLines({
-          top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
+          top:{a:{x:leftXAt(top),y:top},b:{x:rightXAt(top),y:top}},
           right:detectedRightLine,
           bottom:detectedBottomLine,
           left:detectedLeftLine,
