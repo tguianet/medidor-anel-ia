@@ -11,6 +11,11 @@ import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
+import {
+  detectFingerPair, fingerWidth3D, focalPx, readExifFocal, refineCardEdge, solveCardPlaneSafe,
+  sourceFromCanvas, sourceFromPixels, trackFingerEdges,
+  type Camera, type CardEdgeFit, type PixelSource, type Seg,
+} from "./precision";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
@@ -350,6 +355,120 @@ export default function AppV2() {
     input.value = "";
     input.click();
   };
+  // v23: foto em RESOLUÇÃO TOTAL (recorte 3:4 da foto original do celular).
+  // A cópia 900×1200 continua sendo a imagem de tela; todas as medidas de
+  // precisão usam esta versão grande.
+  type HiResPhoto = {
+    canvas: HTMLCanvasElement;
+    src: PixelSource;
+    width: number;
+    height: number;
+    cam: Camera;
+    f35: number | null;
+    original: { w: number; h: number };
+  };
+  const hiResRef = useRef<HiResPhoto | null>(null);
+  const [hiResVersion, setHiResVersion] = useState(0);
+  const [hiResUrl, setHiResUrl] = useState<string | null>(null);
+
+  const clearHiRes = () => {
+    if (!hiResRef.current) return;
+    hiResRef.current = null;
+    setHiResUrl((old) => { if (old) URL.revokeObjectURL(old); return null; });
+    setHiResVersion((v) => v + 1);
+  };
+
+  const buildHiRes = async (img: HTMLImageElement, f35: number | null) => {
+    const natW = img.naturalWidth, natH = img.naturalHeight;
+    let sx = 0, sy = 0, sw = natW, sh = natH;
+    if (natW / natH > 0.75) { sw = natH * 0.75; sx = (natW - sw) / 2; }
+    else { sh = natW / 0.75; sy = (natH - sh) / 2; }
+    const ds = Math.min(1, 4032 / sh);
+    const H = Math.round(sh * ds);
+    const W = Math.round(H * 0.75);
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+    hiResRef.current = {
+      canvas,
+      src: sourceFromCanvas(canvas),
+      width: W,
+      height: H,
+      cam: { f: focalPx(f35, natW, natH, ds), cx: W / 2, cy: H / 2 },
+      f35,
+      original: { w: natW, h: natH },
+    };
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.93));
+    setHiResUrl((old) => { if (old) URL.revokeObjectURL(old); return blob ? URL.createObjectURL(blob) : null; });
+    setHiResVersion((v) => v + 1);
+  };
+
+  /** Fonte de pixels para as medidas de precisão (alta resolução quando existe). */
+  const precisionContext = (fallbackCanvas?: HTMLCanvasElement) => {
+    const hi = hiResRef.current;
+    if (hi) return { src: hi.src, W: hi.width, H: hi.height, cam: hi.cam, hiRes: true, f35: hi.f35 };
+    if (fallbackCanvas) {
+      const W = fallbackCanvas.width, H = fallbackCanvas.height;
+      return { src: sourceFromCanvas(fallbackCanvas), W, H, cam: { f: focalPx(null, W, H, 1), cx: W / 2, cy: H / 2 }, hiRes: false, f35: null };
+    }
+    const p = photoPixelsRef.current;
+    if (!p) return null;
+    return { src: sourceFromPixels(p), W: p.width, H: p.height, cam: { f: focalPx(null, p.width, p.height, 1), cx: p.width / 2, cy: p.height / 2 }, hiRes: false, f35: null };
+  };
+
+  /** Ímã de precisão das linhas do cartão (bordas RGB + cromaticidade, subpixel). */
+  const refineCardLinesPrecise = (
+    lines: Record<CardEdge, Line>,
+    edges: CardEdge[],
+    radiusMm: number | Partial<Record<CardEdge, number>>,
+    fallbackCanvas?: HTMLCanvasElement,
+  ) => {
+    const ctx = precisionContext(fallbackCanvas);
+    if (!ctx) return null;
+    const toPx = (l: Line): Seg => ({
+      a: { x: l.a.x / 100 * ctx.W, y: l.a.y / 100 * ctx.H },
+      b: { x: l.b.x / 100 * ctx.W, y: l.b.y / 100 * ctx.H },
+    });
+    const toPct = (l: Seg): Line => ({
+      a: { x: l.a.x / ctx.W * 100, y: l.a.y / ctx.H * 100 },
+      b: { x: l.b.x / ctx.W * 100, y: l.b.y / ctx.H * 100 },
+    });
+    let ppm: number;
+    try {
+      const A = lineIntersection(toPx(lines.left), toPx(lines.bottom));
+      const B = lineIntersection(toPx(lines.right), toPx(lines.bottom));
+      ppm = Math.hypot(B.x - A.x, B.y - A.y) / 85.6;
+    } catch {
+      return null;
+    }
+    if (!Number.isFinite(ppm) || ppm <= 0) return null;
+    const out: Partial<Record<CardEdge, { line: Line; fit: CardEdgeFit }>> = {};
+    for (const edge of edges) {
+      try {
+        const r = typeof radiusMm === "number" ? radiusMm : (radiusMm[edge] ?? 1.5);
+        const fit = refineCardEdge(ctx.src, toPx(lines[edge]), edge, ppm, r);
+        if (fit?.ok) out[edge] = { line: toPct(fit.line), fit };
+      } catch {
+        /* mantém a linha atual */
+      }
+    }
+    // As duas laterais de um cartão são quase paralelas na foto. Se a
+    // diferença de ângulo passar de 5°, descartamos a lateral menos firme.
+    if (out.left && out.right) {
+      const ang = (l: Line) => Math.atan2((l.b.x - l.a.x) / 100 * ctx.W, (l.b.y - l.a.y) / 100 * ctx.H) * 180 / Math.PI;
+      const diff = Math.abs(ang(out.left.line) - ang(out.right.line));
+      if (diff > 5 && diff < 175) {
+        if (out.left.fit.rmsPx > out.right.fit.rmsPx) delete out.left; else delete out.right;
+      }
+    }
+    return out;
+  };
+
   const onNativePhoto = async (file: File | undefined) => {
     if (!file) return;
     setNativeLoading(true);
@@ -359,6 +478,12 @@ export default function AppV2() {
       const img = new Image();
       img.src = url;
       await img.decode();
+      const exif = await readExifFocal(file);
+      try {
+        await buildHiRes(img, exif.f35);
+      } catch {
+        clearHiRes();
+      }
       await capture(img);
     } catch {
       camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
@@ -400,6 +525,7 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
+    if (!source) clearHiRes();
     const video = camera.videoRef.current as HTMLVideoElement;
     const frameSource: HTMLVideoElement | HTMLImageElement | null = source ?? (video?.videoWidth ? video : null);
     if (!frameSource) {
@@ -794,15 +920,15 @@ export default function AppV2() {
         const top = clamp(detectedTop, 3, finalBottom - 5);
         const padY = Math.min(7, Math.max(3, (finalBottom-top)*0.15));
 
-        const detectedLeftLine:Line={
+        let detectedLeftLine:Line={
           a:{x:finalLeft,y:clamp(top-padY,1,99)},
           b:{x:finalLeft,y:clamp(finalBottom+padY,1,99)},
         };
-        const detectedRightLine:Line={
+        let detectedRightLine:Line={
           a:{x:finalRight,y:clamp(top-padY,1,99)},
           b:{x:finalRight,y:clamp(finalBottom+padY,1,99)},
         };
-        const detectedBottomLine:Line={
+        let detectedBottomLine:Line={
           a:{x:finalLeft,y:finalBottom},
           b:{x:finalRight,y:finalBottom},
         };
@@ -812,6 +938,22 @@ export default function AppV2() {
           {x:finalRight,y:finalBottom},
           {x:finalLeft,y:finalBottom},
         ];
+
+        // v23: ímã de precisão em resolução total nas 3 linhas detectadas.
+        // As linhas passam a acompanhar a inclinação real das bordas.
+        try {
+          const precise = refineCardLinesPrecise(
+            {left:detectedLeftLine,right:detectedRightLine,bottom:detectedBottomLine,top:detectedBottomLine},
+            ["left","right","bottom"],
+            {left:9,right:9,bottom:6},
+            canvas,
+          );
+          if (precise?.left) detectedLeftLine = precise.left.line;
+          if (precise?.right) detectedRightLine = precise.right.line;
+          if (precise?.bottom) detectedBottomLine = precise.bottom.line;
+        } catch {
+          /* mantém o detector antigo */
+        }
 
         setCardLeft(finalLeft);
         setCardRight(finalRight);
@@ -847,10 +989,19 @@ export default function AppV2() {
           //
           // A escala continua vindo SOMENTE das interseções das 3 linhas:
           // A = esquerda x base, B = direita x base, |A-B| = 85,60 mm.
-          const intersectionWidthPx=Math.hypot(
-            (finalRight-finalLeft)/100*canvas.width,
-            0,
-          );
+          const intersectionWidthPx=(()=>{
+            const toPx=(l:Line):Line=>({
+              a:{x:l.a.x/100*canvas.width,y:l.a.y/100*canvas.height},
+              b:{x:l.b.x/100*canvas.width,y:l.b.y/100*canvas.height},
+            });
+            try{
+              const A=lineIntersection(toPx(detectedLeftLine),toPx(detectedBottomLine));
+              const B=lineIntersection(toPx(detectedRightLine),toPx(detectedBottomLine));
+              const d=Math.hypot(B.x-A.x,B.y-A.y);
+              if(Number.isFinite(d)&&d>canvas.width*0.08) return d;
+            }catch{ /* fallback */ }
+            return (finalRight-finalLeft)/100*canvas.width;
+          })();
           const intersectionPixelsPerMm=intersectionWidthPx/CARD_WIDTH_MM;
 
           setMeasurementCardLengthPx(intersectionWidthPx);
@@ -1825,6 +1976,17 @@ export default function AppV2() {
   };
 
   const snapCardLine = (edge:CardEdge) => {
+    // v23: ímã de precisão primeiro (resolução total, subpixel, ignora sombra).
+    if(edge!=="top"){
+      const precise=refineCardLinesPrecise(cardLines,[edge],1.5);
+      const hit=precise?.[edge];
+      if(hit){
+        setCardLines((current)=>({...current,[edge]:hit.line}));
+        setCardSnapLines((current)=>({...current,[edge]:hit.line}));
+        setCardLineLocked((current)=>({...current,[edge]:true}));
+        return;
+      }
+    }
     const source=photoPixelsRef.current;
     if(!source) return;
     const line=cardLines[edge];
@@ -3107,9 +3269,132 @@ export default function AppV2() {
   // Cada foto e uma medicao autonoma.
   // Nenhum valor anterior pode participar do resultado atual.
   // Foto reprovada pelo gate nunca chega a formula.
+  // v23: medida de precisão — resolução total + plano 3D do cartão
+  // (inclinação e distância pela focal da foto) + bordas do dedo abaixo do
+  // cartão. A largura do dedo vem das linhas verdes (lupa); o rastreador
+  // denso só mede o eixo do dedo e serve de conferência.
+  const precisionResult = useMemo(() => {
+    if (phase !== "finger" || measurementMode !== "finger" || !leftLocked || !rightLocked) return null;
+    const ctx = precisionContext();
+    const stage = measureRef.current;
+    if (!ctx || !stage) return null;
+    const rect = stage.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const toImgX = (p: number) => ((((p / 100) * rect.width) - rect.width / 2 - panX) / zoom + rect.width / 2) / rect.width * ctx.W;
+    const toImgY = (p: number) => ((((p / 100) * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * ctx.H;
+    const toPx = (l: Line): Seg => ({
+      a: { x: l.a.x / 100 * ctx.W, y: l.a.y / 100 * ctx.H },
+      b: { x: l.b.x / 100 * ctx.W, y: l.b.y / 100 * ctx.H },
+    });
+    try {
+      const solved = solveCardPlaneSafe(ctx.cam, toPx(cardLines.left), toPx(cardLines.right), toPx(cardLines.bottom));
+      if (!solved) return null;
+      const plane = solved.plane;
+      const ppm = plane.cardPx / 85.6;
+      const ringYpx = toImgY(ringGuideY);
+      const lx = toImgX(leftLine), rx = toImgX(rightLine);
+      if (!(rx > lx)) return null;
+      const tr = trackFingerEdges(ctx.src, lx, rx, ringYpx, ppm, { radiusMm: 0.3 });
+      const trackerOk = !!tr &&
+        tr.rows >= tr.totalRows * 0.5 &&
+        Math.max(tr.rmsLeftPx, tr.rmsRightPx) <= Math.max(1.5, ppm * 0.08) &&
+        Math.abs(tr.axisDeg) < 20;
+      const slope = trackerOk && tr ? Math.tan((tr.axisDeg * Math.PI) / 180) : 0;
+      const userLeft = { a: lx - slope * ringYpx, b: slope };
+      const userRight = { a: rx - slope * ringYpx, b: slope };
+      const fw = fingerWidth3D(ctx.cam, plane, userLeft, userRight, ringYpx, ctx.W);
+      if (!fw) return null;
+      const snapFw = trackerOk && tr ? fingerWidth3D(ctx.cam, plane, tr.left, tr.right, ringYpx, ctx.W) : null;
+      // Medida "simples" (como a original): px do dedo / px do cartão × 85,60.
+      const simpleMm = ((rx - lx) / plane.cardPx) * 85.6;
+      return {
+        formulaMm: fw.formulaMm,
+        trueMm: fw.trueMm,
+        cardPlaneMm: fw.cardPlaneMm,
+        simpleMm,
+        snapFormulaMm: snapFw?.formulaMm ?? null,
+        distanceMm: fw.distanceMm,
+        referenceDistanceMm: fw.referenceDistanceMm,
+        depthMm: fw.depthMm,
+        tiltDeg: plane.tiltDeg,
+        model: solved.model,
+        axisDeg: trackerOk && tr ? tr.axisDeg : null,
+        trackerRows: tr ? `${tr.rows}/${tr.totalRows}` : "0",
+        ppm,
+        hiRes: ctx.hiRes,
+        W: ctx.W,
+        H: ctx.H,
+        f35: ctx.f35,
+        cardPx: plane.cardPx,
+        A: plane.A,
+        B: plane.B,
+      };
+    } catch {
+      return null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    phase, measurementMode, leftLocked, rightLocked, cardLines, leftLine, rightLine, ringGuideY,
+    zoom, panX, panY, hiResVersion, photoPixelsReady,
+  ]);
+
+  // v23: dedo automático — acha o par de bordas na altura do anel, debaixo
+  // do cartão, e posiciona as linhas verdes. A pessoa confere com a lupa.
+  const runAutoFinger = () => {
+    const ctx = precisionContext();
+    const stage = measureRef.current;
+    if (!ctx || !stage) return false;
+    const rect = stage.getBoundingClientRect();
+    if (!rect.width) return false;
+    const toImgY = (p: number) => ((((p / 100) * rect.height) - rect.height / 2 - panY) / zoom + rect.height / 2) / rect.height * ctx.H;
+    const toScreenX = (px: number) => (rect.width / 2 + (px / ctx.W * rect.width - rect.width / 2) * zoom + panX) / rect.width * 100;
+    const toPx = (l: Line): Seg => ({
+      a: { x: l.a.x / 100 * ctx.W, y: l.a.y / 100 * ctx.H },
+      b: { x: l.b.x / 100 * ctx.W, y: l.b.y / 100 * ctx.H },
+    });
+    try {
+      const solved = solveCardPlaneSafe(ctx.cam, toPx(cardLines.left), toPx(cardLines.right), toPx(cardLines.bottom));
+      if (!solved) return false;
+      const { A, B, cardPx } = solved.plane;
+      const ppm = cardPx / 85.6;
+      const pair = detectFingerPair(ctx.src, toImgY(ringGuideY), Math.min(A.x, B.x), Math.max(A.x, B.x), (A.x + B.x) / 2, ppm);
+      if (!pair) {
+        camera.setError("Não achei o dedo sozinho. Posicione as linhas verdes nas bordas com a lupa.");
+        return false;
+      }
+      const nl = clamp(toScreenX(pair.leftX), 1, 98);
+      const nr = clamp(toScreenX(pair.rightX), nl + 1, 99);
+      setLeftLine(nl);
+      setRightLine(nr);
+      setFingerLines((current) => ({
+        ...current,
+        left: { a: { x: nl, y: 0 }, b: { x: nl, y: 100 } },
+        right: { a: { x: nr, y: 0 }, b: { x: nr, y: 100 } },
+      }));
+      setLeftLocked(true);
+      setRightLocked(true);
+      camera.setError("");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const runAutoFingerRef = useRef(runAutoFinger);
+  runAutoFingerRef.current = runAutoFinger;
+  const autoFingerPhotoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (phase !== "finger" || measurementMode !== "finger" || !photo || !photoPixelsReady) return;
+    if (autoFingerPhotoRef.current === photo) return;
+    const timer = window.setTimeout(() => {
+      autoFingerPhotoRef.current = photo;
+      runAutoFingerRef.current();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [phase, measurementMode, photo, photoPixelsReady, hiResVersion]);
+
   const widthSentToFormulaMm =
     captureQualityGate.accepted && anatomicalRegionReady
-      ? liveWidthMm
+      ? (precisionResult?.formulaMm ?? liveWidthMm)
       : null;
 
 
@@ -4058,6 +4343,10 @@ export default function AppV2() {
         `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}%`,
         `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
         `Zoom ${zoom.toFixed(1)}×`,
+        ...(precisionResult ? [
+          `v23 fórmula ${f2(precisionResult.formulaMm)} · real ${f2(precisionResult.trueMm)} · simples ${f2(precisionResult.simpleMm)} · ímã ${f2(precisionResult.snapFormulaMm)} mm`,
+          `v23 foto ${precisionResult.W}×${precisionResult.H} · focal ${precisionResult.f35 ?? "26*"} · dist ${f2(precisionResult.distanceMm,1)} mm · incl ${f2(precisionResult.tiltDeg,1)}° · eixo ${f2(precisionResult.axisDeg,1)}° · ${precisionResult.model}`,
+        ] : ["v23 precisão n/d"]),
       ];
       const test:SavedTest={
         id:`${Date.now()}`,
@@ -4078,7 +4367,7 @@ export default function AppV2() {
   const generateTestReport = async () => {
     if(!savedTests.length) return;
     setTestBusy("Montando relatório…");
-    const blob=await buildReport(savedTests,`Medidor de anel · v2 · ${savedTests.length} testes`);
+    const blob=await buildReport(savedTests,`Medidor de anel · v23 · ${savedTests.length} testes`);
     if(!blob){ setTestBusy("Falha ao gerar o relatório."); return; }
     const file=new File([blob],`relatorio-medidor-${Date.now()}.jpg`,{type:"image/jpeg"});
     const nav=navigator as Navigator & {canShare?:(d:unknown)=>boolean};
@@ -4334,7 +4623,7 @@ export default function AppV2() {
                       overflow:"hidden",
                       border:"3px solid #52e0a3",
                       boxShadow:"0 8px 28px rgba(0,0,0,.55)",
-                      backgroundImage:`url("${photo}")`,
+                      backgroundImage:`url("${hiResUrl ?? photo}")`,
                       backgroundRepeat:"no-repeat",
                       // Centro da lupa = ponto exato onde a linha verde cruza a
                       // altura do anel; aumento de 2x sobre o zoom atual.
@@ -4731,6 +5020,17 @@ export default function AppV2() {
                 {reportUrl && <a href={reportUrl} download={`relatorio-medidor-${savedTests.length}-testes.jpg`} style={{color:"#00e5ff",fontWeight:700}}>Baixar relatório</a>}
                 {testBusy && <small>{testBusy}</small>}
               </div>
+              {precisionResult && (
+                <div style={{border:"2px solid #52e0a3",borderRadius:10,padding:10,display:"grid",gap:4,margin:"6px 0"}}>
+                  <strong>PRECISÃO v23</strong>
+                  <span>Foto {precisionResult.W}×{precisionResult.H} {precisionResult.hiRes ? "(resolução total)" : "(900×1200)"} · focal {precisionResult.f35 ? `${precisionResult.f35} mm (EXIF)` : "26 mm (padrão)"}</span>
+                  <span>Cartão {precisionResult.cardPx.toFixed(1)} px · {precisionResult.ppm.toFixed(2)} px/mm · modelo {precisionResult.model} · A({precisionResult.A.x.toFixed(0)},{precisionResult.A.y.toFixed(0)}) B({precisionResult.B.x.toFixed(0)},{precisionResult.B.y.toFixed(0)})</span>
+                  <span>Distância {precisionResult.distanceMm.toFixed(1)} mm (ref {precisionResult.referenceDistanceMm.toFixed(1)}) · inclinação {precisionResult.tiltDeg.toFixed(2)}° · borda do dedo {precisionResult.depthMm.toFixed(1)} mm abaixo</span>
+                  <span>Dedo: fórmula {precisionResult.formulaMm.toFixed(2)} mm · real {precisionResult.trueMm.toFixed(2)} · plano do cartão {precisionResult.cardPlaneMm.toFixed(2)} · simples {precisionResult.simpleMm.toFixed(2)}</span>
+                  <span>Ímã do dedo (±0,3 mm): {precisionResult.snapFormulaMm !== null ? `${precisionResult.snapFormulaMm.toFixed(2)} mm` : "n/d"} · eixo {precisionResult.axisDeg !== null ? `${precisionResult.axisDeg.toFixed(1)}°` : "n/d"} · cortes {precisionResult.trackerRows}</span>
+                  <span>Medida antiga (900 px): {liveWidthMm !== null ? `${liveWidthMm.toFixed(2)} mm` : "n/d"}</span>
+                </div>
+              )}
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {measurementAudit && (
@@ -5006,6 +5306,16 @@ export default function AppV2() {
             </div>
           )}
 
+          {phase === "finger" && !tryOn && precisionResult && (
+            <div className="edge-status">
+              <strong>Precisão {precisionResult.hiRes ? `· foto ${precisionResult.W}×${precisionResult.H}` : "· foto da tela 900×1200"}</strong>
+              <span>
+                Cartão a {(precisionResult.distanceMm / 10).toFixed(1)} cm · inclinação {precisionResult.tiltDeg.toFixed(1)}°
+                {precisionResult.axisDeg !== null ? ` · dedo ${precisionResult.axisDeg.toFixed(1)}°` : ""}
+              </span>
+            </div>
+          )}
+
           {phase === "finger" && !tryOn && <div className="edge-status">
             <strong>{leftLocked && rightLocked ? "Laterais posicionadas" : "Ajuste as 2 laterais"}</strong>
             <span>
@@ -5031,6 +5341,9 @@ export default function AppV2() {
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
+            {phase === "finger" && measurementMode === "finger" && !tryOn && (
+              <button className="secondary" type="button" onClick={() => { runAutoFinger(); }}>Achar dedo</button>
+            )}
             {phase === "finger" && (
               <button className="primary" type="button" disabled>{
                 result
