@@ -12,6 +12,7 @@ import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
 import { pickCardChannel, type ChannelChoice } from "./cardChannel";
+import { focalPx, heightCorrection, readExifFocal } from "./heightCorrection";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
@@ -140,6 +141,8 @@ export default function AppV2() {
   // Testes salvos para conferencia em lote.
   // Canal automático do cartão (só para achar as bordas do cartão).
   const cardChannelRef = useRef<ChannelChoice | null>(null);
+  // Lente da foto (px na foto 900×1200) para a correção de altura.
+  const [photoFocal, setPhotoFocal] = useState<{ focal900: number; f35: number | null } | null>(null);
   const [cardChannelInfo, setCardChannelInfo] = useState<ChannelChoice | null>(null);
   const [savedTests, setSavedTests] = useState<SavedTest[]>(() => loadTests());
   const [realRingInput, setRealRingInput] = useState("");
@@ -363,6 +366,10 @@ export default function AppV2() {
       const img = new Image();
       img.src = url;
       await img.decode();
+      const exif = await readExifFocal(file);
+      const natW = img.naturalWidth, natH = img.naturalHeight;
+      const cropW = natW / natH > 0.75 ? natH * 0.75 : natW;
+      setPhotoFocal({ focal900: focalPx(exif.f35, natW, natH, 900 / cropW), f35: exif.f35 });
       await capture(img);
     } catch {
       camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
@@ -404,6 +411,7 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
+    if (!source) setPhotoFocal(null);
     const video = camera.videoRef.current as HTMLVideoElement;
     const frameSource: HTMLVideoElement | HTMLImageElement | null = source ?? (video?.videoWidth ? video : null);
     if (!frameSource) {
@@ -3124,9 +3132,17 @@ export default function AppV2() {
   // Cada foto e uma medicao autonoma.
   // Nenhum valor anterior pode participar do resultado atual.
   // Foto reprovada pelo gate nunca chega a formula.
+  // Correção de altura (borda do dedo abaixo do cartão), pela distância
+  // calculada nesta foto. Só para fotos da câmera do celular (com lente).
+  const heightFix = useMemo(() => {
+    if (!photoFocal || !pixelsPerMm || liveWidthMm === null) return null;
+    return heightCorrection(photoFocal.focal900, pixelsPerMm * 85.6, liveWidthMm, photoPixelsRef.current?.width ?? 900);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoFocal, pixelsPerMm, liveWidthMm, photoPixelsReady]);
+
   const widthSentToFormulaMm =
-    captureQualityGate.accepted && anatomicalRegionReady
-      ? liveWidthMm
+    captureQualityGate.accepted && anatomicalRegionReady && liveWidthMm !== null
+      ? liveWidthMm * (heightFix?.factor ?? 1)
       : null;
 
 
@@ -4075,6 +4091,7 @@ export default function AppV2() {
         `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}%`,
         `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
         `Zoom ${zoom.toFixed(1)}×`,
+        `Altura: ${heightFix ? `dist ${f2(heightFix.distanceMm/10,1)} cm (ref ${f2(heightFix.referenceDistanceMm/10,1)}) · fator ${heightFix.factor.toFixed(4)} · lupa ${f2(liveWidthMm)} → ${f2(widthSentToFormulaMm)} mm · lente ${photoFocal?.f35 ?? "26*"}` : "sem correção"}`,
         `Canal do cartão: ${cardChannelInfo ? `${cardChannelInfo.channel.id} (contraste ${cardChannelInfo.score.toFixed(1)} · cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}`,
       ];
       const test:SavedTest={
@@ -4750,6 +4767,7 @@ export default function AppV2() {
                 {reportUrl && <a href={reportUrl} download={`relatorio-medidor-${savedTests.length}-testes.jpg`} style={{color:"#00e5ff",fontWeight:700}}>Baixar relatório</a>}
                 {testBusy && <small>{testBusy}</small>}
               </div>
+              <span>Altura: {heightFix ? `celular a ${(heightFix.distanceMm/10).toFixed(1)} cm do cartão (ref ${(heightFix.referenceDistanceMm/10).toFixed(1)} cm) · borda do dedo ${heightFix.depthMm.toFixed(1)} mm abaixo · fator ${heightFix.factor.toFixed(4)} · lente ${photoFocal?.f35 ? `${photoFocal.f35} mm` : "26 mm (padrão)"}` : "sem correção (foto sem lente conhecida)"}</span>
               <span>Canal do cartão: {cardChannelInfo ? `${cardChannelInfo.channel.id} · contraste ${cardChannelInfo.score.toFixed(1)} (cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}</span>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
