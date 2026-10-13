@@ -10,8 +10,10 @@ export function useFrozenCameraStream() {
   const [torchOn, setTorchOn] = useState(false);
   const [cameraOpening, setCameraOpening] = useState(false);
   const [error, setError] = useState("");
+  const openSequenceRef = useRef(0);
 
   const stopCamera = () => {
+    openSequenceRef.current += 1;
     if (videoRef.current) videoRef.current.srcObject = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -24,6 +26,7 @@ export function useFrozenCameraStream() {
 
   const startCameraStream = async () => {
     stopCamera();
+    const sequence = openSequenceRef.current;
     setError("");
     setCameraOpening(true);
     // Espere o componente <video> realmente montar antes de anexar o stream.
@@ -47,10 +50,37 @@ export function useFrozenCameraStream() {
       { video: true, audio: false },
     ];
     let lastFailure: unknown;
+    const getStreamWithTimeout = async (constraints: MediaStreamConstraints): Promise<MediaStream> => {
+      let timeoutId: number | undefined;
+      let timedOut = false;
+      const request = navigator.mediaDevices.getUserMedia(constraints);
+      request.then((lateStream) => {
+        if (timedOut || sequence !== openSequenceRef.current) {
+          lateStream.getTracks().forEach(track => track.stop());
+        }
+      }).catch(() => {});
+      try {
+        return await Promise.race([
+          request,
+          new Promise<never>((_, reject) => {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              reject(new Error("Tempo limite para acesso à câmera"));
+            }, 8000);
+          }),
+        ]);
+      } finally {
+        if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      }
+    };
 
     for (const constraints of attempts) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await getStreamWithTimeout(constraints);
+        if (sequence !== openSequenceRef.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
         streamRef.current = stream;
         const track = stream.getVideoTracks()[0];
         const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
@@ -89,10 +119,12 @@ export function useFrozenCameraStream() {
           // Mantém o valor detectado anteriormente.
         }
 
+        if (sequence !== openSequenceRef.current) return;
         setCameraOpening(false);
         setError("");
         return;
       } catch (reason) {
+        if (sequence !== openSequenceRef.current) return;
         if (videoRef.current) videoRef.current.srcObject = null;
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -100,6 +132,7 @@ export function useFrozenCameraStream() {
       }
     }
 
+    if (sequence !== openSequenceRef.current) return;
     setCameraOpening(false);
     const failureName = lastFailure instanceof DOMException ? lastFailure.name : "";
     if (failureName === "NotAllowedError" || failureName === "SecurityError") {
