@@ -4886,6 +4886,22 @@ export default function AppV2() {
               <span style={{fontSize:"0.85em",opacity:.85}}>Dourado = testes antigos · Verde = testes confirmados hoje · círculo branco = leitura atual</span>
             </div>
           )}
+          {phase === "finger" && measurementMode === "finger" && !tryOn && !result && (
+            <div role="status" className="edge-status" style={{border:"1px solid #d7b35f",padding:12,margin:"12px 0"}}>
+              <strong>ARO AINDA NAO CALCULADO</strong>
+              <span>{!pixelsPerMm || pixelsPerMm<=0
+                ? "Escala do cartao indisponivel. Volte para conferir as linhas e os 85,60 mm."
+                : !leftLocked || !rightLocked
+                  ? "Ajuste e solte as duas linhas verdes nas bordas do dedo para confirmar."
+                  : !anatomicalRegionReady
+                    ? "A regiao anatomica do dedo nao foi detectada com seguranca. Ajuste a altura do anel e as laterais."
+                    : captureQualityGate.reasons.length
+                      ? "Verificacao pendente: " + captureQualityGate.reasons.join("; ")
+                      : "Leitura incompleta. Revise a foto e a calibracao."}</span>
+              {pixelsPerMm && pixelsPerMm>0 && <span>Escala ativa: {(1/pixelsPerMm).toFixed(4)} mm por pixel</span>}
+              <button className="secondary" type="button" onClick={recalibrateCard}>Conferir calibracao do cartao</button>
+            </div>
+          )}
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
