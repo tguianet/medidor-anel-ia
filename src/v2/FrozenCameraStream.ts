@@ -26,7 +26,10 @@ export function useFrozenCameraStream() {
     stopCamera();
     setError("");
     setCameraOpening(true);
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // Espere o componente <video> realmente montar antes de anexar o stream.
+    for (let i = 0; i < 20 && !videoRef.current; i++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraOpening(false);
@@ -66,7 +69,14 @@ export function useFrozenCameraStream() {
         video.srcObject = stream;
         video.muted = true;
         video.setAttribute("playsinline", "true");
-        await video.play();
+        // Alguns navegadores deixam play() pendente indefinidamente.
+        // O watchdog recupera o estado e permite uma nova tentativa.
+        await Promise.race([
+          video.play(),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error("Tempo limite ao abrir vídeo")), 7000);
+          }),
+        ]);
 
         // Segunda leitura de capabilities após a câmera estar efetivamente ativa.
         // Em alguns aparelhos Android o suporte ao torch só aparece neste ponto.
@@ -83,6 +93,7 @@ export function useFrozenCameraStream() {
         setError("");
         return;
       } catch (reason) {
+        if (videoRef.current) videoRef.current.srcObject = null;
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         lastFailure = reason;
