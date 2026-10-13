@@ -40,6 +40,24 @@ export default function AppV22(){
  const [left,setLeft]=useState(.42),[right,setRight]=useState(.58),[base,setBase]=useState(.43);
  const [result,setResult]=useState<Awaited<ReturnType<typeof analyze>>|null>(null);
  const [msg,setMsg]=useState("Fotografe o cartao sobre o dedo. Ajuste as guias se necessario.");
+ const [zoom,setZoom]=useState(1),[pan,setPan]=useState({x:0,y:0}),[movePhoto,setMovePhoto]=useState(false);
+ const drag=useRef<{x:number;y:number;panX:number;panY:number}|null>(null);
+ const frame=useRef<HTMLDivElement>(null);
+ const resetView=()=>{setZoom(1);setPan({x:0,y:0});setMovePhoto(false);};
+ const updateZoom=(value:number)=>{setZoom(clamp(value,1,5));};
+ const pointerDown=(e:React.PointerEvent<HTMLDivElement>)=>{
+  if(!movePhoto)return;
+  drag.current={x:e.clientX,y:e.clientY,panX:pan.x,panY:pan.y};
+  e.currentTarget.setPointerCapture(e.pointerId);
+ };
+ const pointerMove=(e:React.PointerEvent<HTMLDivElement>)=>{
+  if(!drag.current||!frame.current)return;
+  const rect=frame.current.getBoundingClientRect();
+  const maxX=rect.width*(zoom-1)/2,maxY=rect.height*(zoom-1)/2;
+  setPan({x:clamp(drag.current.panX+e.clientX-drag.current.x,-maxX,maxX),y:clamp(drag.current.panY+e.clientY-drag.current.y,-maxY,maxY)});
+ };
+ const pointerUp=()=>{drag.current=null;};
+
  const [cameraOn,setCameraOn]=useState(false),[torch,setTorch]=useState(false),[torchSupported,setTorchSupported]=useState(false);
  const videoRef=useRef<HTMLVideoElement>(null),streamRef=useRef<MediaStream|null>(null);
  const stopCamera=()=>{streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;setCameraOn(false);setTorch(false);};
@@ -69,10 +87,10 @@ export default function AppV22(){
    const v=videoRef.current;if(!v||!v.videoWidth){setMsg("A camera ainda nao esta pronta.");return;}
    const canvas=document.createElement("canvas");canvas.width=v.videoWidth;canvas.height=v.videoHeight;
    canvas.getContext("2d")?.drawImage(v,0,0);
-   setPhoto(canvas.toDataURL("image/jpeg",.94));setResult(null);stopCamera();
+   setPhoto(canvas.toDataURL("image/jpeg",.94));setResult(null);resetView();stopCamera();
    setMsg("Foto capturada. Ajuste as linhas e detecte as bordas.");
  };
- const load=(f?:File)=>{if(!f)return;const r=new FileReader();r.onload=()=>{setPhoto(String(r.result));setResult(null);};r.readAsDataURL(f);};
+ const load=(f?:File)=>{if(!f)return;const r=new FileReader();r.onload=()=>{setPhoto(String(r.result));setResult(null);resetView();};r.readAsDataURL(f);};
  const run=async()=>{setBusy(true);setMsg("Procurando contornos sob o cartao...");try{const v=await analyze(photo,left,right,base);setResult(v);setMsg(v.scans.length>=18?"Contornos candidatos encontrados. Confira as linhas na foto.":"Leitura insuficiente. Ajuste as guias verdes e tente novamente.");}catch(e){setMsg(e instanceof Error?e.message:"Erro de leitura");}finally{setBusy(false);}};
  const summary=result?.scans.length?result.scans.map(s=>s.right-s.left).sort((a,b)=>a-b)[Math.floor(result.scans.length/2)]*100:null;
  return <main className="app" style={{maxWidth:740,margin:"auto",padding:16}}>
@@ -89,7 +107,18 @@ export default function AppV22(){
  </div>}
  <label className="secondary" style={{padding:14,textAlign:"center",cursor:"pointer"}}>Escolher foto da galeria<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>load(e.target.files?.[0])}/></label>
  {photo&&<>
- <div style={{position:"relative",width:"100%",touchAction:"auto"}}>
+ <div style={{display:"grid",gap:8}}>
+ <label>Zoom: {zoom.toFixed(1)}× <input type="range" min="1" max="5" step=".1" value={zoom} onChange={e=>updateZoom(Number(e.target.value))} style={{width:"100%"}}/></label>
+ <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+ <button className="secondary" type="button" onClick={()=>updateZoom(zoom+.5)}>Zoom +</button>
+ <button className="secondary" type="button" onClick={()=>updateZoom(zoom-.5)}>Zoom −</button>
+ <button className="secondary" type="button" onClick={()=>setMovePhoto(v=>!v)}>{movePhoto?"Concluir movimentacao":"Mover foto ampliada"}</button>
+ <button className="secondary" type="button" onClick={resetView}>Resetar zoom</button>
+ </div>
+ <small>Ao mover a foto, arraste com um dedo. A imagem e as linhas ampliam juntas, mas as coordenadas da medicao nao mudam.</small>
+ </div>
+ <div ref={frame} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} style={{position:"relative",width:"100%",overflow:"hidden",touchAction:movePhoto?"none":"auto"}}>
+ <div style={{position:"relative",transform:`translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,transformOrigin:"center center"}}>
  <img src={photo} alt="Foto para deteccao do dedo" style={{width:"100%",height:"auto",display:"block"}}/>
  <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
  <line x1={left*1000} y1="0" x2={left*1000} y2="1000" stroke="#3cf1b4" strokeWidth="4" strokeDasharray="12 8"/>
@@ -99,7 +128,7 @@ export default function AppV22(){
  <circle cx={s.left*1000} cy={s.y*1000} r="4" fill="#42ffb7"/><circle cx={s.right*1000} cy={s.y*1000} r="4" fill="#42ffb7"/>
  {i%4===0&&<line x1={s.left*1000} y1={s.y*1000} x2={s.right*1000} y2={s.y*1000} stroke="#ffe08a" strokeWidth="2"/>}
  </g>)}
- </svg></div>
+ </svg></div></div>
  <label>Guia esquerda: {Math.round(left*100)}%<input type="range" min=".05" max={Math.max(.06,right-.03)} step=".002" value={left} onChange={e=>{setLeft(+e.target.value);setResult(null);}} style={{width:"100%"}}/></label>
  <label>Guia direita: {Math.round(right*100)}%<input type="range" min={Math.min(.94,left+.03)} max=".95" step=".002" value={right} onChange={e=>{setRight(+e.target.value);setResult(null);}} style={{width:"100%"}}/></label>
  <label>Base do cartao: {Math.round(base*100)}%<input type="range" min=".10" max=".75" step=".002" value={base} onChange={e=>{setBase(+e.target.value);setResult(null);}} style={{width:"100%"}}/></label>
