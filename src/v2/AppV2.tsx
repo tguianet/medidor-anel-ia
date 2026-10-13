@@ -775,51 +775,15 @@ export default function AppV2() {
           left:detectedLeftLine,
         });
 
-        // Fluxo comercial de 1 foto: o detector leve ja confirmou o cartao.
-        // Aplicamos automaticamente esquerda, direita e base e seguimos
-        // direto para a medicao do dedo. Ajuste manual permanece como fallback.
-        if(singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE){
-          setCardSnapLines({
-            left:detectedLeftLine,
-            right:detectedRightLine,
-            bottom:detectedBottomLine,
-          });
-          setCardLineLocked({top:false,right:true,bottom:true,left:true});
-          setCardQuad(detectedQuad);
-          setPerspectiveReady(true);
-          setCalibrationConfidence(calibration.confidence);
-          // IMPORTANTE: o detector leve apenas posiciona as 3 linhas.
-          // A escala oficial NAO usa calibration.pixelsPerMm.
-          // Voltamos à regra congelada: a distância entre as interseções
-          // esquerda×base e direita×base representa exatamente 85,60 mm.
-          // A foto acabou de ser capturada em canvas 900x1200.
-          // Nao esperamos photoPixelsRef carregar para definir a escala,
-          // porque isso criava uma corrida assíncrona e podia cair no fallback
-          // pixelsPerMm=1 antes do buffer da foto ficar pronto.
-          //
-          // A escala continua vindo SOMENTE das interseções das 3 linhas:
-          // A = esquerda x base, B = direita x base, |A-B| = 85,60 mm.
-          const intersectionWidthPx=Math.hypot(
-            (finalRight-finalLeft)/100*canvas.width,
-            0,
-          );
-          const intersectionPixelsPerMm=intersectionWidthPx/CARD_WIDTH_MM;
+        // A detecção automática apenas sugere as bordas. O usuário sempre
+        // confirma as linhas na fotografia antes de calibrar os milímetros.
+        // Não ativar a medição do dedo automaticamente aqui: a confiança do
+        // detector não prova que o traço esteja exatamente na borda física.
+        setCardLineLocked({top:false,right:false,bottom:false,left:false});
+        setSelectedCardLine(null);
+        setPerspectiveReady(false);
+        setCalibrationConfidence(calibration.confidence);
 
-          setMeasurementCardLengthPx(intersectionWidthPx);
-
-          setFingerCardCalibrationStep("done");
-          setAnalyzingCard(false);
-          activateFingerMeasurement(
-            finalLeft,
-            finalRight,
-            finalBottom,
-            calibration.confidence,
-            detectedQuad,
-            intersectionPixelsPerMm,
-          );
-          camera.setError("");
-          return;
-        }
       } catch {
         setCardLeft(15);
         setCardRight(85);
@@ -4499,13 +4463,14 @@ export default function AppV2() {
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
+              <p style={{fontSize:"0.9rem",lineHeight:1.5,color:"#e8c978"}}>Confira as três linhas nas bordas reais do cartão antes de medir o dedo. Arraste as linhas ou as extremidades para corrigir o alinhamento.</p>
               <button
                 className="primary confirm-perspective"
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
                 {singlePhotoTestMode
-                  ? "Calibrar esta foto e medir o dedo"
+                  ? "Confirmar bordas do cartão e medir o dedo"
                   : fingerCardCalibrationStep === "reference"
                     ? "Salvar 3 linhas e ir para a foto 2"
                     : "Calibrar cartão e medir o dedo"}
