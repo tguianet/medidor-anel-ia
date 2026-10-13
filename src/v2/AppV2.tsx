@@ -11,6 +11,7 @@ import HandCameraScreen from "../components/HandCameraScreen";
 import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
+import { pickCardChannel, type ChannelChoice } from "./cardChannel";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
@@ -137,6 +138,9 @@ export default function AppV2() {
   const [cardRight, setCardRight] = useState(85);
   const [cardBottom, setCardBottom] = useState(58);
   // Testes salvos para conferencia em lote.
+  // Canal automático do cartão (só para achar as bordas do cartão).
+  const cardChannelRef = useRef<ChannelChoice | null>(null);
+  const [cardChannelInfo, setCardChannelInfo] = useState<ChannelChoice | null>(null);
   const [savedTests, setSavedTests] = useState<SavedTest[]>(() => loadTests());
   const [realRingInput, setRealRingInput] = useState("");
   const [testBusy, setTestBusy] = useState("");
@@ -637,11 +641,21 @@ export default function AppV2() {
           if(!context) return null;
           const imageData=context.getImageData(0,0,canvas.width,canvas.height);
           const data=imageData.data;
+          // Canal automático: o que mais separa o cartão do fundo nesta foto.
+          const channelChoice=pickCardChannel(data,canvas.width,canvas.height,{
+            x0:detectedLeft/100*canvas.width,
+            x1:detectedRight/100*canvas.width,
+            y0:detectedTop/100*canvas.height,
+            y1:detectedBottom/100*canvas.height,
+          });
+          cardChannelRef.current=channelChoice;
+          setCardChannelInfo(channelChoice);
+          const readChannel=channelChoice.channel.read;
           const gray=(x:number,y:number)=>{
             const ix=Math.max(0,Math.min(canvas.width-1,Math.round(x)));
             const iy=Math.max(0,Math.min(canvas.height-1,Math.round(y)));
             const o=(iy*canvas.width+ix)*4;
-            return data[o]*0.299+data[o+1]*0.587+data[o+2]*0.114;
+            return readChannel(data,o);
           };
           const robustMean=(values:number[])=>{
             if(!values.length) return 0;
@@ -676,7 +690,9 @@ export default function AppV2() {
             const direction=side==="left" ? -1 : 1;
             const candidates:VerticalEdgeCandidate[]=[];
 
-            for(let dx=-18;dx<=18;dx+=1){
+            // Busca larga (±60 px ≈ 6 mm): o retângulo do detector pode estar
+            // bem fora da borda real, principalmente em fotos da câmera nativa.
+            for(let dx=-60;dx<=60;dx+=1){
               const x=expectedX+dx;
               const contrasts:number[]=[];
               let strong=0;
@@ -744,7 +760,7 @@ export default function AppV2() {
           const bestHorizontal=(expectedY:number)=>{
             let bestY=expectedY;
             let bestScore=-Infinity;
-            for(let dy=-14;dy<=14;dy+=1){
+            for(let dy=-40;dy<=40;dy+=1){
               const y=expectedY+dy;
               const contrasts:number[]=[];
               for(let x=refinedLeft+cardW*0.10;x<=refinedRight-cardW*0.10;x+=Math.max(4,cardW/28)){
@@ -767,8 +783,8 @@ export default function AppV2() {
             leftEdge.coverage<0.52 ||
             rightEdge.coverage<0.52 ||
             bottomEdge.score<7 ||
-            refinedRight-refinedLeft<cardW*0.92 ||
-            refinedRight-refinedLeft>cardW*1.10
+            refinedRight-refinedLeft<cardW*0.85 ||
+            refinedRight-refinedLeft>cardW*1.25
           ){
             return null;
           }
@@ -1834,11 +1850,12 @@ export default function AppV2() {
     const len=Math.hypot(dx,dy);
     if(len<12) return;
     const ux=dx/len, uy=dy/len, nx=-uy, ny=ux;
+    const snapChannel=cardChannelRef.current?.channel.read;
     const gray=(x:number,y:number)=>{
       const ix=Math.max(0,Math.min(source.width-1,Math.round(x)));
       const iy=Math.max(0,Math.min(source.height-1,Math.round(y)));
       const o=(iy*source.width+ix)*4;
-      return source.data[o]*.299+source.data[o+1]*.587+source.data[o+2]*.114;
+      return snapChannel ? snapChannel(source.data,o) : source.data[o]*.299+source.data[o+1]*.587+source.data[o+2]*.114;
     };
     // Snap lateral propositalmente curto: o usuario aproxima a guia da borda
     // correta e o ima apenas faz o refinamento final. Isso impede que a linha
@@ -4058,6 +4075,7 @@ export default function AppV2() {
         `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}%`,
         `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
         `Zoom ${zoom.toFixed(1)}×`,
+        `Canal do cartão: ${cardChannelInfo ? `${cardChannelInfo.channel.id} (contraste ${cardChannelInfo.score.toFixed(1)} · cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}`,
       ];
       const test:SavedTest={
         id:`${Date.now()}`,
@@ -4732,6 +4750,7 @@ export default function AppV2() {
                 {reportUrl && <a href={reportUrl} download={`relatorio-medidor-${savedTests.length}-testes.jpg`} style={{color:"#00e5ff",fontWeight:700}}>Baixar relatório</a>}
                 {testBusy && <small>{testBusy}</small>}
               </div>
+              <span>Canal do cartão: {cardChannelInfo ? `${cardChannelInfo.channel.id} · contraste ${cardChannelInfo.score.toFixed(1)} (cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}</span>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               {measurementAudit && (
