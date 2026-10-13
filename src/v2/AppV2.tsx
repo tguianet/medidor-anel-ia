@@ -12,9 +12,9 @@ import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
 import {
-  detectFingerPair, fingerWidth3D, focalPx, readExifFocal, refineCardEdge, solveCardPlaneSafe,
+  chooseRotation, detectFingerPair, estimateOrientation, fingerWidth3D, focalPx, readExifFocal, refineCardEdge, solveCardPlaneSafe,
   sourceFromCanvas, sourceFromPixels, trackFingerEdges,
-  type Camera, type CardEdgeFit, type PixelSource, type Seg,
+  type Camera, type CardEdgeFit, type PixelSource, type Rotation, type Seg,
 } from "./precision";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
@@ -355,6 +355,45 @@ export default function AppV2() {
     input.value = "";
     input.click();
   };
+  // Foto da câmera nativa: imagem decodificada ou já girada num canvas.
+  type NativeSource = HTMLImageElement | HTMLCanvasElement;
+  const sourceWidth = (s: NativeSource) => (s instanceof HTMLImageElement ? s.naturalWidth : s.width);
+  const sourceHeight = (s: NativeSource) => (s instanceof HTMLImageElement ? s.naturalHeight : s.height);
+  const rotateSource = (s: NativeSource, rotation: Rotation): NativeSource => {
+    if (rotation === 0) return s;
+    const w = sourceWidth(s), h = sourceHeight(s);
+    const swap = rotation === 90 || rotation === 270;
+    const c = document.createElement("canvas");
+    c.width = swap ? h : w;
+    c.height = swap ? w : h;
+    const ctx = c.getContext("2d");
+    if (!ctx) return s;
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.drawImage(s, -w / 2, -h / 2);
+    return c;
+  };
+  /** Gira automaticamente fotos salvas deitadas (celular apontado para a mesa). */
+  const autoRotation = (s: NativeSource): Rotation => {
+    try {
+      const w0 = sourceWidth(s), h0 = sourceHeight(s);
+      const k = 320 / Math.max(w0, h0);
+      const w = Math.max(8, Math.round(w0 * k)), h = Math.max(8, Math.round(h0 * k));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return 0;
+      ctx.drawImage(s, 0, 0, w, h);
+      const d = ctx.getImageData(0, 0, w, h).data;
+      const gray = new Float32Array(w * h);
+      for (let i = 0; i < w * h; i++) gray[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114;
+      return chooseRotation(estimateOrientation(gray, w, h));
+    } catch {
+      return 0;
+    }
+  };
+  const lastNativeRef = useRef<{ source: NativeSource; f35: number | null } | null>(null);
+
   // v23: foto em RESOLUÇÃO TOTAL (recorte 3:4 da foto original do celular).
   // A cópia 900×1200 continua sendo a imagem de tela; todas as medidas de
   // precisão usam esta versão grande.
@@ -378,8 +417,8 @@ export default function AppV2() {
     setHiResVersion((v) => v + 1);
   };
 
-  const buildHiRes = async (img: HTMLImageElement, f35: number | null) => {
-    const natW = img.naturalWidth, natH = img.naturalHeight;
+  const buildHiRes = async (img: NativeSource, f35: number | null) => {
+    const natW = sourceWidth(img), natH = sourceHeight(img);
     let sx = 0, sy = 0, sw = natW, sh = natH;
     if (natW / natH > 0.75) { sw = natH * 0.75; sx = (natW - sw) / 2; }
     else { sh = natW / 0.75; sy = (natH - sh) / 2; }
@@ -479,12 +518,14 @@ export default function AppV2() {
       img.src = url;
       await img.decode();
       const exif = await readExifFocal(file);
+      const oriented = rotateSource(img, autoRotation(img));
+      lastNativeRef.current = { source: oriented, f35: exif.f35 };
       try {
-        await buildHiRes(img, exif.f35);
+        await buildHiRes(oriented, exif.f35);
       } catch {
         clearHiRes();
       }
-      await capture(img);
+      await capture(oriented);
     } catch {
       camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
       setStage("intro");
@@ -494,7 +535,28 @@ export default function AppV2() {
     }
   };
 
-  const capture = async (source?: HTMLImageElement) => {
+  /** Botão "Girar foto": gira 90° no sentido horário e refaz a medição. */
+  const rotateNativePhoto = async () => {
+    const last = lastNativeRef.current;
+    if (!last) return;
+    setNativeLoading(true);
+    try {
+      const rotated = rotateSource(last.source, 90);
+      lastNativeRef.current = { source: rotated, f35: last.f35 };
+      resetMeasurementSession();
+      setFingerCardCalibrationStep((current) => (current === "done" ? "measurement" : current));
+      try {
+        await buildHiRes(rotated, last.f35);
+      } catch {
+        clearHiRes();
+      }
+      await capture(rotated);
+    } finally {
+      setNativeLoading(false);
+    }
+  };
+
+  const capture = async (source?: NativeSource) => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
@@ -525,14 +587,14 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
-    if (!source) clearHiRes();
+    if (!source) { clearHiRes(); lastNativeRef.current = null; }
     const video = camera.videoRef.current as HTMLVideoElement;
-    const frameSource: HTMLVideoElement | HTMLImageElement | null = source ?? (video?.videoWidth ? video : null);
+    const frameSource: HTMLVideoElement | NativeSource | null = source ?? (video?.videoWidth ? video : null);
     if (!frameSource) {
       return;
     }
-    const sourceW = source ? source.naturalWidth : video.videoWidth;
-    const sourceH = source ? source.naturalHeight : video.videoHeight;
+    const sourceW = source ? sourceWidth(source) : video.videoWidth;
+    const sourceH = source ? sourceHeight(source) : video.videoHeight;
 
     const drawCurrentFrame = () => {
       const canvas = document.createElement("canvas");
@@ -3357,7 +3419,13 @@ export default function AppV2() {
       if (!solved) return false;
       const { A, B, cardPx } = solved.plane;
       const ppm = cardPx / 85.6;
-      const pair = detectFingerPair(ctx.src, toImgY(ringGuideY), Math.min(A.x, B.x), Math.max(A.x, B.x), (A.x + B.x) / 2, ppm);
+      // A busca do dedo precisa ficar ABAIXO da base do cartão.
+      const ringRow = Math.max(toImgY(ringGuideY), Math.max(A.y, B.y) + 6 * ppm);
+      if (ringRow > ctx.H - 2 * ppm) {
+        camera.setError("A base do cartão está muito perto do fim da foto. Use Girar foto ou tire outra.");
+        return false;
+      }
+      const pair = detectFingerPair(ctx.src, ringRow, Math.min(A.x, B.x), Math.max(A.x, B.x), (A.x + B.x) / 2, ppm);
       if (!pair) {
         camera.setError("Não achei o dedo sozinho. Posicione as linhas verdes nas bordas com a lupa.");
         return false;
@@ -3392,9 +3460,13 @@ export default function AppV2() {
     return () => window.clearTimeout(timer);
   }, [phase, measurementMode, photo, photoPixelsReady, hiResVersion]);
 
+  // Dedo adulto fica entre ~12 e ~28 mm. Fora disso a foto quase sempre
+  // está girada ou as linhas estão fora do dedo.
+  const precisionPlausible = !!precisionResult && precisionResult.formulaMm >= 10 && precisionResult.formulaMm <= 30;
+
   const widthSentToFormulaMm =
     captureQualityGate.accepted && anatomicalRegionReady
-      ? (precisionResult?.formulaMm ?? liveWidthMm)
+      ? (precisionPlausible ? precisionResult!.formulaMm : liveWidthMm)
       : null;
 
 
@@ -5314,6 +5386,9 @@ export default function AppV2() {
                 Cartão a {(precisionResult.distanceMm / 10).toFixed(1)} cm · inclinação {precisionResult.tiltDeg.toFixed(1)}°
                 {precisionResult.axisDeg !== null ? ` · dedo ${precisionResult.axisDeg.toFixed(1)}°` : ""}
               </span>
+              {!precisionPlausible && (
+                <span style={{color:"#ff9f80"}}>Medida fora do normal ({precisionResult.formulaMm.toFixed(1)} mm). Confira se a foto está em pé (cartão deitado em cima, dedos para baixo) — use Girar foto.</span>
+              )}
             </div>
           )}
 
@@ -5342,6 +5417,9 @@ export default function AppV2() {
 
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
+            {lastNativeRef.current && !tryOn && (
+              <button className="secondary" type="button" onClick={() => { void rotateNativePhoto(); }}>Girar foto</button>
+            )}
             {phase === "finger" && measurementMode === "finger" && !tryOn && (
               <button className="secondary" type="button" onClick={() => { runAutoFinger(); }}>Achar dedo</button>
             )}
