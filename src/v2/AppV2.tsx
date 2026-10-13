@@ -3414,7 +3414,19 @@ export default function AppV2() {
     // A linha amarela e as laterais manuais apenas definem a REGIAO inicial.
     // A medida experimental varre uma faixa maior e cada ponto procura de novo
     // a fronteira fisica pele <-> fundo de forma independente.
-    const samples=fingerBandSamplesPx(ringGuideY,8);
+    // Faixa experimental ampla, equivalente a aproximadamente tres bandas de
+    // 8 mm de altura. Converte mm para percentuais da imagem considerando zoom.
+    // A janela tem limite minimo para diferenciar do teste antigo e limite
+    // maximo para nao varrer indiscriminadamente a mao inteira.
+    // A largura comercial permanece inalterada.
+    const sourceForBand=photoPixelsRef.current;
+    const threeRingHeightMm=24;
+    const halfBandPercent=Math.max(
+      12,
+      Math.min(22, (threeRingHeightMm / 2) * pixelsPerMm /
+        sourceForBand.height * 100 * zoom),
+    );
+    const samples=fingerBandSamplesPx(ringGuideY,halfBandPercent);
     if(!samples || samples.length<20) return null;
 
     const source=photoPixelsRef.current;
@@ -3633,6 +3645,7 @@ export default function AppV2() {
       totalCount:snapped.length,
       validCount,
       supportPercent,
+      scanBandHeightMm: (halfBandPercent * 2 / (100 * zoom)) * sourceForBand.height / pixelsPerMm,
       plateauStart:best?.start ?? -1,
       plateauEnd:best?.end ?? -1,
       plateauValuesMm:best?.values ?? [],
@@ -4625,7 +4638,7 @@ export default function AppV2() {
                       }}
                     >
                       <strong>TESTE · CONTORNO MULTIPONTO + CONSTANTE</strong>
-                      <span>Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
+                      <span>Faixa ampliada: {contourConstantTest.scanBandHeightMm.toFixed(1)} mm · Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
                       <span>Constante encontrada: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · {contourConstantTest.stable ? "PLATÔ ESTÁVEL" : "SEM PLATÔ FORTE"}</span>
                       {contourConstantTest.plateauStart>=0 && <span>Platô: pontos {contourConstantTest.plateauStart+1}–{contourConstantTest.plateauEnd+1} · variação {contourConstantTest.spreadPercent?.toFixed(2)}%</span>}
                       {!!contourConstantTest.plateauValuesMm.length && <span>Medidas do platô: {contourConstantTest.plateauValuesMm.map(value=>value.toFixed(2)).join(" / ")} mm</span>}
