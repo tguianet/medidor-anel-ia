@@ -28,6 +28,8 @@ const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
 const TEST_FINGER_CARD_NORMALIZATION = 1;
 const CARD_WIDTH_MM = 85.6;
 const CARD_HEIGHT_MM = 53.98;
+// Preview V2: always show card calibration so the user can run RGB/manual review.
+const RGB_EXPERIMENTAL_REVIEW = true;
 type Homography = [number,number,number,number,number,number,number,number,number];
 
 const solveLinearSystem = (matrix:number[][], values:number[]) => {
@@ -779,7 +781,7 @@ export default function AppV2() {
         // Fluxo comercial de 1 foto: o detector leve ja confirmou o cartao.
         // Aplicamos automaticamente esquerda, direita e base e seguimos
         // direto para a medicao do dedo. Ajuste manual permanece como fallback.
-        if(singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE){
+        if(singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE && !RGB_EXPERIMENTAL_REVIEW){
           setCardSnapLines({
             left:detectedLeftLine,
             right:detectedRightLine,
