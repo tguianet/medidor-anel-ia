@@ -2186,10 +2186,14 @@ export default function AppV2() {
           chosenGroup=eligible.reduce((best,group)=>{
             const center=group.reduce((sum,item)=>sum+item.x,0)/group.length;
             const bestCenter=best.reduce((sum,item)=>sum+item.x,0)/best.length;
-            // Mais perto do centro = primeira borda encontrada ao sair do dedo.
-            return Math.abs(center-fingerCenterX)<Math.abs(bestCenter-fingerCenterX)
-              ? group
-              : best;
+            // A primeira borda deve corresponder ao gabarito manual, nao a
+            // primeira textura encontrada saindo do centro do dedo.
+            // A distancia ate a guia prevalece; a intensidade desempata.
+            const groupStrength=group.reduce((sum,item)=>sum+item.strength,0)/group.length;
+            const bestStrength=best.reduce((sum,item)=>sum+item.strength,0)/best.length;
+            const groupRank=Math.abs(center-centerX)-Math.min(3,groupStrength*0.035);
+            const bestRank=Math.abs(bestCenter-centerX)-Math.min(3,bestStrength*0.035);
+            return groupRank<bestRank ? group : best;
           },eligible[0]);
         }
       }else{
