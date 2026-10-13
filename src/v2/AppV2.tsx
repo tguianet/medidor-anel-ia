@@ -4625,6 +4625,7 @@ export default function AppV2() {
                       boxShadow:"0 8px 28px rgba(0,0,0,.55)",
                       backgroundImage:`url("${hiResUrl ?? photo}")`,
                       backgroundRepeat:"no-repeat",
+                      backgroundOrigin:"border-box",
                       // Centro da lupa = ponto exato onde a linha verde cruza a
                       // altura do anel; aumento de 2x sobre o zoom atual.
                       backgroundSize:`${fingerLoupe.stageW*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px ${fingerLoupe.stageH*fingerLoupe.zoom*LOUPE_EXTRA_ZOOM}px`,
