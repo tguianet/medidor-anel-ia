@@ -140,227 +140,18 @@ export default function FrozenCameraScreen({
       </div>
       <div className="viewport">
         <video ref={videoRef} playsInline muted autoPlay />
-        <div
-          aria-live="polite"
-          style={{
-            display:"none",
-            position:"absolute",
-            top:18,
-            left:"50%",
-            transform:"translateX(-50%)",
-            zIndex:50,
-            minWidth:"230px",
-            maxWidth:"calc(100% - 28px)",
-            padding:"10px 14px",
-            borderRadius:14,
-            border:`2px solid ${
-              liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
-                ? "#52e0a3"
-                : "#f0c75e"
-            }`,
-            background:"rgba(18,18,18,.88)",
-            color:
-              liveFingerTiltDeg!==null && Math.abs(liveFingerTiltDeg)<=1.5
-                ? "#52e0a3"
-                : "#f5d477",
-            fontWeight:800,
-            textAlign:"center",
-            lineHeight:1.25,
-            boxShadow:"0 4px 18px rgba(0,0,0,.38)",
-            pointerEvents:"none",
-          }}
-        >
-          {liveFingerTiltDeg===null || liveFingerTiltConfidence<45
-            ? "DEDO: procurando inclinação..."
-            : Math.abs(liveFingerTiltDeg)<=1.5
-              ? `✓ DEDO RETO · ${Math.abs(liveFingerTiltDeg).toFixed(1)}°`
-              : `DEDO ${Math.abs(liveFingerTiltDeg).toFixed(1)}° · AJUSTE ATÉ 0°`}
-        </div>
-        <div
-          aria-live="polite"
-          style={{
-            display:singlePhotoTestMode ? "block" : "none",
-            position:"absolute",
-            top:142,
-            left:"50%",
-            transform:"translateX(-50%)",
-            zIndex:51,
-            minWidth:"220px",
-            maxWidth:"calc(100% - 28px)",
-            padding:"9px 12px",
-            borderRadius:12,
-            border:`2px solid ${
-              liveOpticalCenterOffsetPx!==null &&
-              liveCardFingerOffsetPx!==null &&
-              Math.abs(liveOpticalCenterOffsetPx)<=6 &&
-              Math.abs(liveCardFingerOffsetPx)<=5
-                ? "#52e0a3"
-                : "#7ec4ff"
-            }`,
-            background:"rgba(12,18,24,.88)",
-            color:
-              liveOpticalCenterOffsetPx!==null &&
-              liveCardFingerOffsetPx!==null &&
-              Math.abs(liveOpticalCenterOffsetPx)<=6 &&
-              Math.abs(liveCardFingerOffsetPx)<=5
-                ? "#52e0a3"
-                : "#9ed2ff",
-            fontWeight:800,
-            textAlign:"center",
-            lineHeight:1.25,
-            boxShadow:"0 4px 18px rgba(0,0,0,.32)",
-            pointerEvents:"none",
-          }}
-        >
-          {liveOpticalCenterOffsetPx===null || liveCardFingerOffsetPx===null || liveOpticalCenterConfidence<45
-            ? "CELULAR: procurando centro óptico..."
-            : Math.abs(liveOpticalCenterOffsetPx)<=6 && Math.abs(liveCardFingerOffsetPx)<=5
-              ? `✓ CELULAR CENTRALIZADO · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px · cartão↔dedo ${liveCardFingerOffsetPx.toFixed(1)} px`
-              : liveOpticalCenterOffsetPx>6
-                ? `← MOVA O CELULAR PARA A ESQUERDA · centro +${liveOpticalCenterOffsetPx.toFixed(1)} px`
-                : liveOpticalCenterOffsetPx<-6
-                  ? `MOVA O CELULAR PARA A DIREITA → · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px`
-                  : `ALINHE CARTÃO E DEDO · diferença ${liveCardFingerOffsetPx.toFixed(1)} px`}
-        </div>
         {singlePhotoTestMode && (
-          <div aria-live="polite" style={{
-            position:"absolute",left:"50%",top:340,transform:"translateX(-50%)",
-            width:"min(300px,calc(100% - 18px))",zIndex:53,
-            display:"grid",justifyItems:"center",gap:7,padding:"8px",
-            borderRadius:12,border:`2px solid ${centerAligned ? "#52e0a3" : "#f0c75e"}`,
-            background:"rgba(5,10,14,.86)",color:centerAligned?"#52e0a3":"#f5dfaa",
-            pointerEvents:"none",textAlign:"center"
+          <div role="status" aria-live="polite" style={{
+            position:"absolute",top:8,left:12,right:120,zIndex:60,
+            background:"rgba(10,12,13,.88)",borderRadius:9,
+            padding:"8px 9px",pointerEvents:"none",
+            color:cardReady&&centerAligned?"#52e0a3":"#ffe19d",
+            fontSize:12,fontWeight:800
           }}>
-            <strong style={{fontSize:12}}>{centerInstruction}</strong>
-            <div style={{position:"relative",height:18,width:"90%",borderRadius:9,
-              border:"1px solid rgba(255,255,255,.45)",background:"rgba(255,255,255,.06)"}}>
-              <div style={{position:"absolute",left:"50%",top:0,bottom:0,width:2,
-                background:"#52e0a3",transform:"translateX(-50%)"}} />
-              {centerKnown && (
-                <div style={{position:"absolute",left:`${50+Math.max(-40,Math.min(40,centerOffset/18*40))}%`,
-                  top:"50%",width:12,height:12,borderRadius:"50%",background:"#79c8ff",
-                  transform:"translate(-50%,-50%)",border:"1px solid white"}} />
-              )}
-            </div>
-            <span style={{fontSize:10,opacity:.85}}>Azul = posição estimada do dedo · Verde = centro da imagem</span>
-            <span style={{fontSize:10,opacity:.85}}>Indicador experimental: não garante ausência de paralaxe</span>
+            {!cardReady?"ENQUADRE O CARTÃO":!centerKnown?"CENTRE O DEDO":!centerAligned?centerInstruction:!phoneReady?"NIVELE O CELULAR":"✓ PRONTO PARA FOTO"}
           </div>
         )}
-        {singlePhotoTestMode && (
-          <div style={{
-            position:"absolute",left:"50%",top:213,transform:"translateX(-50%)",
-            width:"min(280px,calc(100% - 20px))",zIndex:51,
-            padding:"5px 8px",borderRadius:8,background:"rgba(0,0,0,.7)",
-            color:"#f5dfaa",fontSize:10,textAlign:"center",pointerEvents:"none"
-          }}>
-            Guia de enquadramento por imagem; não mede a profundidade real da câmera.
-            Capture apenas quando o dedo estiver bem centralizado.
-          </div>
-        )}
-        {singlePhotoTestMode && (
-          <div
-            aria-label="Nivel visual de alinhamento do dedo e do celular"
-            style={{
-              position:"absolute",
-              left:"50%",
-              top:18,
-              zIndex:50,
-              transform:"translateX(-50%)",
-              display:"grid",
-              justifyItems:"center",
-              gap:7,
-              width:"min(270px, calc(100% - 110px))",
-              pointerEvents:"none",
-            }}
-          >
-            <div
-              style={{
-                position:"relative",
-                width:112,
-                height:112,
-                borderRadius:"50%",
-                border:`3px solid ${levelReady ? "#52e0a3" : "rgba(242,207,115,.88)"}`,
-                background:"rgba(8,8,8,.62)",
-                boxShadow:levelReady
-                  ? "0 0 22px rgba(82,224,163,.55)"
-                  : "0 0 16px rgba(0,0,0,.45)",
-                transition:"border-color .15s ease, box-shadow .15s ease",
-              }}
-            >
-              <span style={{position:"absolute",left:"50%",top:8,bottom:8,width:1,background:"rgba(255,255,255,.16)",transform:"translateX(-50%)"}} />
-              <span style={{position:"absolute",top:"50%",left:8,right:8,height:1,background:"rgba(255,255,255,.16)",transform:"translateY(-50%)"}} />
-
-              <span
-                aria-hidden="true"
-                style={{
-                  position:"absolute",
-                  left:"50%",
-                  top:"50%",
-                  width:34,
-                  height:34,
-                  borderRadius:"50%",
-                  border:`2px solid ${levelReady ? "#52e0a3" : "rgba(255,255,255,.55)"}`,
-                  transform:"translate(-50%,-50%)",
-                  boxShadow:levelReady ? "0 0 12px rgba(82,224,163,.7)" : "none",
-                }}
-              />
-
-              <span
-                title="Dedo"
-                style={{
-                  position:"absolute",
-                  left:`calc(50% + ${fingerX.toFixed(1)}px)`,
-                  top:`calc(50% + ${fingerY.toFixed(1)}px)`,
-                  width:18,
-                  height:18,
-                  borderRadius:"50%",
-                  transform:"translate(-50%,-50%)",
-                  background:fingerReady ? "#52e0a3" : "#f2cf73",
-                  border:"2px solid rgba(0,0,0,.55)",
-                  boxShadow:"0 0 9px rgba(242,207,115,.75)",
-                  transition:"left .10s linear, top .10s linear, background .15s ease",
-                }}
-              />
-
-              <span
-                title="Celular"
-                style={{
-                  position:"absolute",
-                  left:`calc(50% + ${phoneX.toFixed(1)}px)`,
-                  top:`calc(50% + ${phoneY.toFixed(1)}px)`,
-                  width:14,
-                  height:14,
-                  borderRadius:"50%",
-                  transform:"translate(-50%,-50%)",
-                  background:phoneReady ? "#52e0a3" : "#79c8ff",
-                  border:"2px solid rgba(0,0,0,.55)",
-                  boxShadow:"0 0 9px rgba(121,200,255,.8)",
-                  transition:"left .10s linear, top .10s linear, background .15s ease",
-                }}
-              />
-            </div>
-
-            <strong
-              style={{
-                padding:"4px 9px",
-                borderRadius:999,
-                color:levelReady ? "#071b14" : "#f5dfaa",
-                background:levelReady ? "#52e0a3" : "rgba(10,9,7,.78)",
-                fontSize:10,
-                letterSpacing:".04em",
-              }}
-            >
-              {levelReady ? "✓ ALINHADO" : "JUNTE AS DUAS BOLINHAS NO CENTRO"}
-            </strong>
-
-            <div style={{display:"flex",gap:10,fontSize:9,color:"#fff"}}>
-              <span><b style={{color:"#f2cf73"}}>●</b> dedo</span>
-              <span><b style={{color:"#79c8ff"}}>●</b> celular</span>
-            </div>
-          </div>
-        )}
-
-        <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
+        <button type="button" className={`torch-button${torchOn ? " is-on" : ""}${!torchSupported ? " support-unknown" : ""}`} style={{zIndex:100,top:8,right:8,position:"absolute"}} onClick={onToggleTorch}>{torchOn ? "⚡ Luz ligada" : "⚡ Ligar luz"}</button>
         {calibrationStep === "measurement" && !singlePhotoTestMode && referenceCardWidthPercent !== null && (
           <div
             className="reference-card-ghost"
@@ -373,31 +164,16 @@ export default function FrozenCameraScreen({
             <span>GUIA DA FOTO 1</span>
           </div>
         )}
-        <div aria-live="polite" style={{
-          position:"absolute",left:"50%",bottom:12,transform:"translateX(-50%)",
-          zIndex:52,pointerEvents:"none",textAlign:"center",
-          width:"min(290px, calc(100% - 20px))",padding:"9px 12px",
-          borderRadius:12,background:"rgba(8,12,15,.88)",
-          border:`1px solid ${distanceAligned ? "#52e0a3" : "#efc466"}`,
-          color:distanceAligned ? "#52e0a3" : "#ffe0a0",
-          fontWeight:800,fontSize:12
-        }}>
-          <div>{distanceInstruction}</div>
-          <div style={{fontSize:11,fontWeight:500,marginTop:3}}>
-            {cardScalePercent === null ? "Enquadre o cartão na moldura" : `Tamanho na câmera: ${cardScalePercent}% da referência`}
-          </div>
-          <div style={{fontSize:10,fontWeight:400,opacity:.8,marginTop:3}}>Referência visual · não mede altura em cm</div>
-        </div>
         <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
           <div className="live-card-frame">
-            <span>{cardReady ? "✓ ALINHADO — PODE CAPTURAR" : "ENCAIXE O CARTÃO"}</span>
+            <span style={{display:singlePhotoTestMode?"none":undefined}}>{cardReady ? "✓ ALINHADO — PODE CAPTURAR" : "ENCAIXE O CARTÃO"}</span>
             <i className="card-guide-corner tl" />
             <i className="card-guide-corner tr" />
             <i className="card-guide-corner br" />
             <i className="card-guide-corner bl" />
           </div>
 
-          <div className={`camera-angle-guide ${cameraAngleGuide}`}>
+          <div className={`camera-angle-guide ${cameraAngleGuide}`} style={{display:singlePhotoTestMode?"none":undefined}}>
             <span className="angle-arrow forward">↑</span>
             <strong>
               {cameraAngleGuide === "forward" ? "INCLINE A CÂMERA PARA FRENTE" :
@@ -423,7 +199,7 @@ export default function FrozenCameraScreen({
               pointerEvents:"none",
             }}
           />
-          <div className="live-finger-axis">
+          <div className="live-finger-axis" style={{display:singlePhotoTestMode?"none":undefined}}>
             <span>{fingerReady ? "✓ DEDO RETO" : "ALINHE O DEDO"}</span>
           </div>
 
@@ -446,7 +222,7 @@ export default function FrozenCameraScreen({
         </div>
         {cameraOpening && <div className="camera-opening">Abrindo câmera...</div>}
       </div>
-      <p>{cardReady
+      <p style={{display:singlePhotoTestMode?"none":undefined}}>{cardReady
         ? (singlePhotoTestMode
             ? "Tudo verde. Capture o cartão já posicionado sobre o dedo."
             : calibrationStep === "reference"
