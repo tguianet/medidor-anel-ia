@@ -3426,7 +3426,14 @@ export default function AppV2() {
       Math.min(22, (threeRingHeightMm / 2) * pixelsPerMm /
         sourceForBand.height * 100 * zoom),
     );
-    const samples=fingerBandSamplesPx(ringGuideY,halfBandPercent);
+    // A borda inferior do cartão é o limite superior da zona utilizável.
+    // Centralizar na linha amarela varria parte do cartão; deslocamos toda
+    // a faixa para baixo, sobre o dedo descoberto.
+    const bandTop=Math.max(ringGuideY + 1, 7);
+    const bandBottom=Math.min(93, bandTop + halfBandPercent * 2);
+    const bandCenter=(bandTop + bandBottom)/2;
+    const effectiveHalfSpan=(bandBottom-bandTop)/2;
+    const samples=fingerBandSamplesPx(bandCenter,effectiveHalfSpan);
     if(!samples || samples.length<20) return null;
 
     const source=photoPixelsRef.current;
@@ -3645,7 +3652,7 @@ export default function AppV2() {
       totalCount:snapped.length,
       validCount,
       supportPercent,
-      scanBandHeightMm: (halfBandPercent * 2 / (100 * zoom)) * sourceForBand.height / pixelsPerMm,
+      scanBandHeightMm: (effectiveHalfSpan * 2 / (100 * zoom)) * sourceForBand.height / pixelsPerMm,
       plateauStart:best?.start ?? -1,
       plateauEnd:best?.end ?? -1,
       plateauValuesMm:best?.values ?? [],
@@ -4244,6 +4251,20 @@ export default function AppV2() {
                     }}>BORDA DA LINHA · 6×</span>
                   </div>
                 )}
+                {phase==="finger" && leftLocked && rightLocked && (
+                  <div aria-hidden="true" style={{
+                    position:"absolute",
+                    left:`${Math.min(leftLine,rightLine)}%`,
+                    width:`${Math.abs(rightLine-leftLine)}%`,
+                    top:`${Math.min(93,ringGuideY+1)}%`,
+                    height:"24%",
+                    maxHeight:"calc(93% - 1px)",
+                    background:"rgba(0,225,220,.13)",
+                    borderTop:"2px solid #00e1dc",
+                    borderBottom:"2px solid #00e1dc",
+                    pointerEvents:"none",zIndex:3
+                  }} />
+                )}
                 {contourConstantTest && contourConstantTest.points.length > 0 && (
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none"
                     aria-label="Faixa ampliada de três anéis e platô estável"
@@ -4469,7 +4490,7 @@ export default function AppV2() {
                 </button>
               </>
             )}
-            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
+            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && !contourConstantTest && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
                 <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
