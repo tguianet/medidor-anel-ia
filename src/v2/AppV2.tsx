@@ -19,6 +19,7 @@ import { analyzeFingerContourAnatomy } from "./fingerContourAnatomy";
 import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
 import BatchReviewV2 from "./BatchReviewV2";
+import UniversalCardDetectorV2, { type UniversalCardBox } from "./UniversalCardDetectorV2";
 import type { LightCardDetectionPayload } from "./LightCardDetectorTest";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
@@ -929,6 +930,23 @@ export default function AppV2() {
       left,
     ];
     return {left,right,widthPx,bottomY,quadPercent};
+  };
+
+  const applyUniversalCardBox = (box:UniversalCardBox) => {
+    const lx=clamp(box.x*100,1,95);
+    const rx=clamp((box.x+box.width)*100,5,99);
+    const ty=clamp(box.y*100,1,90);
+    const by=clamp((box.y+box.height)*100,10,99);
+    if(rx-lx<12 || by-ty<8)return;
+    const left:Line={a:{x:lx,y:ty},b:{x:lx,y:by}};
+    const right:Line={a:{x:rx,y:ty},b:{x:rx,y:by}};
+    const bottom:Line={a:{x:lx,y:by},b:{x:rx,y:by}};
+    setCardLines(current=>({...current,left,right,bottom}));
+    setCardSnapLines({});
+    setCardLineLocked(current=>({...current,left:false,right:false,bottom:false}));
+    setSelectedCardLine(null);
+    setPerspectiveReady(false);
+    camera.setError("Sugestao RGB aplicada. Confira as bordas e corrija as linhas antes de calibrar.");
   };
 
   const applyLightCardDetection = (payload:LightCardDetectionPayload) => {
@@ -4493,6 +4511,9 @@ export default function AppV2() {
             </>
           )}
 
+          {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && photo && (
+            <UniversalCardDetectorV2 photo={photo} onApply={applyUniversalCardBox} />
+          )}
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
