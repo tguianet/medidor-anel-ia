@@ -4244,6 +4244,27 @@ export default function AppV2() {
                     }}>BORDA DA LINHA · 6×</span>
                   </div>
                 )}
+                {contourConstantTest && contourConstantTest.points.length > 0 && (
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none"
+                    aria-label="Faixa ampliada de três anéis e platô estável"
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:4}}>
+                    <polygon
+                      points={[
+                        ...contourConstantTest.points.map(p=>`${p.leftPercent},${p.yPercent}`),
+                        ...[...contourConstantTest.points].reverse().map(p=>`${p.rightPercent},${p.rightYPercent}`)
+                      ].join(" ")}
+                      fill="rgba(0,225,220,.19)" stroke="#00e1dc" strokeWidth="0.55"
+                      vectorEffect="non-scaling-stroke"/>
+                    {contourConstantTest.points.map((point,index)=>(
+                      <line key={index} x1={point.leftPercent} y1={point.yPercent}
+                        x2={point.rightPercent} y2={point.rightYPercent}
+                        stroke={point.inPlateau ? "#ffd86b" : "#00e1dc"}
+                        strokeWidth={point.inPlateau ? "1.0" : "0.28"}
+                        opacity={point.valid ? 0.85 : 0.25}
+                        vectorEffect="non-scaling-stroke"/>
+                    ))}
+                  </svg>
+                )}
                 {fingerMagnetSamples && (
                   <svg
                     viewBox="0 0 100 100"
@@ -4637,7 +4658,7 @@ export default function AppV2() {
                         background:"rgba(31,25,16,.62)"
                       }}
                     >
-                      <strong>TESTE · CONTORNO MULTIPONTO + CONSTANTE</strong>
+                      <strong>TESTE · FAIXA AMPLIADA (3 ANÉIS) + PLATÔ</strong>
                       <span>Faixa ampliada: {contourConstantTest.scanBandHeightMm.toFixed(1)} mm · Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
                       <span>Constante encontrada: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · {contourConstantTest.stable ? "PLATÔ ESTÁVEL" : "SEM PLATÔ FORTE"}</span>
                       {contourConstantTest.plateauStart>=0 && <span>Platô: pontos {contourConstantTest.plateauStart+1}–{contourConstantTest.plateauEnd+1} · variação {contourConstantTest.spreadPercent?.toFixed(2)}%</span>}
