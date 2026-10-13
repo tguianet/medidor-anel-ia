@@ -167,13 +167,13 @@ export default function FrozenCameraScreen({
         <div
           aria-live="polite"
           style={{
-            display:"none",
+            display:singlePhotoTestMode ? "block" : "none",
             position:"absolute",
-            top:88,
+            top:142,
             left:"50%",
             transform:"translateX(-50%)",
-            zIndex:49,
-            minWidth:"250px",
+            zIndex:51,
+            minWidth:"220px",
             maxWidth:"calc(100% - 28px)",
             padding:"9px 12px",
             borderRadius:12,
@@ -208,8 +208,19 @@ export default function FrozenCameraScreen({
                 ? `← MOVA O CELULAR PARA A ESQUERDA · centro +${liveOpticalCenterOffsetPx.toFixed(1)} px`
                 : liveOpticalCenterOffsetPx<-6
                   ? `MOVA O CELULAR PARA A DIREITA → · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px`
-                  : `CENTRE CARTÃO SOBRE O DEDO · diferença ${liveCardFingerOffsetPx.toFixed(1)} px`}
+                  : `ALINHE CARTÃO E DEDO · diferença ${liveCardFingerOffsetPx.toFixed(1)} px`}
         </div>
+        {singlePhotoTestMode && (
+          <div style={{
+            position:"absolute",left:"50%",top:213,transform:"translateX(-50%)",
+            width:"min(280px,calc(100% - 20px))",zIndex:51,
+            padding:"5px 8px",borderRadius:8,background:"rgba(0,0,0,.7)",
+            color:"#f5dfaa",fontSize:10,textAlign:"center",pointerEvents:"none"
+          }}>
+            Guia de enquadramento por imagem; não mede a profundidade real da câmera.
+            Capture apenas quando o dedo estiver bem centralizado.
+          </div>
+        )}
         {singlePhotoTestMode && (
           <div
             aria-label="Nivel visual de alinhamento do dedo e do celular"
