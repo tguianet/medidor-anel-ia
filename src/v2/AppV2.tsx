@@ -146,6 +146,8 @@ export default function AppV2() {
   // na borda real do cartao, a calibracao usa esta geometria travada mesmo
   // se a guia visual for arrastada alem da borda.
   const [cardSnapLines, setCardSnapLines] = useState<Partial<Record<CardEdge, Line>>>({});
+  // Manual mode uses the physical guide positions; color/contrast snapping is bypassed.
+  const [manualCardEdges, setManualCardEdges] = useState(false);
   const [selectedCardLine, setSelectedCardLine] = useState<CardEdge | null>(null);
   const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [leftLine, setLeftLine] = useState(25);
@@ -937,6 +939,7 @@ export default function AppV2() {
       return;
     }
 
+    if(manualCardEdges) return; // Never overwrite user-positioned edges with color-based detection.
     const {x,y,width,height}=payload.cardBox;
     const leftX=clamp(x*100,1,99);
     const rightX=clamp((x+width)*100,1,99);
@@ -1139,6 +1142,7 @@ export default function AppV2() {
     // explicitamente travada. Se o usuario voltar a mover a guia, usamos
     // imediatamente a geometria visual atual e descartamos o snap antigo.
     const lineForCalibration = (edge:"left"|"right"|"bottom"):Line => {
+      if (manualCardEdges) return cardLines[edge];
       const snapped=cardSnapLines[edge];
       return useSnap && cardLineLocked[edge] && snapped ? snapped : cardLines[edge];
     };
@@ -1250,9 +1254,9 @@ export default function AppV2() {
       let pxPerMm=widthPx/CARD_WIDTH_MM;
       let activeQuad=syntheticQuad;
       let activeHomography:Homography|null=null;
-      let cardConfidence=96;
+      let cardConfidence=manualCardEdges ? 90 : 96;
 
-      if(VISION_FEATURE_FLAGS.ENABLE_PERSPECTIVE_CORRECTION){
+      if(!manualCardEdges && VISION_FEATURE_FLAGS.ENABLE_PERSPECTIVE_CORRECTION){
         try{
           const actualQuad=quadFromLines(cardLines);
           const actualPx=validateCardQuad(actualQuad);
@@ -1912,7 +1916,8 @@ export default function AppV2() {
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match){
         const edge=match[1] as CardEdge;
-        snapCardLine(edge);
+        if (!manualCardEdges) snapCardLine(edge);
+        else setCardLineLocked((current)=>({...current,[edge]:true}));
       }
     }
     draggingRef.current=null;
@@ -4493,8 +4498,24 @@ export default function AppV2() {
             </>
           )}
 
-          {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
-          {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
+          {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && (
+            <div className="card-base-status" style={{marginTop:12}}>
+              <button className="secondary" type="button" aria-pressed={manualCardEdges}
+                onClick={() => {
+                  setManualCardEdges(current => !current);
+                  setCardSnapLines({});
+                  setCardLineLocked({top:false,right:false,bottom:false,left:false});
+                  setSelectedCardLine(null);
+                  camera.setError("");
+                }}>
+                {manualCardEdges ? "Ajuste manual ativo · voltar ao automático" : "Ajustar laterais manualmente (85,60 mm)"}
+              </button>
+              {manualCardEdges && <small>Arraste as linhas esquerda e direita até as bordas físicas do cartão e alinhe a linha da base. A distância entre as duas interseções com a base vale exatamente 85,60 mm, independentemente da cor do cartão. Confirme apenas após posicionar as linhas.</small>}
+              {manualCardEdges && cardReferencePreview && <small>Referência atual: {cardReferencePreview.lengthPx.toFixed(1)} px = 85,60 mm · escala {(cardReferencePreview.mmPerPx).toFixed(4)} mm/px</small>}
+            </div>
+          )}
+          {analyzingCard && !manualCardEdges && <p className="analysis-loading">Localizando o cartão...</p>}
+          {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && (!analyzingCard || manualCardEdges) && (
             <>
               <button
                 className="primary confirm-perspective"
