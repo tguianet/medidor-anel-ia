@@ -4121,16 +4121,21 @@ export default function AppV2() {
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
-                aria-label="Três linhas de calibração do cartão"
+                aria-label="Duas guias laterais do cartão de ponta a ponta"
               >
-                {(["left","right","bottom"] as CardEdge[]).map((edge)=>{
+                {(["left","right"] as CardEdge[]).map((edge)=>{
                   const line=cardLines[edge];
                   const locked=cardLineLocked[edge];
                   const selected=selectedCardLine===edge;
+                  const extrapolate=(targetY:number)=>{
+                    const dy=line.b.y-line.a.y;
+                    if(Math.abs(dy)<0.001) return (line.a.x+line.b.x)/2;
+                    return line.a.x+(line.b.x-line.a.x)*(targetY-line.a.y)/dy;
+                  };
                   return <g key={edge} className={`card-edge${locked?" locked":""}${selected?" selected":""}`}>
-                    <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                    <line className="card-line-hit" x1={extrapolate(0)} y1={0} x2={extrapolate(100)} y2={100}
                       onPointerDown={(e)=>startCardLineDrag(edge,null,e)} />
-                    <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    <line className="card-line-visible" x1={extrapolate(0)} y1={0} x2={extrapolate(100)} y2={100} />
                     {(["a","b"] as const).map((point)=><g key={point}>
                       <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="4.6"
                         onPointerDown={(e)=>startCardLineDrag(edge,point,e)} />
@@ -4463,7 +4468,7 @@ export default function AppV2() {
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
-              <p style={{fontSize:"0.9rem",lineHeight:1.5,color:"#e8c978"}}>Confira as três linhas nas bordas reais do cartão antes de medir o dedo. Arraste as linhas ou as extremidades para corrigir o alinhamento.</p>
+              <p style={{fontSize:"0.9rem",lineHeight:1.5,color:"#e8c978"}}>Ajuste somente as duas linhas verdes de ponta a ponta nas laterais reais do cartão. A base é detectada internamente e não precisa ser arrastada.</p>
               <button
                 className="primary confirm-perspective"
                 type="button"
@@ -4472,11 +4477,11 @@ export default function AppV2() {
                 {singlePhotoTestMode
                   ? "Confirmar bordas do cartão e medir o dedo"
                   : fingerCardCalibrationStep === "reference"
-                    ? "Salvar 3 linhas e ir para a foto 2"
+                    ? "Salvar laterais e ir para a foto 2"
                     : "Calibrar cartão e medir o dedo"}
               </button>
               <div className="card-line-status">
-                {(["left","right","bottom"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
+                {(["left","right"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
                   {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
                 </span>)}
               </div>
@@ -4487,9 +4492,9 @@ export default function AppV2() {
                     ? "Foto 1 — calibração do cartão"
                     : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>{singlePhotoTestMode
-                  ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão já posicionado sobre o dedo."
+                  ? "Ajuste somente as duas guias verticais nas laterais reais do cartão. A base fica automática."
                   : fingerCardCalibrationStep === "reference"
-                    ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
+                    ? "Ajuste as duas laterais do cartão; a base fica automática."
                     : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo. Na captura, use a guia fantasma da Foto 1 para aproximar escala e ângulo."}</span>
                 <small>{singlePhotoTestMode
                   ? "A própria largura de 85,60 mm desta foto define a escala usada para medir o dedo."
