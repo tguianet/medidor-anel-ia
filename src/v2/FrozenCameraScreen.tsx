@@ -50,6 +50,18 @@ export default function FrozenCameraScreen({
         ? "AFASTE O CELULAR"
         : "DISTÂNCIA ADEQUADA";
 
+  // Centralizacao estimada pelo alinhamento visual; nao mede paralaxe real.
+  const centerKnown = liveOpticalCenterConfidence >= 45 &&
+    liveOpticalCenterOffsetPx !== null && liveCardFingerOffsetPx !== null;
+  const centerOffset = centerKnown ? liveOpticalCenterOffsetPx! : 0;
+  const cardFingerOffset = centerKnown ? liveCardFingerOffsetPx! : 0;
+  const centerAligned = centerKnown &&
+    Math.abs(centerOffset) <= 6 && Math.abs(cardFingerOffset) <= 5;
+  const centerInstruction = !centerKnown ? "PROCURANDO DEDO E CARTÃO"
+    : centerOffset > 6 ? "← MOVA O CELULAR PARA A ESQUERDA"
+    : centerOffset < -6 ? "MOVA O CELULAR PARA A DIREITA →"
+    : Math.abs(cardFingerOffset) > 5 ? "CENTRE O CARTÃO SOBRE O DEDO"
+    : "✓ ENQUADRAMENTO CENTRALIZADO";
   const autoCaptureTimerRef = useRef<number | null>(null);
   const autoCaptureLockedRef = useRef(false);
 
@@ -210,6 +222,30 @@ export default function FrozenCameraScreen({
                   ? `MOVA O CELULAR PARA A DIREITA → · centro ${liveOpticalCenterOffsetPx.toFixed(1)} px`
                   : `ALINHE CARTÃO E DEDO · diferença ${liveCardFingerOffsetPx.toFixed(1)} px`}
         </div>
+        {singlePhotoTestMode && (
+          <div aria-live="polite" style={{
+            position:"absolute",left:"50%",top:340,transform:"translateX(-50%)",
+            width:"min(300px,calc(100% - 18px))",zIndex:53,
+            display:"grid",justifyItems:"center",gap:7,padding:"8px",
+            borderRadius:12,border:`2px solid ${centerAligned ? "#52e0a3" : "#f0c75e"}`,
+            background:"rgba(5,10,14,.86)",color:centerAligned?"#52e0a3":"#f5dfaa",
+            pointerEvents:"none",textAlign:"center"
+          }}>
+            <strong style={{fontSize:12}}>{centerInstruction}</strong>
+            <div style={{position:"relative",height:18,width:"90%",borderRadius:9,
+              border:"1px solid rgba(255,255,255,.45)",background:"rgba(255,255,255,.06)"}}>
+              <div style={{position:"absolute",left:"50%",top:0,bottom:0,width:2,
+                background:"#52e0a3",transform:"translateX(-50%)"}} />
+              {centerKnown && (
+                <div style={{position:"absolute",left:`${50+Math.max(-40,Math.min(40,centerOffset/18*40))}%`,
+                  top:"50%",width:12,height:12,borderRadius:"50%",background:"#79c8ff",
+                  transform:"translate(-50%,-50%)",border:"1px solid white"}} />
+              )}
+            </div>
+            <span style={{fontSize:10,opacity:.85}}>Azul = posição estimada do dedo · Verde = centro da imagem</span>
+            <span style={{fontSize:10,opacity:.85}}>Indicador experimental: não garante ausência de paralaxe</span>
+          </div>
+        )}
         {singlePhotoTestMode && (
           <div style={{
             position:"absolute",left:"50%",top:213,transform:"translateX(-50%)",
