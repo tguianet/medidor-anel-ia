@@ -82,3 +82,27 @@ export const heightCorrection = (focal900: number, cardPx: number, fingerMm: num
   if (!Number.isFinite(factor) || factor < 0.9 || factor > 1.1) return null;
   return { distanceMm, referenceDistanceMm, depthMm, factor };
 };
+
+// ---------------------------------------------------------------------------
+// Dedo fora do centro da foto
+// ---------------------------------------------------------------------------
+// O cartão é plano: em qualquer lugar da foto ele aparece na mesma escala.
+// O dedo é redondo: fora do centro a câmera enxerga um pouco da lateral dele
+// e a silhueta fica mais larga, na proporção 1/cos(ângulo). Ex.: celular a
+// 10 cm e dedo 3 cm fora do centro → ~16° → dedo ~4% mais largo (~0,7 mm).
+// Corrigimos pelo ângulo lateral entre o centro do dedo e o centro da foto.
+export type OffCenterCorrection = { angleDeg: number; offsetMm: number; factor: number };
+
+export const offCenterCorrection = (
+  focal900: number,
+  fingerCenterXpx: number,
+  photoWidthPx: number,
+  pxPerMm: number,
+): OffCenterCorrection | null => {
+  if (!(focal900 > 0) || !(pxPerMm > 0)) return null;
+  const dx = fingerCenterXpx - photoWidthPx / 2;
+  const angle = Math.atan(dx / focal900);
+  const factor = Math.cos(angle);
+  if (!Number.isFinite(factor) || factor < 0.85) return null;
+  return { angleDeg: (angle * 180) / Math.PI, offsetMm: dx / pxPerMm, factor };
+};

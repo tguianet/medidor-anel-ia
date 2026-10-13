@@ -12,7 +12,7 @@ import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { buildReport, loadTests, makeCrops, storeTests, type SavedTest } from "./testReport";
 import { pickCardChannel, type ChannelChoice } from "./cardChannel";
-import { focalPx, heightCorrection, readExifFocal } from "./heightCorrection";
+import { focalPx, heightCorrection, offCenterCorrection, readExifFocal } from "./heightCorrection";
 import { chooseRotation, estimateOrientation, type Rotation } from "./orientation";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
@@ -3232,9 +3232,22 @@ export default function AppV2() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photoFocal, pixelsPerMm, liveWidthMm, photoPixelsReady]);
 
+  // Dedo fora do centro da foto: a silhueta redonda fica mais larga (1/cos).
+  const offCenterFix = useMemo(() => {
+    const source = photoPixelsRef.current;
+    const stage = measureRef.current;
+    if (!photoFocal || !pixelsPerMm || !source || !stage) return null;
+    const rect = stage.getBoundingClientRect();
+    if (!rect.width) return null;
+    const toImageX = (percent:number) => ((((percent/100)*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width;
+    const centerPx = (toImageX(leftLine) + toImageX(rightLine)) / 2;
+    return offCenterCorrection(photoFocal.focal900, centerPx, source.width, pixelsPerMm);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoFocal, pixelsPerMm, leftLine, rightLine, zoom, panX, photoPixelsReady]);
+
   const widthSentToFormulaMm =
     captureQualityGate.accepted && anatomicalRegionReady && liveWidthMm !== null
-      ? liveWidthMm * (heightFix?.factor ?? 1)
+      ? liveWidthMm * (heightFix?.factor ?? 1) * (offCenterFix?.factor ?? 1)
       : null;
 
 
@@ -4183,6 +4196,7 @@ export default function AppV2() {
         `Dedo ${f2(g?.currentFingerPx,1)} px · razão ${f2(g?.currentRatio,4)} · altura Y ${f2(g?.anatomyY,1)}%`,
         `Dedo ${f2(g?.fingerAngleDeg,1)}° · celular pitch ${f2(g?.pitch,1)}° roll ${f2(g?.roll,1)}° · estab ${g?.stability ?? "n/d"}`,
         `Zoom ${zoom.toFixed(1)}×`,
+        `Centro: ${offCenterFix ? `dedo ${f2(offCenterFix.offsetMm,1)} mm do centro (${f2(offCenterFix.angleDeg,1)}°) · fator ${offCenterFix.factor.toFixed(4)}` : "sem correção"}`,
         `Altura: ${heightFix ? `dist ${f2(heightFix.distanceMm/10,1)} cm (ref ${f2(heightFix.referenceDistanceMm/10,1)}) · fator ${heightFix.factor.toFixed(4)} · lupa ${f2(liveWidthMm)} → ${f2(widthSentToFormulaMm)} mm · lente ${photoFocal?.f35 ?? "26*"}` : "sem correção"}`,
         `Canal do cartão: ${cardChannelInfo ? `${cardChannelInfo.channel.id} (contraste ${cardChannelInfo.score.toFixed(1)} · cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}`,
       ];
@@ -4860,6 +4874,7 @@ export default function AppV2() {
                 {testBusy && <small>{testBusy}</small>}
               </div>
               <span>Medida do dedo: {widthAnalysis.manualFallback ? "pelas linhas da lupa (snaps automáticos não acharam a borda)" : "snaps automáticos"} · {captureQualityGate.accepted ? "aceita" : `bloqueada: ${captureQualityGate.reasons.join(" · ")}`}</span>
+              <span>Centro: {offCenterFix ? `dedo ${Math.abs(offCenterFix.offsetMm).toFixed(1)} mm à ${offCenterFix.offsetMm < 0 ? "esquerda" : "direita"} do centro da foto (${Math.abs(offCenterFix.angleDeg).toFixed(1)}°) · fator ${offCenterFix.factor.toFixed(4)}` : "sem correção"}</span>
               <span>Altura: {heightFix ? `celular a ${(heightFix.distanceMm/10).toFixed(1)} cm do cartão (ref ${(heightFix.referenceDistanceMm/10).toFixed(1)} cm) · borda do dedo ${heightFix.depthMm.toFixed(1)} mm abaixo · fator ${heightFix.factor.toFixed(4)} · lente ${photoFocal?.f35 ? `${photoFocal.f35} mm` : "26 mm (padrão)"}` : (photoFocal ? "sem correção (sem largura do dedo)" : "sem correção (foto sem lente conhecida)")}</span>
               <span>Canal do cartão: {cardChannelInfo ? `${cardChannelInfo.channel.id} · contraste ${cardChannelInfo.score.toFixed(1)} (cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}</span>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
@@ -5134,6 +5149,13 @@ export default function AppV2() {
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
               <span>Posicione as linhas verdes aproximadamente na parte mais grossa do dedo. No diagnóstico privado, os snaps multiponto percorrem a faixa ao redor, grudam no contorno físico de cada lado e procuram a maior largura que forme uma constante estável.</span>
+            </div>
+          )}
+
+          {phase === "finger" && !tryOn && offCenterFix && Math.abs(offCenterFix.angleDeg) > 6 && (
+            <div className="edge-status">
+              <strong>Dedo fora do centro da foto ({Math.abs(offCenterFix.offsetMm/10).toFixed(1)} cm)</strong>
+              <span>A medida foi corrigida, mas para mais precisão tire a próxima foto com o celular bem em cima do dedo do anel.</span>
             </div>
           )}
 
