@@ -2664,6 +2664,7 @@ export default function AppV2() {
       baseMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
       normalizedMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
       measurementSource:"intersection-85.60" as const,
+      manualFallback:false,
     };
     if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
 
@@ -2690,7 +2691,27 @@ export default function AppV2() {
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
-    if(!samples || samples.length<35) return empty;
+    if(!samples || samples.length<35){
+      // Os snaps automáticos não acharam bordas suficientes nesta foto.
+      // Usamos a posição das linhas verdes ajustadas na lupa (medida manual),
+      // na altura do anel, com a mesma escala A-B do cartão.
+      const stage=measureRef.current;
+      const source=photoPixelsRef.current;
+      if(!stage||!source) return empty;
+      const rect=stage.getBoundingClientRect();
+      if(!rect.width) return empty;
+      const toImageX=(percent:number)=>(((percent/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*source.width;
+      const lineX=(line:Line,yPercent:number)=>{
+        const dy=line.b.y-line.a.y;
+        if(Math.abs(dy)<1e-6) return (line.a.x+line.b.x)/2;
+        const t=clamp((yPercent-line.a.y)/dy,0,1);
+        return line.a.x+(line.b.x-line.a.x)*t;
+      };
+      const widthPx=Math.abs(toImageX(lineX(fingerLines.right,ringGuideY))-toImageX(lineX(fingerLines.left,ringGuideY)));
+      const manualMm=widthPx/pixelsPerMm;
+      if(!Number.isFinite(manualMm)||manualMm<=0||manualMm>45) return empty;
+      return {...empty,oldMm:manualMm,newMm:manualMm,localScaleMm:manualMm,manualFallback:true};
+    }
 
     const baseMmPerPx=1/pixelsPerMm;
 
@@ -2822,10 +2843,11 @@ export default function AppV2() {
       baseMmPerPx,
       normalizedMmPerPx:baseMmPerPx*perspectiveScaleFactor,
       measurementSource:"intersection-85.60" as const,
+      manualFallback:false,
     };
   },[
     pixelsPerMm,leftLine,rightLine,ringGuideY,zoom,panX,panY,leftLocked,rightLocked,
-    measurementCardHomography,cardLines,
+    measurementCardHomography,cardLines,fingerLines,
     handLandmarkAnalysis?.measuredFinger?.ringRegionY,
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
@@ -2983,7 +3005,9 @@ export default function AppV2() {
     }
     // Pitch e roll continuam no diagnostico e no score da rajada.
     // Nao bloqueiam mais sozinhos o resultado comercial.
-    if(preFormulaQuality.edgeScore<70){
+    // Medida pelas linhas da lupa (snaps falharam): a pessoa marcou a borda
+    // na lupa, então o critério de bordas automáticas não se aplica.
+    if(!widthAnalysis.manualFallback && preFormulaQuality.edgeScore<70){
       reasons.push(`bordas ${preFormulaQuality.edgeScore} < 70`);
     }
     if(calibrationConfidence<MIN_CARD_CALIBRATION_CONFIDENCE){
@@ -3002,6 +3026,7 @@ export default function AppV2() {
       confidenceMin:null,
     };
   },[
+    widthAnalysis.manualFallback,
     preFormulaQuality.edgeScore,
     captureDeviceQuality?.stabilityScore,
     captureDeviceQuality?.devicePitch,
@@ -4767,7 +4792,8 @@ export default function AppV2() {
                 {reportUrl && <a href={reportUrl} download={`relatorio-medidor-${savedTests.length}-testes.jpg`} style={{color:"#00e5ff",fontWeight:700}}>Baixar relatório</a>}
                 {testBusy && <small>{testBusy}</small>}
               </div>
-              <span>Altura: {heightFix ? `celular a ${(heightFix.distanceMm/10).toFixed(1)} cm do cartão (ref ${(heightFix.referenceDistanceMm/10).toFixed(1)} cm) · borda do dedo ${heightFix.depthMm.toFixed(1)} mm abaixo · fator ${heightFix.factor.toFixed(4)} · lente ${photoFocal?.f35 ? `${photoFocal.f35} mm` : "26 mm (padrão)"}` : "sem correção (foto sem lente conhecida)"}</span>
+              <span>Medida do dedo: {widthAnalysis.manualFallback ? "pelas linhas da lupa (snaps automáticos não acharam a borda)" : "snaps automáticos"} · {captureQualityGate.accepted ? "aceita" : `bloqueada: ${captureQualityGate.reasons.join(" · ")}`}</span>
+              <span>Altura: {heightFix ? `celular a ${(heightFix.distanceMm/10).toFixed(1)} cm do cartão (ref ${(heightFix.referenceDistanceMm/10).toFixed(1)} cm) · borda do dedo ${heightFix.depthMm.toFixed(1)} mm abaixo · fator ${heightFix.factor.toFixed(4)} · lente ${photoFocal?.f35 ? `${photoFocal.f35} mm` : "26 mm (padrão)"}` : (photoFocal ? "sem correção (sem largura do dedo)" : "sem correção (foto sem lente conhecida)")}</span>
               <span>Canal do cartão: {cardChannelInfo ? `${cardChannelInfo.channel.id} · contraste ${cardChannelInfo.score.toFixed(1)} (cinza ${cardChannelInfo.grayScore.toFixed(1)})` : "n/d"}</span>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
