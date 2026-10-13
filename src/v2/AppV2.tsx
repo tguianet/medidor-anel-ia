@@ -3132,6 +3132,20 @@ export default function AppV2() {
   const visualBandWidth = Math.max(0, visualBandRight - visualBandLeft);
   const visualBandCenter = visualBandLeft + visualBandWidth / 2;
 
+  // Experimento independente: somente as duas linhas VERDES manuais.
+  // Sem snaps, detector físico, suavização ou fusão anatômica.
+  // A distância em tela é desfeita pelo zoom visual antes da escala do cartão.
+  const manualLinesOnlyTest=(()=>{
+    const source=photoPixelsRef.current;
+    if(phase!=="finger" || !leftLocked || !rightLocked ||
+       !source || !pixelsPerMm || pixelsPerMm<=0 || zoom<=0) return null;
+    const widthPx=Math.abs(rightLine-leftLine)/100*source.width/zoom;
+    const widthMm=widthPx/pixelsPerMm;
+    if(!Number.isFinite(widthMm)||widthMm<=0) return null;
+    const ring=classifyFingerWidthMmExperimentalHigh(widthMm);
+    return {widthPx,widthMm,ringSize:ring.exactRingSize};
+  })();
+
   const geometricScaleMmPerPx = (() => {
     if(phase!=="finger"||!pixelsPerMm||pixelsPerMm<=0) return null;
     return 1/pixelsPerMm;
@@ -4649,6 +4663,16 @@ export default function AppV2() {
                   <span>Cartão automático: detector aproximado + auto-snap físico EXTERNO das laterais + base antes da escala.</span>
                   <span>Homografia: somente diagnóstico/validação de perspectiva · não altera a medida</span>
                   <span>Divergência geométrica: {widthAnalysis.geometryDisagreementMm.toFixed(2)} mm · somente diagnóstico</span>
+                  {manualLinesOnlyTest && (
+                    <div style={{padding:"10px",border:"2px solid #00e1dc",borderRadius:"8px",display:"grid",gap:"4px"}}>
+                      <strong>TESTE ISOLADO — SOMENTE LINHAS VERDES (SEM SNAPS)</strong>
+                      <span>Distância entre linhas: {manualLinesOnlyTest.widthPx.toFixed(1)} px</span>
+                      <span>Largura manual: {manualLinesOnlyTest.widthMm.toFixed(3)} mm</span>
+                      <strong>Aro pela largura manual: {manualLinesOnlyTest.ringSize ?? "n/d"}</strong>
+                      <span>Zoom da foto: {zoom.toFixed(2)}× · escala do cartão: {pixelsPerMm.toFixed(2)} px/mm</span>
+                      <span>Somente diagnóstico — não altera o aro comercial.</span>
+                    </div>
+                  )}
                   <span>Medida realmente enviada à fórmula: {widthSentToFormulaMm===null ? "n/d" : widthSentToFormulaMm.toFixed(2)+" mm"}</span>
                   {robustFingerLineTest && (
                     <>
