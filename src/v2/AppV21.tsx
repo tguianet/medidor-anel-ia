@@ -551,6 +551,11 @@ export default function AppV21() {
 
     // V2-1 applies the same grayscale photo to calibration, visualization and finger measurement.
     capturedPhoto = await grayShadowCorrect(capturedPhoto);
+    // Keep the processing canvas and the displayed photo pixel-identical.
+    const processed = new Image();
+    processed.src = capturedPhoto;
+    await new Promise<void>((resolve,reject)=>{ processed.onload=()=>resolve(); processed.onerror=()=>reject(new Error("Falha no processamento da imagem.")); });
+    selectedCanvas.getContext("2d")?.drawImage(processed,0,0,selectedCanvas.width,selectedCanvas.height);
     selectedBurstCalibration = null; // Calibrate from transformed photo only.
     // Alias mantido para o restante do fluxo existente.
     const canvas=selectedCanvas;
