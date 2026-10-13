@@ -67,6 +67,7 @@ const detectInWorker=async(photo:string,onStatus:(text:string)=>void):Promise<De
 
     worker.onmessage=(event)=>{
       const data=event.data;
+      if(data?.type==="status"){onStatus(data.message || "Carregando OpenCV...");return;}
       if(data?.type==="result"){
         finish();
         resolve(data.result as DetectionResult);
