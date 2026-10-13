@@ -910,7 +910,12 @@ export default function AppV2() {
         // Fluxo comercial de 1 foto: o detector leve ja confirmou o cartao.
         // Aplicamos automaticamente esquerda, direita e base e seguimos
         // direto para a medicao do dedo. Ajuste manual permanece como fallback.
-        if(singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE){
+        // Teste: NÃO pula mais a etapa do cartão. O detector às vezes erra a
+        // caixa (ex.: foto da câmera do celular, mão encostada no cartão) e
+        // seguia direto para o dedo com a escala errada. Agora a pessoa sempre
+        // confere as 3 linhas (com ímã) e toca em Calibrar.
+        const AUTO_ADVANCE_CARD=false;
+        if(AUTO_ADVANCE_CARD && singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE){
           setCardSnapLines({
             left:detectedLeftLine,
             right:detectedRightLine,
@@ -965,7 +970,9 @@ export default function AppV2() {
       }
 
       camera.setError(
-        fingerCardCalibrationStep === "reference"
+        singlePhotoTestMode
+          ? "Confira as 3 linhas do cartão (laterais e base). Aproxime da borda e solte: o ímã encaixa. Depois toque em Calibrar."
+          : fingerCardCalibrationStep === "reference"
           ? "Foto 1: ajuste as 2 laterais e a base do cartão."
           : "Foto 2: ajuste novamente as 2 laterais e a base do cartão sobre o dedo."
       );
