@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useEffect,useRef,useState} from "react";
 type P={x:number;y:number};
 type Scan={y:number;left:number;right:number;quality:number};
 const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
@@ -40,6 +40,38 @@ export default function AppV22(){
  const [left,setLeft]=useState(.42),[right,setRight]=useState(.58),[base,setBase]=useState(.43);
  const [result,setResult]=useState<Awaited<ReturnType<typeof analyze>>|null>(null);
  const [msg,setMsg]=useState("Fotografe o cartao sobre o dedo. Ajuste as guias se necessario.");
+ const [cameraOn,setCameraOn]=useState(false),[torch,setTorch]=useState(false),[torchSupported,setTorchSupported]=useState(false);
+ const videoRef=useRef<HTMLVideoElement>(null),streamRef=useRef<MediaStream|null>(null);
+ const stopCamera=()=>{streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;setCameraOn(false);setTorch(false);};
+ useEffect(()=>()=>{streamRef.current?.getTracks().forEach(t=>t.stop());},[]);
+ const openCamera=async()=>{
+   stopCamera();
+   try{
+     const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:1920}},audio:false});
+     streamRef.current=stream;
+     const track=stream.getVideoTracks()[0];
+     const capabilities=track.getCapabilities() as MediaTrackCapabilities & {torch?:boolean};
+     setTorchSupported(Boolean(capabilities?.torch));
+     setCameraOn(true);
+     setMsg(capabilities?.torch?"Camera pronta. Ligue a lanterna se necessario.":"Camera pronta. Lanterna nao disponivel neste navegador/aparelho.");
+     requestAnimationFrame(()=>{if(videoRef.current){videoRef.current.srcObject=stream;void videoRef.current.play();}});
+   }catch(err){setMsg("Erro ao abrir camera: "+(err instanceof Error?err.message:String(err)));}
+ };
+ const toggleTorch=async()=>{
+   const track=streamRef.current?.getVideoTracks()[0];if(!track)return;
+   try{
+     const next=!torch;
+     await track.applyConstraints({advanced:[{torch:next} as MediaTrackConstraintSet]});
+     setTorch(next);setMsg(next?"Lanterna ligada.":"Lanterna desligada.");
+   }catch{setTorchSupported(false);setMsg("Este navegador nao permite controlar a lanterna. Tente Chrome no Android.");}
+ };
+ const takePhoto=()=>{
+   const v=videoRef.current;if(!v||!v.videoWidth){setMsg("A camera ainda nao esta pronta.");return;}
+   const canvas=document.createElement("canvas");canvas.width=v.videoWidth;canvas.height=v.videoHeight;
+   canvas.getContext("2d")?.drawImage(v,0,0);
+   setPhoto(canvas.toDataURL("image/jpeg",.94));setResult(null);stopCamera();
+   setMsg("Foto capturada. Ajuste as linhas e detecte as bordas.");
+ };
  const load=(f?:File)=>{if(!f)return;const r=new FileReader();r.onload=()=>{setPhoto(String(r.result));setResult(null);};r.readAsDataURL(f);};
  const run=async()=>{setBusy(true);setMsg("Procurando contornos sob o cartao...");try{const v=await analyze(photo,left,right,base);setResult(v);setMsg(v.scans.length>=18?"Contornos candidatos encontrados. Confira as linhas na foto.":"Leitura insuficiente. Ajuste as guias verdes e tente novamente.");}catch(e){setMsg(e instanceof Error?e.message:"Erro de leitura");}finally{setBusy(false);}};
  const summary=result?.scans.length?result.scans.map(s=>s.right-s.left).sort((a,b)=>a-b)[Math.floor(result.scans.length/2)]*100:null;
@@ -48,7 +80,14 @@ export default function AppV22(){
  <section className="panel" style={{display:"grid",gap:14}}>
  <h2>Cartao sobre o dedo · 1 foto</h2>
  <p>Primeiro teste: verificar se as bordas verdes acompanham o dedo visivel abaixo do cartao. Nao calcula aro nesta fase.</p>
- <label className="primary" style={{padding:14,textAlign:"center",cursor:"pointer"}}>Fotografar ou escolher imagem<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>load(e.target.files?.[0])}/></label>
+ <button className="primary" type="button" onClick={()=>void openCamera()}>Abrir camera</button>
+ {cameraOn&&<div style={{display:"grid",gap:8}}>
+  <video ref={videoRef} autoPlay muted playsInline style={{width:"100%",borderRadius:12}}/>
+  <button className="secondary" type="button" disabled={!torchSupported} onClick={()=>void toggleTorch()}>{!torchSupported?"Lanterna indisponivel":torch?"Desligar flash":"Ligar flash / lanterna"}</button>
+  <button className="primary" type="button" onClick={takePhoto}>Capturar foto</button>
+  <button className="secondary" type="button" onClick={stopCamera}>Fechar camera</button>
+ </div>}
+ <label className="secondary" style={{padding:14,textAlign:"center",cursor:"pointer"}}>Escolher foto da galeria<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>load(e.target.files?.[0])}/></label>
  {photo&&<>
  <div style={{position:"relative",width:"100%",touchAction:"auto"}}>
  <img src={photo} alt="Foto para deteccao do dedo" style={{width:"100%",height:"auto",display:"block"}}/>
