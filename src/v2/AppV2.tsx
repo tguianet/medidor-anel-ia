@@ -171,6 +171,7 @@ export default function AppV2() {
     right: { a:{x:38,y:34}, b:{x:38,y:66} },
   });
   const [cardReady, setCardReady] = useState(false);
+  const [liveCardWidthPx, setLiveCardWidthPx] = useState<number | null>(null);
   const [cameraAngleGuide, setCameraAngleGuide] = useState<"forward" | "backward" | "aligned" | "unknown">("unknown");
   const [liveFingerTiltDeg, setLiveFingerTiltDeg] = useState<number | null>(null);
   const [liveFingerTiltConfidence, setLiveFingerTiltConfidence] = useState(0);
@@ -245,6 +246,7 @@ export default function AppV2() {
   useEffect(() => {
     if (stage !== "camera" || camera.cameraOpening) {
       setCardReady(false);
+      setLiveCardWidthPx(null);
       setCameraAngleGuide("unknown");
       setLiveFingerTiltDeg(null);
       setLiveFingerTiltConfidence(0);
@@ -260,6 +262,7 @@ export default function AppV2() {
       try {
         const liveGuide = analyzeLiveCardGuide(camera.videoRef.current);
         setCardReady(liveGuide.ready);
+        setLiveCardWidthPx(current => liveGuide.cardWidthPx === null ? null : current === null ? liveGuide.cardWidthPx : current * 0.7 + liveGuide.cardWidthPx * 0.3);
         setCameraAngleGuide(liveGuide.angle);
         setLiveFingerTiltConfidence(liveGuide.fingerTiltConfidence);
         setLiveOpticalCenterConfidence(liveGuide.opticalCenterConfidence);
@@ -4032,6 +4035,7 @@ export default function AppV2() {
           torchSupported={camera.torchSupported}
           onToggleTorch={() => void camera.toggleTorch()}
           cardReady={cardReady}
+          liveCardWidthPx={liveCardWidthPx}
           calibrationStep={fingerCardCalibrationStep}
           cameraAngleGuide={cameraAngleGuide}
           liveFingerTiltDeg={measurementMode==="finger" ? liveFingerTiltDeg : null}
