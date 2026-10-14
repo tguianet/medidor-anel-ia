@@ -1865,6 +1865,12 @@ export default function App() {
           <small>{debugMode ? "Modo de teste privado ativo" : "Paquímetro digital"}</small>
         </div>
       </header>
+      <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <button type="button" onClick={() => setDebugMode(value => !value)} style={{padding:"10px 14px",borderRadius:8,border:"1px solid #5688ba",background:debugMode?"#216749":"#273b58",color:"#fff",fontWeight:700,cursor:"pointer"}}>
+          {debugMode ? "Desativar diagnóstico" : "Ativar modo de teste"}
+        </button>
+        <span style={{fontSize:12}}>{debugMode ? "Diagnóstico ativo: finalize a medição para exportar o JSON." : "PR #48 — somente versão experimental"}</span>
+      </div>
 
       {stage === "intro" && (
         <IntroScreen
