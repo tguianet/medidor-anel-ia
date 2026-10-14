@@ -180,6 +180,8 @@ export default function AppV2() {
   const [liveOpticalCenterConfidence, setLiveOpticalCenterConfidence] = useState(0);
   const [analyzingCard, setAnalyzingCard] = useState(false);
   const [tryOn, setTryOn] = useState(false);
+  // Tela de resultado (só apresentação; o número vem do cálculo congelado).
+  const [showResultScreen, setShowResultScreen] = useState(false);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
   const [ringBandWidth, setRingBandWidth] = useState(4);
   const [ringStyle, setRingStyle] = useState<RingStyle>("classic");
@@ -4456,7 +4458,7 @@ export default function AppV2() {
                 </button>
               </>
             )}
-            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
+            {debugMode && phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
                 <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
@@ -4590,7 +4592,7 @@ export default function AppV2() {
                 : "Tire outra foto com o cartão e o celular mais alinhados e o celular parado."}</span>
             </div>
           )}
-          {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
+          {debugMode && phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
               <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {commercialRingSize}</strong>
@@ -4913,17 +4915,38 @@ export default function AppV2() {
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
             {phase === "finger" && (
-              <button className="primary" type="button" disabled>{
-                result
-                  ? "Aro calculado"
-                  : leftLocked && rightLocked
-                    ? "Linhas posicionadas"
-                    : "Ajuste as linhas no dedo"
-              }</button>
+              result && commercialRingSize!==null && leftLocked && rightLocked
+                ? <button className="primary result-open-btn" type="button" onClick={() => setShowResultScreen(true)}>Ver meu aro</button>
+                : <button className="primary" type="button" disabled>{
+                    leftLocked && rightLocked
+                      ? "Linhas posicionadas"
+                      : "Ajuste as linhas no dedo"
+                  }</button>
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
           <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Alinhe manualmente as duas linhas verdes nas bordas externas da parte mais grossa do dedo."}</p>
+          {showResultScreen && phase === "finger" && result && commercialRingSize!==null && (
+            <div className="result-screen" role="dialog" aria-modal="true" aria-label="Seu aro">
+              <div className="result-screen-lines" aria-hidden="true"><i /><i /></div>
+              <div className="result-screen-top">
+                <span>◇ MEDIDOR DE ANEL</span>
+              </div>
+              <div className="result-screen-body">
+                <span className="result-screen-eyebrow">ARO DO ANEL</span>
+                <strong className="result-screen-number">{commercialRingSize}</strong>
+                <div className="result-screen-divider" aria-hidden="true"><span /><b>◇</b><span /></div>
+                <p className="result-screen-options">
+                  Justo <em>{clamp(commercialRingSize - 1, 1, 40)}</em> · Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
+                </p>
+                <p className="result-screen-hint">Na dúvida entre dois números, prefira o de conforto para anéis largos ou para usar o dia todo.</p>
+              </div>
+              <div className="result-screen-actions">
+                <button type="button" className="result-screen-primary" onClick={() => { setShowResultScreen(false); resetPhoto(); }}>Medir novamente</button>
+                <button type="button" className="result-screen-secondary" onClick={() => setShowResultScreen(false)}>Voltar e ajustar as linhas</button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 

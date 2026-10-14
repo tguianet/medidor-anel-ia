@@ -1195,3 +1195,25 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .home-foot p { max-width: 280px; margin: 8px auto 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 @keyframes home-ping { 75%, 100% { transform: scale(2.2); opacity: 0; } }
 @keyframes home-pulse { 50% { opacity: .2; } }
+
+/* ===== Tela de resultado (somente aparência) ===== */
+.result-open-btn { min-height: 52px; border-radius: 999px; font-weight: 700; letter-spacing: .04em; box-shadow: 0 8px 22px rgba(212,175,55,.28); }
+.result-screen { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; padding: max(18px, env(safe-area-inset-top)) 24px max(22px, env(safe-area-inset-bottom)); overflow: hidden; color: #f5f5f0; background: radial-gradient(ellipse 80% 55% at 50% 40%, rgba(212,175,55,.12), transparent 70%), linear-gradient(180deg, #121110, #0b0a09); animation: result-in .45s ease-out both; }
+.result-screen-lines i { position: absolute; width: 1px; height: 46%; background: linear-gradient(180deg, transparent, rgba(242,202,80,.55), transparent); transform-origin: top; }
+.result-screen-lines i:first-child { top: -6%; right: 18%; transform: rotate(-28deg); }
+.result-screen-lines i:last-child { bottom: 22%; left: 10%; height: 26%; transform: rotate(-28deg); }
+.result-screen-lines i::after { content: ""; position: absolute; left: -3px; top: 55%; width: 7px; height: 7px; border-radius: 50%; background: #e9c46f; box-shadow: 0 0 10px #e9c46f; }
+.result-screen-top { position: relative; text-align: center; color: #d9b363; font-family: "Playfair Display", Georgia, serif; font-size: 15px; letter-spacing: .22em; }
+.result-screen-body { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.result-screen-eyebrow { color: #e3c47d; font-family: "Playfair Display", Georgia, serif; font-size: clamp(30px, 9vw, 44px); letter-spacing: .04em; line-height: 1; }
+.result-screen-number { display: block; margin: 6px 0 4px; font-family: "Playfair Display", Georgia, serif; font-size: clamp(120px, 42vw, 190px); font-weight: 500; line-height: .95; background: linear-gradient(180deg, #f6e3a6, #d4af37 55%, #a8812f); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 6px 18px rgba(212,175,55,.25)); }
+.result-screen-divider { display: flex; align-items: center; gap: 10px; width: min(260px, 70%); margin: 10px auto 12px; color: #d9b363; }
+.result-screen-divider span { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(217,179,99,.7), transparent); }
+.result-screen-divider b { font-size: 12px; font-weight: 400; }
+.result-screen-options { margin: 0; color: #e6e2de; font-size: 16px; letter-spacing: .02em; }
+.result-screen-options em { font-style: normal; color: #f2ca50; font-weight: 600; }
+.result-screen-hint { max-width: 300px; margin: 18px auto 0; color: #9e9a90; font-size: 12.5px; line-height: 1.55; }
+.result-screen-actions { position: relative; display: grid; gap: 10px; width: min(100%, 420px); margin: 0 auto; }
+.result-screen-primary { height: 54px; border: 0; border-radius: 999px; color: #0d0d0d; background: linear-gradient(90deg, #f3e5ab, #f2ca50, #c9a25e); font-size: 15px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; box-shadow: 0 8px 24px rgba(212,175,55,.28); cursor: pointer; }
+.result-screen-secondary { height: 48px; border: 1px solid rgba(212,175,55,.35); border-radius: 999px; color: #e7c17c; background: transparent; font-size: 14px; font-weight: 600; cursor: pointer; }
+@keyframes result-in { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }
