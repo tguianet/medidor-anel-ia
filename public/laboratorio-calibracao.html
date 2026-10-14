@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laboratório de calibração | V2</title>
+<style>
+:root{font-family:system-ui,sans-serif;color-scheme:dark;background:#11151c;color:#f4f5f6}
+*{box-sizing:border-box}body{margin:0 auto;max-width:820px;padding:16px}h1{font-size:1.45rem;margin:.4rem 0}
+p,small{color:#bdc6d2;line-height:1.5}.panel{border:1px solid #394352;background:#1c232d;padding:14px;border-radius:12px;margin:12px 0}
+button,input[type=file]{font:inherit}button{border:0;border-radius:8px;padding:12px;background:#376fde;color:white;margin:5px 5px 5px 0;cursor:pointer}
+button:disabled{opacity:.4}input[type=range]{width:100%}label{display:block;margin:16px 0}
+strong,output{color:#fff}#photo{max-width:100%;display:block;border-radius:6px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#29323e;padding:12px;border-radius:8px}
+.metric b{display:block;font-size:1.3rem;margin-top:4px}#snapshots{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color:#ffd58a}
+</style></head><body>
+<h1>Laboratório de calibração do cartão — V2</h1>
+<p>Experimento isolado. Carregue um diagnóstico completo .json da V2. A foto fica fixa; nenhum dado é enviado a servidor.</p>
+<section class="panel"><label>Arquivo de diagnóstico (.json)<br><input id="file" type="file" accept=".json,application/json"></label>
+<small id="status">Escolha um diagnóstico que contenha foto, escala e largura do dedo.</small></section>
+<section class="panel" id="lab" hidden>
+<img id="photo" alt="Fotografia original da medição">
+<div class="grid">
+<div class="metric">Escala original<b id="origScale"></b></div>
+<div class="metric">Largura original<b id="origWidth"></b></div>
+<div class="metric">Escala simulada<b id="scaleValue"></b></div>
+<div class="metric">Largura simulada<b id="widthValue"></b></div>
+</div>
+<label>Ajuste fino da largura de referência do cartão (alteração percentual sobre os 85,60 mm em pixels da foto)
+<input id="offset" type="range" min="-8" max="8" step="0.1" value="0">
+<output id="change">0,0%</output></label>
+<p class="warning">A simulação preserva os pixels do dedo e altera apenas os pixels atribuídos à largura do cartão. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
+<button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
+</section>
+<section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
+<div id="snapshots"><table><thead><tr><th>#</th><th>Cartão</th><th>Escala</th><th>Largura simulada</th><th>Dif. da original</th></tr></thead><tbody id="rows"></tbody></table></div>
+<button id="download">Baixar relatório JSON</button><button id="clear">Limpar tentativas</button>
+</section>
+<script>
+const $=id=>document.getElementById(id), fmt=(n,d=3)=>Number(n).toFixed(d).replace('.',',');
+let diagnostic=null, snapshots=[], reference={};
+function update(){
+const factor=1+Number($('offset').value)/100;
+const scale=reference.scale*factor;
+const width=reference.pixelFingerWidth/scale;
+$('change').textContent=(Number($('offset').value)>0?'+':'')+fmt($('offset').value,1)+'%';
+$('scaleValue').textContent=fmt(scale,4)+' px/mm';
+$('widthValue').textContent=fmt(width)+' mm';
+return {adjustmentPercent:Number($('offset').value),cardPixelWidth:reference.cardPixelWidth*factor,scalePxPerMm:scale,simulatedFingerMm:width,differenceMm:width-reference.originalWidth};
+}
+$('file').addEventListener('change',async e=>{
+try{
+const f=e.target.files[0];if(!f)return;
+const d=JSON.parse(await f.text());
+const scale=Number(d.card?.pixelsPerMm), width=Number(d.finger?.widthSentToFormulaMm), physical=Number(d.card?.physicalWidthMm);
+if(!d.image?.photoDataUrl?.startsWith('data:image/')||!Number.isFinite(scale)||scale<=0||!Number.isFinite(width)||width<=0||!Number.isFinite(physical)||physical<=0)throw Error('Diagnóstico incompleto ou incompatível.');
+diagnostic=d; snapshots=[];
+reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:width*scale};
+$('photo').src=d.image.photoDataUrl;
+$('origScale').textContent=fmt(scale,4)+' px/mm';
+$('origWidth').textContent=fmt(width)+' mm';
+$('offset').value=0;$('lab').hidden=false;$('results').hidden=false;$('rows').replaceChildren();
+$('status').textContent='Arquivo carregado: '+f.name+'. A foto permanecerá fixa.';
+update();
+}catch(err){$('status').textContent='Erro: '+err.message;$('lab').hidden=true;$('results').hidden=true;}
+});
+$('offset').addEventListener('input',update);
+$('reset').addEventListener('click',()=>{$('offset').value=0;update()});
+$('save').addEventListener('click',()=>{
+if(!diagnostic)return; const data={number:snapshots.length+1,...update()};snapshots.push(data);
+const tr=document.createElement('tr');
+[data.number,fmt(data.adjustmentPercent,1)+'%',fmt(data.scalePxPerMm,4),fmt(data.simulatedFingerMm),fmt(data.differenceMm)].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.appendChild(td)});$('rows').appendChild(tr);
+});
+$('clear').addEventListener('click',()=>{snapshots=[];$('rows').replaceChildren()});
+$('download').addEventListener('click',()=>{
+if(!diagnostic)return;
+const report={schema:'v2-calibration-sensitivity-lab-1',sourceCapturedAt:diagnostic.capturedAt,sourceSchema:diagnostic.schema,reference,assumption:'finger pixels fixed; changes to card pixel width only; no re-execution of original algorithm',snapshots};
+const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='laboratorio-calibracao-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+});
+</script></body></html>
