@@ -4962,7 +4962,7 @@ export default function AppV2() {
                 link.click();
                 link.remove();
                 window.setTimeout(() => URL.revokeObjectURL(url), 5000);
-              }}>Baixar diagnóstico completo (.json)</button>
+              }} id="v2-export-diagnostic">Baixar diagnóstico completo (.json)</button>
               <small>Inclui foto, linhas, escala, dados do dedo, qualidade e resultado. Exporte após ajustar as linhas.</small>
             </div>
           )}
