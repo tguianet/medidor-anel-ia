@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap");
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #f6f0e5;
@@ -1141,3 +1142,23 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   left:63%;
   transform:translateX(-50%);
 }
+
+/* ===== Visual premium (somente aparência) ===== */
+.intro-lux { position: relative; overflow: hidden; padding: clamp(26px, 6vw, 44px) clamp(20px, 5vw, 40px); text-align: center; border-color: #4a3d27; background: linear-gradient(180deg, rgba(30,26,20,.97), rgba(14,12,10,.98)); }
+.intro-lux-glow { position: absolute; inset: -40% -20% auto; height: 70%; background: radial-gradient(ellipse at center, rgba(224,186,104,.22), transparent 65%); pointer-events: none; }
+.intro-lux > * { position: relative; }
+.intro-lux-kicker { display: inline-block; color: #d9b363; font-size: 11px; font-weight: 800; letter-spacing: .28em; }
+.intro-lux-title { margin: 14px auto 10px; max-width: 13ch; font-family: "Playfair Display", Georgia, serif; font-size: clamp(36px, 9.5vw, 56px); font-weight: 600; line-height: 1.02; color: #f6ead0; }
+.intro-lux-title em { font-style: italic; color: #e9c46f; background: linear-gradient(180deg, #f6dc95, #c99a43); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.intro-lux-sub { margin: 0 auto 20px; max-width: 30ch; color: #c9bda6; font-size: 15px; line-height: 1.5; }
+.intro-lux-video { position: relative; overflow: hidden; margin: 0 0 20px; border: 1px solid rgba(220,180,90,.5); border-radius: 18px; background: #050505; box-shadow: 0 14px 36px rgba(0,0,0,.45); }
+.intro-lux-video video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; }
+.intro-lux-video-close { position: absolute; top: 10px; right: 10px; z-index: 3; width: 36px; height: 36px; padding: 0; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; color: #fff; background: rgba(0,0,0,.7); font-size: 18px; font-weight: 900; cursor: pointer; }
+.intro-lux-link { margin: 0 auto 18px; padding: 8px 14px; border: 1px solid #5a4a2c; border-radius: 999px; color: #e7c574; background: transparent; font-size: 13px; font-weight: 700; cursor: pointer; }
+.intro-lux-steps { display: grid; gap: 10px; margin: 4px 0 22px; padding: 0; list-style: none; text-align: left; }
+.intro-lux-steps li { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid #3d3324; border-radius: 16px; background: rgba(12,10,8,.55); }
+.intro-lux-steps li > span { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border: 1.5px solid #d9b363; border-radius: 50%; color: #f0cf7e; font-family: "Playfair Display", Georgia, serif; font-size: 17px; font-weight: 700; box-shadow: 0 0 12px rgba(217,179,99,.25); }
+.intro-lux-steps strong { display: block; color: #f3e6c8; font-size: 15px; }
+.intro-lux-steps small { display: block; margin-top: 2px; color: #a99c86; font-size: 12.5px; }
+.intro-lux-cta { min-height: 56px; border-radius: 16px; font-size: 17px; font-weight: 800; letter-spacing: .02em; box-shadow: 0 10px 28px rgba(201,154,67,.28), inset 0 1px 0 rgba(255,255,255,.35); }
+.intro-lux-note { margin: 12px 0 0; color: #9d927f; font-size: 12.5px; }

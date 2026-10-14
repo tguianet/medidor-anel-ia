@@ -10,57 +10,28 @@ export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
   const [videoAvailable, setVideoAvailable] = useState(true);
 
   return (
-    <section className="panel intro">
-      <span className="step">MEDIDOR DE ANEL</span>
-      <h1>Descubra seu tamanho</h1>
+    <section className="panel intro intro-lux">
+      <div className="intro-lux-glow" aria-hidden="true" />
+      <span className="intro-lux-kicker">◇ MEDIDOR DE ANEL</span>
+      <h1 className="intro-lux-title">
+        Descubra o <em>número</em> do seu anel
+      </h1>
+      <p className="intro-lux-sub">Só com o celular e um cartão comum. Leva menos de um minuto.</p>
 
       {showPresentation && videoAvailable && (
-        <div
-          style={{
-            position:"relative",
-            overflow:"hidden",
-            margin:"12px 0 16px",
-            border:"1px solid rgba(220,180,90,.55)",
-            borderRadius:18,
-            background:"#050505",
-            boxShadow:"0 12px 30px rgba(0,0,0,.35)",
-          }}
-        >
+        <div className="intro-lux-video">
           <video
             src="/medidor-apresentacao.mp4"
             controls
             playsInline
             preload="metadata"
             onError={() => setVideoAvailable(false)}
-            style={{
-              display:"block",
-              width:"100%",
-              aspectRatio:"16 / 9",
-              objectFit:"contain",
-              background:"#000",
-            }}
           />
-
           <button
             type="button"
+            className="intro-lux-video-close"
             onClick={() => setShowPresentation(false)}
             aria-label="Ocultar apresentação"
-            style={{
-              position:"absolute",
-              top:10,
-              right:10,
-              zIndex:3,
-              minWidth:38,
-              height:38,
-              padding:"0 11px",
-              border:"1px solid rgba(255,255,255,.38)",
-              borderRadius:999,
-              color:"#fff",
-              background:"rgba(0,0,0,.72)",
-              fontSize:18,
-              fontWeight:900,
-              cursor:"pointer",
-            }}
           >
             ×
           </button>
@@ -68,31 +39,22 @@ export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
       )}
 
       {!showPresentation && videoAvailable && (
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => setShowPresentation(true)}
-          style={{marginBottom:14}}
-        >
-          Ver apresentação
+        <button type="button" className="intro-lux-link" onClick={() => setShowPresentation(true)}>
+          ▶ Ver como funciona
         </button>
       )}
 
-      <p className="lead">
-        Assista à apresentação ou toque em COMEÇAR para ir direto à medição.
-      </p>
+      <ol className="intro-lux-steps">
+        <li><span>1</span><div><strong>Apoie a mão</strong><small>Cartão deitado sobre os dedos</small></div></li>
+        <li><span>2</span><div><strong>Fotografe de cima</strong><small>Dedo do anel no centro da tela</small></div></li>
+        <li><span>3</span><div><strong>Ajuste as linhas</strong><small>Nas bordas do cartão e do dedo</small></div></li>
+      </ol>
 
-      <button
-        className="primary"
-        onClick={onMeasureFinger}
-        style={{marginTop:10}}
-      >
-        COMEÇAR
+      <button className="primary intro-lux-cta" onClick={onMeasureFinger}>
+        Começar medição
       </button>
 
-      <p style={{margin:"10px 0 0",fontSize:12,opacity:.66,textAlign:"center"}}>
-        Você pode começar a medição a qualquer momento, sem precisar assistir ao vídeo completo.
-      </p>
+      <p className="intro-lux-note">Você recebe o número exato e as opções justa e confortável.</p>
 
       {error && <p className="error">{error}</p>}
     </section>
