@@ -87,16 +87,28 @@ const svg=$('overlay');svg.replaceChildren();
 for(const name of ['left','right','top','bottom']){
 const l=lines[name],ns='http://www.w3.org/2000/svg';
 const visible=document.createElementNS(ns,'line'),hit=document.createElementNS(ns,'line');
-const paint=()=>{for(const el of [visible,hit]){el.setAttribute('x1',l.a.x);el.setAttribute('y1',l.a.y);el.setAttribute('x2',l.b.x);el.setAttribute('y2',l.b.y)}};
-paint();hit.classList.add('hit');hit.dataset.name=name;
-hit.addEventListener('pointerdown',e=>{selected=name;hit.setPointerCapture(e.pointerId);hit.dataset.x=e.clientX;hit.dataset.y=e.clientY;drawSelection();e.preventDefault()});
-hit.addEventListener('pointermove',e=>{if(!hit.hasPointerCapture(e.pointerId))return;
-const rect=svg.getBoundingClientRect(),axis=name==='left'||name==='right'?'x':'y';
-const delta=axis==='x'?(e.clientX-Number(hit.dataset.x))*100/rect.width:(e.clientY-Number(hit.dataset.y))*100/rect.height;
-hit.dataset.x=e.clientX;hit.dataset.y=e.clientY;
-moveLine(name,axis,delta);e.preventDefault()});
-svg.append(visible,hit);
-}}
+for(const el of [visible,hit]){el.setAttribute('x1',l.a.x);el.setAttribute('y1',l.a.y);el.setAttribute('x2',l.b.x);el.setAttribute('y2',l.b.y)}
+hit.classList.add('hit');hit.dataset.name=name;svg.append(visible,hit);
+}
+}
+let dragging=null;
+$('overlay').addEventListener('pointerdown',e=>{
+const name=e.target.closest('line.hit')?.dataset.name;
+if(!name)return;
+selected=name;dragging={name,id:e.pointerId,x:e.clientX,y:e.clientY};
+e.currentTarget.setPointerCapture(e.pointerId);drawSelection();e.preventDefault();
+});
+$('overlay').addEventListener('pointermove',e=>{
+if(!dragging||dragging.id!==e.pointerId)return;
+const rect=e.currentTarget.getBoundingClientRect(),axis=dragging.name==='left'||dragging.name==='right'?'x':'y';
+const delta=axis==='x'?(e.clientX-dragging.x)*100/rect.width:(e.clientY-dragging.y)*100/rect.height;
+dragging.x=e.clientX;dragging.y=e.clientY;
+moveLine(dragging.name,axis,delta);e.preventDefault();
+});
+const stopDrag=e=>{if(dragging&&dragging.id===e.pointerId)dragging=null};
+$('overlay').addEventListener('pointerup',stopDrag);
+$('overlay').addEventListener('pointercancel',stopDrag);
+$('overlay').addEventListener('lostpointercapture',stopDrag);
 function drawSelection(){
 for(const el of $('overlay').querySelectorAll('line:not(.hit)'))el.classList.toggle('active',el.nextSibling?.dataset.name===selected);
 }
