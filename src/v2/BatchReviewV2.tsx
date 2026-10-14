@@ -141,6 +141,7 @@ export default function BatchReviewV2({ ringSize, widthMm, calibrationConfidence
             <button type="button" className="primary" onClick={() => void shareBatch()}>Enviar lote completo</button>
             <button type="button" className="secondary" onClick={exportCsv}>Baixar CSV</button>
             <button type="button" className="secondary" onClick={() => download(JSON.stringify({ version: VERSION, exportedAt: new Date().toISOString(), entries }, null, 2), "medidor-anel-v2-lote.json", "application/json")}>Baixar JSON</button>
+            <button type="button" className="primary" onClick={() => { const button = document.getElementById("v2-export-diagnostic") as HTMLButtonElement | null; if (button) { button.click(); setMessage("Diagnostico completo da medicao atual gerado. Envie o arquivo JSON."); } else { setMessage("Finalize a foto e o ajuste do dedo para exportar o diagnostico completo."); } }}>Baixar diagnostico completo (.json)</button>
             {!confirmClear
               ? <button type="button" className="secondary" onClick={() => setConfirmClear(true)}>Limpar lote</button>
               : <button type="button" className="secondary" onClick={() => { setEntries([]); setConfirmClear(false); setMessage("Lote apagado."); }}>Confirmar limpeza</button>}
