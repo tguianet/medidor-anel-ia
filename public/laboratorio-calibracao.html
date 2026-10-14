@@ -262,4 +262,68 @@ document.getElementById('download').addEventListener('click',()=>{
  a.href=url;a.download='analise-cortes-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
 });
 })();
-</script></body></html>
+</script>
+<script>
+(function(){
+  const panel=document.createElement('section');
+  panel.className='panel';panel.id='edgeViewer';panel.hidden=true;
+  panel.innerHTML='<h2>Rastreamento individual do dedo</h2><p id="edgeStatus"></p><p>Linhas azuis: cortes registrados. Linhas amarelas: sete cortes selecionados. Pontos nas extremidades indicam as bordas calculadas. Os dados são provenientes do diagnóstico, não de uma nova detecção da foto.</p><label><input type="checkbox" id="edgeShowAll" checked> Mostrar todos os cortes</label><div id="edgeSummary"></div><div id="edgeTable" style="overflow-x:auto"></div><button type="button" id="edgeExport">Baixar diagnóstico visual JSON</button>';
+  document.getElementById('cutsPanel').after(panel);
+  let original=null;
+  const svg=document.getElementById('overlay');
+  const ns='http://www.w3.org/2000/svg';
+  const fmt3=n=>Number(n).toFixed(3).replace('.',',');
+  function render(){
+    svg.querySelectorAll('[data-edge-cut]').forEach(n=>n.remove());
+    if(!original)return;
+    const cuts=original.finger.cuts;
+    const start=Number(original.audit?.selectedRunStart)-1;
+    const size=Array.isArray(original.audit?.selectedUpperWidthsPx)?original.audit.selectedUpperWidthsPx.length:7;
+    const showAll=document.getElementById('edgeShowAll').checked;
+    const rows=[];
+    for(let i=0;i<cuts.length;i++){
+      const c=cuts[i],selected=i>=start && i<start+size;
+      if(!c?.left||!c?.right)continue;
+      const px=[Number(c.left.x),Number(c.left.y),Number(c.right.x),Number(c.right.y)];
+      if(px.some(n=>!Number.isFinite(n)))continue;
+      if(showAll||selected){
+        const line=document.createElementNS(ns,'line');
+        line.dataset.edgeCut=String(i);line.setAttribute('x1',String(px[0]));line.setAttribute('y1',String(px[1]));
+        line.setAttribute('x2',String(px[2]));line.setAttribute('y2',String(px[3]));
+        line.setAttribute('style','stroke:'+(selected?'#ffe066':'#48b9ff')+';stroke-width:'+(selected?'1.1':'.38')+';vector-effect:non-scaling-stroke;pointer-events:none');
+        svg.appendChild(line);
+        for(const j of [0,2]){
+          const dot=document.createElementNS(ns,'circle');dot.dataset.edgeCut=String(i);
+          dot.setAttribute('cx',String(px[j]));dot.setAttribute('cy',String(px[j+1]));
+          dot.setAttribute('r',selected?'.4':'.22');dot.setAttribute('fill',selected?'#ffe066':'#48b9ff');
+          dot.setAttribute('style','pointer-events:none');svg.appendChild(dot);
+        }
+      }
+      rows.push('<tr><td>'+(i+1)+'</td><td>'+fmt3(c.widthPx)+'</td><td>'+(Number.isFinite(c.horizontalWidthPx)?fmt3(c.horizontalWidthPx):'não registrado')+'</td><td>'+(selected?'Selecionado':'—')+'</td></tr>');
+    }
+    document.getElementById('edgeTable').innerHTML='<table><thead><tr><th>Corte</th><th>Largura perpendicular (px)</th><th>Largura horizontal (px)</th><th>Uso</th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+    document.getElementById('edgeStatus').textContent=cuts.length+' cortes com coordenadas • '+(Number.isFinite(start)&&start>=0?(start+1)+' a '+(start+size):'seleção não informada')+' selecionados';
+    const raw=Number(original.audit?.rawCardMm),corr=Number(original.audit?.normalizedMm);
+    document.getElementById('edgeSummary').textContent=Number.isFinite(raw)&&Number.isFinite(corr)?'Sem normalização: '+fmt3(raw)+' mm | Com 9,2%: '+fmt3(corr)+' mm | Diferença: '+fmt3(raw-corr)+' mm':'Comparação em milímetros indisponível neste arquivo.';
+  }
+  const formerDraw=draw;
+  draw=function(){formerDraw();render();};
+  document.getElementById('file').addEventListener('change',async e=>{
+    original=null;panel.hidden=true;
+    const file=e.target.files?.[0];if(!file)return;
+    try{
+      const d=JSON.parse(await file.text());
+      if(!Array.isArray(d.finger?.cuts)||!d.finger.cuts.some(c=>c?.left&&c?.right))return;
+      original=d;panel.hidden=false;render();
+    }catch(_){original=null;}
+  });
+  document.getElementById('edgeShowAll').addEventListener('change',render);
+  document.getElementById('edgeExport').addEventListener('click',()=>{
+    if(!original)return;
+    const payload={schema:'v2-edge-visual-diagnostic-1',capturedAt:original.capturedAt,coordinateSystem:original.finger.coordinateSystem,cuts:original.finger.cuts,selection:{startIndexOneBased:original.audit?.selectedRunStart,selectedWidthsPx:original.audit?.selectedUpperWidthsPx},comparison:{rawMm:original.audit?.rawCardMm,normalizedMm:original.audit?.normalizedMm,correctionPercent:original.audit?.correctionPercent},limitations:'Visualização de pontos registrados, sem nova detecção ou homografia.'};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download='diagnostico-visual-cortes-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);
+  });
+})();
+</script>
+</body></html>
