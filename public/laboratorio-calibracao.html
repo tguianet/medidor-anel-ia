@@ -28,7 +28,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <input id="offset" type="range" min="-8" max="8" step="0.1" value="0">
 <output id="change">0,0%</output></label>
 <p class="warning">Se o topo e a base vierem sobrepostos no JSON, o laboratório apresenta um retângulo inicial provisório. Confirme as quatro bordas visualmente antes de registrar. As linhas arrastadas alteram a escala aproximada do cartão, mantendo os pixels do dedo fixos. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
-<button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
+<button id="detect">Detectar bordas do cartão</button><button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
 </section>
 <section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
 <div id="snapshots"><table><thead><tr><th>#</th><th>Cartão</th><th>Escala</th><th>Largura simulada</th><th>Dif. da original</th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -47,6 +47,38 @@ function extendedLines(raw){
  if(yt>yb)[yt,yb]=[yb,yt];
  const lt=xAt(o.left,yt),lb=xAt(o.left,yb),rt=xAt(o.right,yt),rb=xAt(o.right,yb);
  return {left:{a:{x:lt,y:yt},b:{x:lb,y:yb}},right:{a:{x:rt,y:yt},b:{x:rb,y:yb}},top:{a:{x:lt,y:yt},b:{x:rt,y:yt}},bottom:{a:{x:lb,y:yb},b:{x:rb,y:yb}}};
+}
+function detectCardBounds(img){
+ const canvas=document.createElement('canvas');const max=800,ratio=Math.min(1,max/img.naturalWidth,max/img.naturalHeight);
+ canvas.width=Math.round(img.naturalWidth*ratio);canvas.height=Math.round(img.naturalHeight*ratio);
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ const {data}=ctx.getImageData(0,0,canvas.width,canvas.height),w=canvas.width,h=canvas.height;
+ const rows=new Uint32Array(h),cols=new Uint32Array(w);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const i=(y*w+x)*4,R=data[i],G=data[i+1],B=data[i+2];
+  if(R>145&&G>55&&G<225&&R>G*1.28&&G>B*1.36&&R-B>95){rows[y]++;cols[x]++;}
+ }
+ // Long continuous orange rows/columns identify the actual card, not the exported guides.
+ function region(counts,minCount){
+  let best=[0,0],start=-1;
+  for(let i=0;i<=counts.length;i++){
+   if(i<counts.length&&counts[i]>=minCount){if(start<0)start=i;}
+   else if(start>=0){if(i-start>best[1]-best[0])best=[start,i];start=-1;}
+  }
+  return best[1]-best[0]>=Math.min(18,counts.length/8)?best:null;
+ }
+ const xr=region(cols,Math.round(h*.18)),yr=region(rows,Math.round(w*.27));
+ if(!xr||!yr)return null;
+ const rect={left:xr[0]*100/w,right:xr[1]*100/w,top:yr[0]*100/h,bottom:yr[1]*100/h};
+ if(rect.right-rect.left<25||rect.bottom-rect.top<15)return null;
+ return rect;
+}
+function applyCardBounds(b){
+ lines={left:{a:{x:b.left,y:b.top},b:{x:b.left,y:b.bottom}},
+ right:{a:{x:b.right,y:b.top},b:{x:b.right,y:b.bottom}},
+ top:{a:{x:b.left,y:b.top},b:{x:b.right,y:b.top}},
+ bottom:{a:{x:b.left,y:b.bottom},b:{x:b.right,y:b.bottom}}};
+ selected='left';reference.initialSpan=span();reference.initialLines=clone(lines);redraw();
 }
 let selected='left';
 function redraw(){draw();drawSelection();update()}
@@ -101,6 +133,7 @@ if(!d.image?.photoDataUrl?.startsWith('data:image/')||!Number.isFinite(scale)||s
 if(!d.card?.cardLines?.left||!d.card?.cardLines?.right||!d.card?.cardLines?.top||!d.card?.cardLines?.bottom)throw Error('Linhas do cartão ausentes do JSON.');
 diagnostic=d; snapshots=[];lines=extendedLines(d.card.cardLines);
 reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:Number(d.audit?.usedWidthPx)||width*scale/(1-(Number(d.audit?.correctionPercent)||0)/100),correctionPercent:Number(d.audit?.correctionPercent)||0,initialSpan:span(),initialLines:clone(lines)};
+$('photo').onload=()=>{const bounds=detectCardBounds($('photo'));if(bounds){applyCardBounds(bounds);$('status').textContent='Cartão localizado pela cor na foto. Confira e ajuste as quatro bordas.'}else{$('status').textContent='Detecção automática indisponível nesta foto. Ajuste as quatro bordas manualmente.'}};
 $('photo').src=d.image.photoDataUrl;
 $('origScale').textContent=fmt(scale,4)+' px/mm';
 $('origWidth').textContent=fmt(width)+' mm';
@@ -110,6 +143,7 @@ redraw();
 }catch(err){$('status').textContent='Erro: '+err.message;$('lab').hidden=true;$('results').hidden=true;}
 });
 $('offset').addEventListener('input',update);
+$('detect').addEventListener('click',()=>{const bounds=detectCardBounds($('photo'));if(bounds)applyCardBounds(bounds);else $('status').textContent='Não foi possível localizar automaticamente o cartão nesta foto.'});
 $('reset').addEventListener('click',()=>{$('offset').value=0;lines=clone(reference.initialLines);redraw()});
 $('save').addEventListener('click',()=>{
 if(!diagnostic)return; const data={number:snapshots.length+1,...update()};snapshots.push(data);
