@@ -4252,7 +4252,7 @@ export default function AppV2() {
                     }}>BORDA DA LINHA · 6×</span>
                   </div>
                 )}
-                {fingerMagnetSamples && (
+                {debugMode && fingerMagnetSamples && (
                   <svg
                     viewBox="0 0 100 100"
                     preserveAspectRatio="none"
