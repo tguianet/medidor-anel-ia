@@ -7,7 +7,7 @@
 p,small{color:#bdc6d2;line-height:1.5}.panel{border:1px solid #394352;background:#1c232d;padding:14px;border-radius:12px;margin:12px 0}
 button,input[type=file]{font:inherit}button{border:0;border-radius:8px;padding:12px;background:#376fde;color:white;margin:5px 5px 5px 0;cursor:pointer}
 button:disabled{opacity:.4}input[type=range]{width:100%}label{display:block;margin:16px 0}
-strong,output{color:#fff}#photo{max-width:100%;display:block;border-radius:6px}
+strong,output{color:#fff}#photo{width:100%;display:block;border-radius:6px}#photoWrap{position:relative;touch-action:none}#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}#overlay line{stroke:#20e6b2;stroke-width:.6;cursor:grab;vector-effect:non-scaling-stroke}#overlay line.active{stroke:#ffd368;stroke-width:1}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#29323e;padding:12px;border-radius:8px}
 .metric b{display:block;font-size:1.3rem;margin-top:4px}#snapshots{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}
 th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color:#ffd58a}
@@ -17,7 +17,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <section class="panel"><label>Arquivo de diagnóstico (.json)<br><input id="file" type="file" accept=".json,application/json"></label>
 <small id="status">Escolha um diagnóstico que contenha foto, escala e largura do dedo.</small></section>
 <section class="panel" id="lab" hidden>
-<img id="photo" alt="Fotografia original da medição">
+<div id="photoWrap"><img id="photo" alt="Fotografia original da medição"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><p>Arraste as linhas verdes para alinhar com as bordas do cartão, sem mudar a fotografia. Depois registre as tentativas.</p>
 <div class="grid">
 <div class="metric">Escala original<b id="origScale"></b></div>
 <div class="metric">Largura original<b id="origWidth"></b></div>
@@ -27,7 +27,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <label>Ajuste fino da largura de referência do cartão (alteração percentual sobre os 85,60 mm em pixels da foto)
 <input id="offset" type="range" min="-8" max="8" step="0.1" value="0">
 <output id="change">0,0%</output></label>
-<p class="warning">A simulação preserva os pixels do dedo e altera apenas os pixels atribuídos à largura do cartão. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
+<p class="warning">As linhas arrastadas alteram a escala aproximada do cartão, mantendo os pixels do dedo fixos. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
 <button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
 </section>
 <section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
@@ -36,15 +36,37 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 </section>
 <script>
 const $=id=>document.getElementById(id), fmt=(n,d=3)=>Number(n).toFixed(d).replace('.',',');
-let diagnostic=null, snapshots=[], reference={};
+let diagnostic=null, snapshots=[], reference={}, lines={};
+function clone(v){return JSON.parse(JSON.stringify(v))}
+function xAt(l,y){return Math.abs(l.b.y-l.a.y)<1e-6?(l.a.x+l.b.x)/2:l.a.x+(l.b.x-l.a.x)*(y-l.a.y)/(l.b.y-l.a.y)}
+function span(){
+const top=(lines.top.a.y+lines.top.b.y)/2, bottom=(lines.bottom.a.y+lines.bottom.b.y)/2;
+return (Math.abs(xAt(lines.right,top)-xAt(lines.left,top))+Math.abs(xAt(lines.right,bottom)-xAt(lines.left,bottom)))/2;
+}
+function draw(){
+const svg=$('overlay');svg.replaceChildren();
+for(const name of ['left','right','top','bottom']){
+const l=lines[name],el=document.createElementNS('http://www.w3.org/2000/svg','line');
+const paint=()=>{el.setAttribute('x1',l.a.x);el.setAttribute('y1',l.a.y);el.setAttribute('x2',l.b.x);el.setAttribute('y2',l.b.y)};
+paint();let last=null;
+el.addEventListener('pointerdown',e=>{last={x:e.clientX,y:e.clientY};el.setPointerCapture(e.pointerId);el.classList.add('active');e.preventDefault()});
+el.addEventListener('pointermove',e=>{if(!last)return;const box=svg.getBoundingClientRect();
+const dx=(e.clientX-last.x)*100/box.width,dy=(e.clientY-last.y)*100/box.height;last={x:e.clientX,y:e.clientY};
+const axis=name==='left'||name==='right'?'x':'y',d=axis==='x'?dx:dy;
+for(const point of [l.a,l.b])point[axis]=Math.max(0,Math.min(100,point[axis]+d));
+paint();update();e.preventDefault()});
+for(const ev of ['pointerup','pointercancel'])el.addEventListener(ev,()=>{last=null;el.classList.remove('active')});
+svg.appendChild(el);
+}}
+
 function update(){
-const factor=1+Number($('offset').value)/100;
+const factor=span()/reference.initialSpan*(1+Number($('offset').value)/100);
 const scale=reference.scale*factor;
 const width=reference.pixelFingerWidth/scale;
 $('change').textContent=(Number($('offset').value)>0?'+':'')+fmt($('offset').value,1)+'%';
 $('scaleValue').textContent=fmt(scale,4)+' px/mm';
 $('widthValue').textContent=fmt(width)+' mm';
-return {adjustmentPercent:Number($('offset').value),cardPixelWidth:reference.cardPixelWidth*factor,scalePxPerMm:scale,simulatedFingerMm:width,differenceMm:width-reference.originalWidth};
+return {adjustmentPercent:Number($('offset').value),cardPixelWidth:reference.cardPixelWidth*factor,scalePxPerMm:scale,simulatedFingerMm:width,differenceMm:width-reference.originalWidth,cardLines:clone(lines),cardSpanPercent:span()};
 }
 $('file').addEventListener('change',async e=>{
 try{
@@ -52,18 +74,19 @@ const f=e.target.files[0];if(!f)return;
 const d=JSON.parse(await f.text());
 const scale=Number(d.card?.pixelsPerMm), width=Number(d.finger?.widthSentToFormulaMm), physical=Number(d.card?.physicalWidthMm);
 if(!d.image?.photoDataUrl?.startsWith('data:image/')||!Number.isFinite(scale)||scale<=0||!Number.isFinite(width)||width<=0||!Number.isFinite(physical)||physical<=0)throw Error('Diagnóstico incompleto ou incompatível.');
-diagnostic=d; snapshots=[];
-reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:width*scale};
+if(!d.card?.cardLines?.left||!d.card?.cardLines?.right||!d.card?.cardLines?.top||!d.card?.cardLines?.bottom)throw Error('Linhas do cartão ausentes do JSON.');
+diagnostic=d; snapshots=[];lines=clone(d.card.cardLines);
+reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:width*scale,initialSpan:span(),initialLines:clone(lines)};
 $('photo').src=d.image.photoDataUrl;
 $('origScale').textContent=fmt(scale,4)+' px/mm';
 $('origWidth').textContent=fmt(width)+' mm';
 $('offset').value=0;$('lab').hidden=false;$('results').hidden=false;$('rows').replaceChildren();
 $('status').textContent='Arquivo carregado: '+f.name+'. A foto permanecerá fixa.';
-update();
+draw();update();
 }catch(err){$('status').textContent='Erro: '+err.message;$('lab').hidden=true;$('results').hidden=true;}
 });
 $('offset').addEventListener('input',update);
-$('reset').addEventListener('click',()=>{$('offset').value=0;update()});
+$('reset').addEventListener('click',()=>{$('offset').value=0;lines=clone(reference.initialLines);draw();update()});
 $('save').addEventListener('click',()=>{
 if(!diagnostic)return; const data={number:snapshots.length+1,...update()};snapshots.push(data);
 const tr=document.createElement('tr');
@@ -72,7 +95,7 @@ const tr=document.createElement('tr');
 $('clear').addEventListener('click',()=>{snapshots=[];$('rows').replaceChildren()});
 $('download').addEventListener('click',()=>{
 if(!diagnostic)return;
-const report={schema:'v2-calibration-sensitivity-lab-1',sourceCapturedAt:diagnostic.capturedAt,sourceSchema:diagnostic.schema,reference,assumption:'finger pixels fixed; changes to card pixel width only; no re-execution of original algorithm',snapshots};
+const report={schema:'v2-calibration-sensitivity-lab-1',sourceCapturedAt:diagnostic.capturedAt,sourceSchema:diagnostic.schema,reference,assumption:'finger pixels fixed, manual card line geometry with scale simulation; does not re-execute homography or production algorithm',snapshots};
 const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
 const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='laboratorio-calibracao-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
 });
