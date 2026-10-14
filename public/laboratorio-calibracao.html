@@ -30,6 +30,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <p class="warning">Se o topo e a base vierem sobrepostos no JSON, o laboratório apresenta um retângulo inicial provisório. Confirme as quatro bordas visualmente antes de registrar. As linhas arrastadas alteram a escala aproximada do cartão, mantendo os pixels do dedo fixos. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
 <button id="detect">Detectar bordas do cartão</button><button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
 </section>
+<section class="panel" id="comparison" hidden><h2>Comparativo da mesma foto</h2><p>Simulação diagnóstica; não altera a medição nem a V2 principal.</p><div class="grid"><div class="metric">Sem correção percentual<b id="compareRaw"></b></div><div class="metric">Com correção original<b id="compareCorrected"></b></div><div class="metric">Diferença causada pela correção<b id="compareDelta"></b></div><div class="metric">Perspectiva dos quatro cantos<b id="comparePerspective"></b></div></div><small id="compareNote"></small></section>
 <section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
 <div id="snapshots"><table><thead><tr><th>#</th><th>Cartão</th><th>Escala</th><th>Largura simulada</th><th>Dif. da original</th></tr></thead><tbody id="rows"></tbody></table></div>
 <button id="download">Baixar relatório JSON</button><button id="clear">Limpar tentativas</button>
@@ -184,4 +185,23 @@ const report={schema:'v2-calibration-sensitivity-lab-1',sourceCapturedAt:diagnos
 const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
 const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='laboratorio-calibracao-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
 });
+</script><script>
+(function(){
+ const get=id=>document.getElementById(id);
+ const previous=update;
+ update=function(){
+   const r=previous();
+   if(!diagnostic||!reference||!Number.isFinite(r.scalePxPerMm))return r;
+   get('comparison').hidden=false;
+   const correction=reference.correctionPercent||0;
+   const raw=reference.pixelFingerWidth/r.scalePxPerMm;
+   const corrected=raw*(1-correction/100);
+   get('compareRaw').textContent=fmt(raw)+' mm';
+   get('compareCorrected').textContent=fmt(corrected)+' mm';
+   get('compareDelta').textContent=fmt(raw-corrected)+' mm ('+fmt(correction,1)+'%)';
+   get('comparePerspective').textContent='Cantos ajustáveis';
+   get('compareNote').textContent='A perspectiva está representada pelas quatro linhas móveis. Os valores acima são calculados por escala média, não por homografia ou nova detecção do dedo. A correção percentual é apenas desligada na simulação, não no sistema original.';
+   return r;
+ };
+})();
 </script></body></html>
