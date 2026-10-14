@@ -6,6 +6,7 @@ type Props = {
   torchSupported: boolean;
   onToggleTorch: () => void;
   cardReady: boolean;
+  liveCardWidthPx?: number | null;
   calibrationStep: "reference" | "measurement" | "done";
   cameraAngleGuide: "forward" | "backward" | "aligned" | "unknown";
   liveFingerTiltDeg?: number | null;
@@ -26,7 +27,7 @@ type Props = {
 };
 
 export default function FrozenCameraScreen({
-  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, calibrationStep, cameraAngleGuide,
+  videoRef, torchOn, torchSupported, onToggleTorch, cardReady, liveCardWidthPx = null, calibrationStep, cameraAngleGuide,
   liveFingerTiltDeg = null, liveFingerTiltConfidence = 0,
   liveOpticalCenterOffsetPx = null, liveCardFingerOffsetPx = null, liveOpticalCenterConfidence = 0,
   devicePitch = null, deviceRoll = null,
@@ -34,6 +35,21 @@ export default function FrozenCameraScreen({
   referenceCardWidthPercent = null, referenceCardAngleDeg = null, singlePhotoTestMode = false,
   onClose, onCapture, onRetry,
 }: Props) {
+  // O detector usa canvas de 300 px e guia entre 11% e 89% da largura.
+  // Meta relativa ao enquadramento, nao distancia fisica em centimetros.
+  const targetCardWidthPx = 300 * 0.78;
+  const cardScalePercent = liveCardWidthPx !== null && Number.isFinite(liveCardWidthPx)
+    ? Math.round(liveCardWidthPx / targetCardWidthPx * 100)
+    : null;
+  const distanceAligned = cardScalePercent !== null && Math.abs(cardScalePercent - 100) <= 5;
+  const distanceInstruction = cardScalePercent === null
+    ? "Procurando laterais do cartão"
+    : cardScalePercent < 95
+      ? "APROXIME O CELULAR"
+      : cardScalePercent > 105
+        ? "AFASTE O CELULAR"
+        : "DISTÂNCIA ADEQUADA";
+
   const autoCaptureTimerRef = useRef<number | null>(null);
   const autoCaptureLockedRef = useRef(false);
 
@@ -310,6 +326,21 @@ export default function FrozenCameraScreen({
             <span>GUIA DA FOTO 1</span>
           </div>
         )}
+        <div aria-live="polite" style={{
+          position:"absolute",left:"50%",bottom:12,transform:"translateX(-50%)",
+          zIndex:52,pointerEvents:"none",textAlign:"center",
+          width:"min(290px, calc(100% - 20px))",padding:"9px 12px",
+          borderRadius:12,background:"rgba(8,12,15,.88)",
+          border:`1px solid ${distanceAligned ? "#52e0a3" : "#efc466"}`,
+          color:distanceAligned ? "#52e0a3" : "#ffe0a0",
+          fontWeight:800,fontSize:12
+        }}>
+          <div>{distanceInstruction}</div>
+          <div style={{fontSize:11,fontWeight:500,marginTop:3}}>
+            {cardScalePercent === null ? "Enquadre o cartão na moldura" : `Tamanho na câmera: ${cardScalePercent}% da referência`}
+          </div>
+          <div style={{fontSize:10,fontWeight:400,opacity:.8,marginTop:3}}>Referência visual · não mede altura em cm</div>
+        </div>
         <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
           <div className="live-card-frame">
             <span>{cardReady ? "✓ ALINHADO — PODE CAPTURAR" : "ENCAIXE O CARTÃO"}</span>

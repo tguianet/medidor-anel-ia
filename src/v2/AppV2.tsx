@@ -171,6 +171,7 @@ export default function AppV2() {
     right: { a:{x:38,y:34}, b:{x:38,y:66} },
   });
   const [cardReady, setCardReady] = useState(false);
+  const [liveCardWidthPx, setLiveCardWidthPx] = useState<number | null>(null);
   const [cameraAngleGuide, setCameraAngleGuide] = useState<"forward" | "backward" | "aligned" | "unknown">("unknown");
   const [liveFingerTiltDeg, setLiveFingerTiltDeg] = useState<number | null>(null);
   const [liveFingerTiltConfidence, setLiveFingerTiltConfidence] = useState(0);
@@ -245,6 +246,7 @@ export default function AppV2() {
   useEffect(() => {
     if (stage !== "camera" || camera.cameraOpening) {
       setCardReady(false);
+      setLiveCardWidthPx(null);
       setCameraAngleGuide("unknown");
       setLiveFingerTiltDeg(null);
       setLiveFingerTiltConfidence(0);
@@ -260,6 +262,7 @@ export default function AppV2() {
       try {
         const liveGuide = analyzeLiveCardGuide(camera.videoRef.current);
         setCardReady(liveGuide.ready);
+        setLiveCardWidthPx(current => liveGuide.cardWidthPx === null ? null : current === null ? liveGuide.cardWidthPx : current * 0.7 + liveGuide.cardWidthPx * 0.3);
         setCameraAngleGuide(liveGuide.angle);
         setLiveFingerTiltConfidence(liveGuide.fingerTiltConfidence);
         setLiveOpticalCenterConfidence(liveGuide.opticalCenterConfidence);
@@ -775,51 +778,15 @@ export default function AppV2() {
           left:detectedLeftLine,
         });
 
-        // Fluxo comercial de 1 foto: o detector leve ja confirmou o cartao.
-        // Aplicamos automaticamente esquerda, direita e base e seguimos
-        // direto para a medicao do dedo. Ajuste manual permanece como fallback.
-        if(singlePhotoTestMode && calibration.confidence>=MIN_CARD_CALIBRATION_CONFIDENCE){
-          setCardSnapLines({
-            left:detectedLeftLine,
-            right:detectedRightLine,
-            bottom:detectedBottomLine,
-          });
-          setCardLineLocked({top:false,right:true,bottom:true,left:true});
-          setCardQuad(detectedQuad);
-          setPerspectiveReady(true);
-          setCalibrationConfidence(calibration.confidence);
-          // IMPORTANTE: o detector leve apenas posiciona as 3 linhas.
-          // A escala oficial NAO usa calibration.pixelsPerMm.
-          // Voltamos à regra congelada: a distância entre as interseções
-          // esquerda×base e direita×base representa exatamente 85,60 mm.
-          // A foto acabou de ser capturada em canvas 900x1200.
-          // Nao esperamos photoPixelsRef carregar para definir a escala,
-          // porque isso criava uma corrida assíncrona e podia cair no fallback
-          // pixelsPerMm=1 antes do buffer da foto ficar pronto.
-          //
-          // A escala continua vindo SOMENTE das interseções das 3 linhas:
-          // A = esquerda x base, B = direita x base, |A-B| = 85,60 mm.
-          const intersectionWidthPx=Math.hypot(
-            (finalRight-finalLeft)/100*canvas.width,
-            0,
-          );
-          const intersectionPixelsPerMm=intersectionWidthPx/CARD_WIDTH_MM;
+        // A detecção automática apenas sugere as bordas. O usuário sempre
+        // confirma as linhas na fotografia antes de calibrar os milímetros.
+        // Não ativar a medição do dedo automaticamente aqui: a confiança do
+        // detector não prova que o traço esteja exatamente na borda física.
+        setCardLineLocked({top:false,right:false,bottom:false,left:false});
+        setSelectedCardLine(null);
+        setPerspectiveReady(false);
+        setCalibrationConfidence(calibration.confidence);
 
-          setMeasurementCardLengthPx(intersectionWidthPx);
-
-          setFingerCardCalibrationStep("done");
-          setAnalyzingCard(false);
-          activateFingerMeasurement(
-            finalLeft,
-            finalRight,
-            finalBottom,
-            calibration.confidence,
-            detectedQuad,
-            intersectionPixelsPerMm,
-          );
-          camera.setError("");
-          return;
-        }
       } catch {
         setCardLeft(15);
         setCardRight(85);
@@ -2046,10 +2013,13 @@ export default function AppV2() {
           chosenGroup=eligible.reduce((best,group)=>{
             const center=group.reduce((sum,item)=>sum+item.x,0)/group.length;
             const bestCenter=best.reduce((sum,item)=>sum+item.x,0)/best.length;
-            // Mais perto do centro = primeira borda encontrada ao sair do dedo.
-            return Math.abs(center-fingerCenterX)<Math.abs(bestCenter-fingerCenterX)
-              ? group
-              : best;
+            // O primeiro snap respeita a borda indicada pela guia.
+            // Evita escolher textura interna apenas por proximidade ao centro.
+            const groupStrength=group.reduce((sum,item)=>sum+item.strength,0)/group.length;
+            const bestStrength=best.reduce((sum,item)=>sum+item.strength,0)/best.length;
+            const groupRank=Math.abs(center-centerX)-Math.min(3,groupStrength*0.035);
+            const bestRank=Math.abs(bestCenter-centerX)-Math.min(3,bestStrength*0.035);
+            return groupRank<bestRank ? group : best;
           },eligible[0]);
         }
       }else{
@@ -3444,7 +3414,19 @@ export default function AppV2() {
     // A linha amarela e as laterais manuais apenas definem a REGIAO inicial.
     // A medida experimental varre uma faixa maior e cada ponto procura de novo
     // a fronteira fisica pele <-> fundo de forma independente.
-    const samples=fingerBandSamplesPx(ringGuideY,8);
+    // Faixa experimental ampla, equivalente a aproximadamente tres bandas de
+    // 8 mm de altura. Converte mm para percentuais da imagem considerando zoom.
+    // A janela tem limite minimo para diferenciar do teste antigo e limite
+    // maximo para nao varrer indiscriminadamente a mao inteira.
+    // A largura comercial permanece inalterada.
+    const sourceForBand=photoPixelsRef.current;
+    const threeRingHeightMm=24;
+    const halfBandPercent=Math.max(
+      12,
+      Math.min(22, (threeRingHeightMm / 2) * pixelsPerMm /
+        sourceForBand.height * 100 * zoom),
+    );
+    const samples=fingerBandSamplesPx(ringGuideY,halfBandPercent);
     if(!samples || samples.length<20) return null;
 
     const source=photoPixelsRef.current;
@@ -3663,6 +3645,7 @@ export default function AppV2() {
       totalCount:snapped.length,
       validCount,
       supportPercent,
+      scanBandHeightMm: (halfBandPercent * 2 / (100 * zoom)) * sourceForBand.height / pixelsPerMm,
       plateauStart:best?.start ?? -1,
       plateauEnd:best?.end ?? -1,
       plateauValuesMm:best?.values ?? [],
@@ -4065,6 +4048,7 @@ export default function AppV2() {
           torchSupported={camera.torchSupported}
           onToggleTorch={() => void camera.toggleTorch()}
           cardReady={cardReady}
+          liveCardWidthPx={liveCardWidthPx}
           calibrationStep={fingerCardCalibrationStep}
           cameraAngleGuide={cameraAngleGuide}
           liveFingerTiltDeg={measurementMode==="finger" ? liveFingerTiltDeg : null}
@@ -4154,16 +4138,21 @@ export default function AppV2() {
                 style={{transform:`translate(${panX}px, ${panY}px) scale(${zoom})`}}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
-                aria-label="Três linhas de calibração do cartão"
+                aria-label="Duas guias laterais do cartão de ponta a ponta"
               >
-                {(["left","right","bottom"] as CardEdge[]).map((edge)=>{
+                {(["left","right"] as CardEdge[]).map((edge)=>{
                   const line=cardLines[edge];
                   const locked=cardLineLocked[edge];
                   const selected=selectedCardLine===edge;
+                  const extrapolate=(targetY:number)=>{
+                    const dy=line.b.y-line.a.y;
+                    if(Math.abs(dy)<0.001) return (line.a.x+line.b.x)/2;
+                    return line.a.x+(line.b.x-line.a.x)*(targetY-line.a.y)/dy;
+                  };
                   return <g key={edge} className={`card-edge${locked?" locked":""}${selected?" selected":""}`}>
-                    <line className="card-line-hit" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y}
+                    <line className="card-line-hit" x1={extrapolate(0)} y1={0} x2={extrapolate(100)} y2={100}
                       onPointerDown={(e)=>startCardLineDrag(edge,null,e)} />
-                    <line className="card-line-visible" x1={line.a.x} y1={line.a.y} x2={line.b.x} y2={line.b.y} />
+                    <line className="card-line-visible" x1={extrapolate(0)} y1={0} x2={extrapolate(100)} y2={100} />
                     {(["a","b"] as const).map((point)=><g key={point}>
                       <circle className="card-line-handle-hit" cx={line[point].x} cy={line[point].y} r="4.6"
                         onPointerDown={(e)=>startCardLineDrag(edge,point,e)} />
@@ -4206,13 +4195,13 @@ export default function AppV2() {
                       position:"absolute",
                       left:fingerLoupe.side==="left" ? "72%" : "28%",
                       top:"18%",
-                      width:"132px",
-                      height:"132px",
+                      width:"min(188px, 48vw)",
+                      height:"min(188px, 48vw)",
                       transform:"translate(-50%,-50%)",
                       borderRadius:"50%",
                       overflow:"hidden",
                       border:"3px solid #52e0a3",
-                      boxShadow:"0 8px 28px rgba(0,0,0,.55)",
+                      boxShadow:"0 10px 36px rgba(0,0,0,.65)",
                       backgroundImage:`url("${photo}")`,
                       backgroundRepeat:"no-repeat",
                       backgroundSize:"600% 600%",
@@ -4496,19 +4485,20 @@ export default function AppV2() {
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
+              <p style={{fontSize:"0.9rem",lineHeight:1.5,color:"#e8c978"}}>Ajuste somente as duas linhas verdes de ponta a ponta nas laterais reais do cartão. A base é detectada internamente e não precisa ser arrastada.</p>
               <button
                 className="primary confirm-perspective"
                 type="button"
                 onClick={fingerCardCalibrationStep === "reference" ? confirmReferenceCardLine : confirmMeasurementCardLine}
               >
                 {singlePhotoTestMode
-                  ? "Calibrar esta foto e medir o dedo"
+                  ? "Confirmar bordas do cartão e medir o dedo"
                   : fingerCardCalibrationStep === "reference"
-                    ? "Salvar 3 linhas e ir para a foto 2"
+                    ? "Salvar laterais e ir para a foto 2"
                     : "Calibrar cartão e medir o dedo"}
               </button>
               <div className="card-line-status">
-                {(["left","right","bottom"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
+                {(["left","right"] as CardEdge[]).map((edge)=><span key={edge} className={cardLineLocked[edge] ? "locked" : ""}>
                   {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
                 </span>)}
               </div>
@@ -4519,9 +4509,9 @@ export default function AppV2() {
                     ? "Foto 1 — calibração do cartão"
                     : "Foto 2 — cartão sobre o dedo"}</strong>
                 <span>{singlePhotoTestMode
-                  ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão já posicionado sobre o dedo."
+                  ? "Ajuste somente as duas guias verticais nas laterais reais do cartão. A base fica automática."
                   : fingerCardCalibrationStep === "reference"
-                    ? "Ajuste a lateral esquerda, a lateral direita e a linha da base nas bordas reais do cartão."
+                    ? "Ajuste as duas laterais do cartão; a base fica automática."
                     : "Ajuste novamente as duas laterais e a base do cartão sobre o dedo. Na captura, use a guia fantasma da Foto 1 para aproximar escala e ângulo."}</span>
                 <small>{singlePhotoTestMode
                   ? "A própria largura de 85,60 mm desta foto define a escala usada para medir o dedo."
@@ -4648,7 +4638,7 @@ export default function AppV2() {
                       }}
                     >
                       <strong>TESTE · CONTORNO MULTIPONTO + CONSTANTE</strong>
-                      <span>Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
+                      <span>Faixa ampliada: {contourConstantTest.scanBandHeightMm.toFixed(1)} mm · Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
                       <span>Constante encontrada: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · {contourConstantTest.stable ? "PLATÔ ESTÁVEL" : "SEM PLATÔ FORTE"}</span>
                       {contourConstantTest.plateauStart>=0 && <span>Platô: pontos {contourConstantTest.plateauStart+1}–{contourConstantTest.plateauEnd+1} · variação {contourConstantTest.spreadPercent?.toFixed(2)}%</span>}
                       {!!contourConstantTest.plateauValuesMm.length && <span>Medidas do platô: {contourConstantTest.plateauValuesMm.map(value=>value.toFixed(2)).join(" / ")} mm</span>}
