@@ -1787,7 +1787,7 @@ export default function App() {
            b:{x:imageToPercentX(line.b.x),y:imageToPercentY(line.b.y)}}
     ]));
     const cuts=fingerMagnetSamples.map((sample,index)=>({
-      index, widthPx:sample.width,confidence:sample.confidence,
+      index, widthPx:sample.width, horizontalWidthPx:sample.horizontalWidth, axisAngleDeg:sample.axisAngleDeg, confidence:sample.confidence,
       left:{x:sample.left/source.width*100,y:sample.y/source.height*100},
       right:{x:sample.right/source.width*100,y:sample.rightY/source.height*100}
     }));
