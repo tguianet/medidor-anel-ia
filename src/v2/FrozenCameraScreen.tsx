@@ -339,7 +339,6 @@ export default function FrozenCameraScreen({
           <div style={{fontSize:11,fontWeight:500,marginTop:3}}>
             {cardScalePercent === null ? "Enquadre o cartão na moldura" : `Tamanho na câmera: ${cardScalePercent}% da referência`}
           </div>
-          <div style={{fontSize:10,fontWeight:400,opacity:.8,marginTop:3}}>Referência visual · não mede altura em cm</div>
         </div>
         <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
           <div className="live-card-frame">
@@ -410,7 +409,7 @@ export default function FrozenCameraScreen({
           : cameraAngleGuide === "backward"
             ? "Incline levemente a câmera para trás até o indicador ficar verde."
             : singlePhotoTestMode
-              ? "Modo 1 foto: coloque o cartão sobre o dedo, enquadre na moldura e ajuste o ângulo até ficar verde."
+              ? "Coloque o cartão sobre o dedo, enquadre na moldura e ajuste o ângulo até ficar verde."
               : calibrationStep === "reference"
                 ? "Coloque o cartão em uma base plana, enquadre na moldura e ajuste o ângulo até ficar verde."
                 : "Coloque o cartão sobre o dedo e ajuste a distância do celular até o cartão coincidir com a guia fantasma da Foto 1."}</p>
