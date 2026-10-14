@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 
 // Ícones em SVG (não dependem de fonte externa).
@@ -27,6 +27,33 @@ type Props = {
 export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
   const [showPresentation, setShowPresentation] = useState(false);
   const [videoAvailable, setVideoAvailable] = useState(true);
+
+  // PWA: botão "Instalar app" (Android) e dica para iPhone.
+  type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice?: Promise<{ outcome: string }> };
+  const getPrompt = () => (window as unknown as { __mdaInstall?: InstallPrompt }).__mdaInstall ?? null;
+  const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(getPrompt);
+  const isStandalone =
+    typeof window !== "undefined" &&
+    (window.matchMedia?.("(display-mode: standalone)").matches ||
+      (navigator as unknown as { standalone?: boolean }).standalone === true);
+  const isIos = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
+  useEffect(() => {
+    const ready = () => setInstallPrompt(getPrompt());
+    window.addEventListener("mda-install-ready", ready);
+    return () => window.removeEventListener("mda-install-ready", ready);
+  }, []);
+  const install = async () => {
+    const p = installPrompt;
+    if (!p) return;
+    try {
+      await p.prompt();
+      await p.userChoice;
+    } catch {
+      /* usuário cancelou */
+    }
+    (window as unknown as { __mdaInstall?: Event | null }).__mdaInstall = null;
+    setInstallPrompt(null);
+  };
 
   return (
     <section className="home-lux">
@@ -111,6 +138,15 @@ export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
         <Icon name="lock" />
         Sem cadastro · leva menos de 1 minuto
       </div>
+
+      {!isStandalone && installPrompt && (
+        <button type="button" className="home-install" onClick={() => void install()}>
+          <Icon name="photo_camera" /> Instalar o app no celular
+        </button>
+      )}
+      {!isStandalone && !installPrompt && isIos && (
+        <p className="home-install-ios">No iPhone: toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong> para instalar o app.</p>
+      )}
 
       <div className="home-foot">
         <div><Icon name="stars" />Justo · Exato · Conforto</div>
