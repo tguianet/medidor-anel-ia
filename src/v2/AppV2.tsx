@@ -3426,7 +3426,14 @@ export default function AppV2() {
       Math.min(22, (threeRingHeightMm / 2) * pixelsPerMm /
         sourceForBand.height * 100 * zoom),
     );
-    const samples=fingerBandSamplesPx(ringGuideY,halfBandPercent);
+    // A borda inferior do cartão é o limite superior da zona utilizável.
+    // Centralizar na linha amarela varria parte do cartão; deslocamos toda
+    // a faixa para baixo, sobre o dedo descoberto.
+    const bandTop=Math.max(ringGuideY + 1, 7);
+    const bandBottom=Math.min(93, bandTop + halfBandPercent * 2);
+    const bandCenter=(bandTop + bandBottom)/2;
+    const effectiveHalfSpan=(bandBottom-bandTop)/2;
+    const samples=fingerBandSamplesPx(bandCenter,effectiveHalfSpan);
     if(!samples || samples.length<20) return null;
 
     const source=photoPixelsRef.current;
@@ -3645,7 +3652,7 @@ export default function AppV2() {
       totalCount:snapped.length,
       validCount,
       supportPercent,
-      scanBandHeightMm: (halfBandPercent * 2 / (100 * zoom)) * sourceForBand.height / pixelsPerMm,
+      scanBandHeightMm: (effectiveHalfSpan * 2 / (100 * zoom)) * sourceForBand.height / pixelsPerMm,
       plateauStart:best?.start ?? -1,
       plateauEnd:best?.end ?? -1,
       plateauValuesMm:best?.values ?? [],
@@ -4244,6 +4251,41 @@ export default function AppV2() {
                     }}>BORDA DA LINHA · 6×</span>
                   </div>
                 )}
+                {phase==="finger" && leftLocked && rightLocked && (
+                  <div aria-hidden="true" style={{
+                    position:"absolute",
+                    left:`${Math.min(leftLine,rightLine)}%`,
+                    width:`${Math.abs(rightLine-leftLine)}%`,
+                    top:`${Math.min(93,ringGuideY+1)}%`,
+                    height:"24%",
+                    maxHeight:"calc(93% - 1px)",
+                    background:"rgba(0,225,220,.13)",
+                    borderTop:"2px solid #00e1dc",
+                    borderBottom:"2px solid #00e1dc",
+                    pointerEvents:"none",zIndex:3
+                  }} />
+                )}
+                {contourConstantTest && contourConstantTest.points.length > 0 && (
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none"
+                    aria-label="Faixa ampliada de três anéis e platô estável"
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:4}}>
+                    <polygon
+                      points={[
+                        ...contourConstantTest.points.map(p=>`${p.leftPercent},${p.yPercent}`),
+                        ...[...contourConstantTest.points].reverse().map(p=>`${p.rightPercent},${p.rightYPercent}`)
+                      ].join(" ")}
+                      fill="rgba(0,225,220,.19)" stroke="#00e1dc" strokeWidth="0.55"
+                      vectorEffect="non-scaling-stroke"/>
+                    {contourConstantTest.points.map((point,index)=>(
+                      <line key={index} x1={point.leftPercent} y1={point.yPercent}
+                        x2={point.rightPercent} y2={point.rightYPercent}
+                        stroke={point.inPlateau ? "#ffd86b" : "#00e1dc"}
+                        strokeWidth={point.inPlateau ? "1.0" : "0.28"}
+                        opacity={point.valid ? 0.85 : 0.25}
+                        vectorEffect="non-scaling-stroke"/>
+                    ))}
+                  </svg>
+                )}
                 {fingerMagnetSamples && (
                   <svg
                     viewBox="0 0 100 100"
@@ -4448,7 +4490,7 @@ export default function AppV2() {
                 </button>
               </>
             )}
-            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
+            {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && !contourConstantTest && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
                 <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
@@ -4637,7 +4679,7 @@ export default function AppV2() {
                         background:"rgba(31,25,16,.62)"
                       }}
                     >
-                      <strong>TESTE · CONTORNO MULTIPONTO + CONSTANTE</strong>
+                      <strong>TESTE · FAIXA AMPLIADA (3 ANÉIS) + PLATÔ</strong>
                       <span>Faixa ampliada: {contourConstantTest.scanBandHeightMm.toFixed(1)} mm · Snaps válidos: {contourConstantTest.validCount}/{contourConstantTest.totalCount} · suporte {contourConstantTest.supportPercent}%</span>
                       <span>Constante encontrada: {contourConstantTest.widthMm===null ? "n/d" : contourConstantTest.widthMm.toFixed(2)+" mm"} · {contourConstantTest.stable ? "PLATÔ ESTÁVEL" : "SEM PLATÔ FORTE"}</span>
                       {contourConstantTest.plateauStart>=0 && <span>Platô: pontos {contourConstantTest.plateauStart+1}–{contourConstantTest.plateauEnd+1} · variação {contourConstantTest.spreadPercent?.toFixed(2)}%</span>}
@@ -4881,6 +4923,48 @@ export default function AppV2() {
               onClose={() => setTryOn(false)}
               onGoHandCamera={() => void openHandCamera()}
             />
+          )}
+
+          {phase === "finger" && !tryOn && (
+            <div className="edge-status" style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:10}}>
+              <strong>Diagnóstico completo (experimental)</strong>
+              <button className="secondary" type="button" onClick={() => {
+                // Apenas leitura: registra exatamente o estado usado nesta medição.
+                // Não interfere na câmera, nos snaps nem na fórmula de aro.
+                const snapshot = {
+                  schema: "medidor-anel-v2-diagnostico-completo-1",
+                  capturedAt: new Date().toISOString(),
+                  url: location.href,
+                  mode: { stage, phase, measurementMode, singlePhotoTestMode, diameterPhotoTestMode },
+                  image: { photoDataUrl: photo || null },
+                  card: {
+                    physicalWidthMm: CARD_WIDTH_MM,
+                    physicalHeightMm: CARD_HEIGHT_MM,
+                    cardLines, cardQuad, cardLineLocked,
+                    pixelsPerMm, mmPerPixel: pixelsPerMm && pixelsPerMm > 0 ? 1 / pixelsPerMm : null,
+                    calibrationConfidence,
+                  },
+                  finger: {
+                    liveWidthMm, widthSentToFormulaMm, widthAnalysis,
+                    anatomicalRegionReady, handLandmarkAnalysis,
+                    stableCaptures,
+                  },
+                  captureQuality: { captureQualityGate, preFormulaQuality, captureDeviceQuality },
+                  result: { result, commercialRingSize },
+                };
+                const json = JSON.stringify(snapshot, (_key, value) =>
+                  typeof value === "number" && !Number.isFinite(value) ? null : value, 2);
+                const url = URL.createObjectURL(new Blob([json], {type:"application/json;charset=utf-8"}));
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "diagnostico-v2-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+              }} id="v2-export-diagnostic">Baixar diagnóstico completo (.json)</button>
+              <small>Inclui foto, linhas, escala, dados do dedo, qualidade e resultado. Exporte após ajustar as linhas.</small>
+            </div>
           )}
 
           {phase === "finger" && measurementMode === "finger" && !tryOn && (
