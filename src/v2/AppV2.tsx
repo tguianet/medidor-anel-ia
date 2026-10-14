@@ -4915,34 +4915,46 @@ export default function AppV2() {
           <div className="review-actions">
             <button className="secondary" onClick={resetPhoto}>Tirar outra</button>
             {phase === "finger" && (
-              result && commercialRingSize!==null && leftLocked && rightLocked
-                ? <button className="primary result-open-btn" type="button" onClick={() => setShowResultScreen(true)}>Ver meu aro</button>
-                : <button className="primary" type="button" disabled>{
-                    leftLocked && rightLocked
-                      ? "Linhas posicionadas"
-                      : "Ajuste as linhas no dedo"
-                  }</button>
+              <button
+                className="primary result-open-btn"
+                type="button"
+                disabled={!(leftLocked && rightLocked)}
+                onClick={() => setShowResultScreen(true)}
+              >{leftLocked && rightLocked ? "Finalizar e ver meu aro" : "Ajuste as linhas no dedo"}</button>
             )}
           </div>
           {camera.error && <p className="error">{camera.error}</p>}
           <p className="pending">{tryOn ? "Escolha o acabamento e a largura para comparar os modelos no seu dedo." : "Alinhe manualmente as duas linhas verdes nas bordas externas da parte mais grossa do dedo."}</p>
-          {showResultScreen && phase === "finger" && result && commercialRingSize!==null && (
+          {showResultScreen && phase === "finger" && (
             <div className="result-screen" role="dialog" aria-modal="true" aria-label="Seu aro">
               <div className="result-screen-lines" aria-hidden="true"><i /><i /></div>
               <div className="result-screen-top">
                 <span>◇ MEDIDOR DE ANEL</span>
               </div>
-              <div className="result-screen-body">
-                <span className="result-screen-eyebrow">ARO DO ANEL</span>
-                <strong className="result-screen-number">{commercialRingSize}</strong>
-                <div className="result-screen-divider" aria-hidden="true"><span /><b>◇</b><span /></div>
-                <p className="result-screen-options">
-                  Justo <em>{clamp(commercialRingSize - 1, 1, 40)}</em> · Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
-                </p>
-                <p className="result-screen-hint">Na dúvida entre dois números, prefira o de conforto para anéis largos ou para usar o dia todo.</p>
-              </div>
+              {result && commercialRingSize!==null ? (
+                <div className="result-screen-body">
+                  <span className="result-screen-eyebrow">ARO DO ANEL</span>
+                  <strong className="result-screen-number">{commercialRingSize}</strong>
+                  <div className="result-screen-divider" aria-hidden="true"><span /><b>◇</b><span /></div>
+                  <p className="result-screen-options">
+                    Justo <em>{clamp(commercialRingSize - 1, 1, 40)}</em> · Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
+                  </p>
+                  <p className="result-screen-hint">Na dúvida entre dois números, prefira o de conforto para anéis largos ou para usar o dia todo.</p>
+                </div>
+              ) : (
+                <div className="result-screen-body">
+                  <span className="result-screen-eyebrow">Quase lá</span>
+                  <p className="result-screen-fail">Não conseguimos calcular o aro com segurança nesta foto.</p>
+                  <ul className="result-screen-tips">
+                    <li>Mão apoiada na mesa, dedos esticados</li>
+                    <li>Celular bem em cima e parado</li>
+                    <li>Dedo do anel no centro da foto</li>
+                    <li>Linhas verdes encostadas nas bordas do dedo</li>
+                  </ul>
+                </div>
+              )}
               <div className="result-screen-actions">
-                <button type="button" className="result-screen-primary" onClick={() => { setShowResultScreen(false); resetPhoto(); }}>Medir novamente</button>
+                <button type="button" className="result-screen-primary" onClick={() => { setShowResultScreen(false); resetPhoto(); }}>{result && commercialRingSize!==null ? "Medir novamente" : "Tirar outra foto"}</button>
                 <button type="button" className="result-screen-secondary" onClick={() => setShowResultScreen(false)}>Voltar e ajustar as linhas</button>
               </div>
             </div>
