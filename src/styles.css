@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap");
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #f6f0e5;
@@ -1143,22 +1143,55 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
   transform:translateX(-50%);
 }
 
-/* ===== Visual premium (somente aparência) ===== */
-.intro-lux { position: relative; overflow: hidden; padding: clamp(26px, 6vw, 44px) clamp(20px, 5vw, 40px); text-align: center; border-color: #4a3d27; background: linear-gradient(180deg, rgba(30,26,20,.97), rgba(14,12,10,.98)); }
-.intro-lux-glow { position: absolute; inset: -40% -20% auto; height: 70%; background: radial-gradient(ellipse at center, rgba(224,186,104,.22), transparent 65%); pointer-events: none; }
-.intro-lux > * { position: relative; }
-.intro-lux-kicker { display: inline-block; color: #d9b363; font-size: 11px; font-weight: 800; letter-spacing: .28em; }
-.intro-lux-title { margin: 14px auto 10px; max-width: 13ch; font-family: "Playfair Display", Georgia, serif; font-size: clamp(36px, 9.5vw, 56px); font-weight: 600; line-height: 1.02; color: #f6ead0; }
-.intro-lux-title em { font-style: italic; color: #e9c46f; background: linear-gradient(180deg, #f6dc95, #c99a43); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.intro-lux-sub { margin: 0 auto 20px; max-width: 30ch; color: #c9bda6; font-size: 15px; line-height: 1.5; }
-.intro-lux-video { position: relative; overflow: hidden; margin: 0 0 20px; border: 1px solid rgba(220,180,90,.5); border-radius: 18px; background: #050505; box-shadow: 0 14px 36px rgba(0,0,0,.45); }
-.intro-lux-video video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; }
-.intro-lux-video-close { position: absolute; top: 10px; right: 10px; z-index: 3; width: 36px; height: 36px; padding: 0; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; color: #fff; background: rgba(0,0,0,.7); font-size: 18px; font-weight: 900; cursor: pointer; }
-.intro-lux-link { margin: 0 auto 18px; padding: 8px 14px; border: 1px solid #5a4a2c; border-radius: 999px; color: #e7c574; background: transparent; font-size: 13px; font-weight: 700; cursor: pointer; }
-.intro-lux-steps { display: grid; gap: 10px; margin: 4px 0 22px; padding: 0; list-style: none; text-align: left; }
-.intro-lux-steps li { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid #3d3324; border-radius: 16px; background: rgba(12,10,8,.55); }
-.intro-lux-steps li > span { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border: 1.5px solid #d9b363; border-radius: 50%; color: #f0cf7e; font-family: "Playfair Display", Georgia, serif; font-size: 17px; font-weight: 700; box-shadow: 0 0 12px rgba(217,179,99,.25); }
-.intro-lux-steps strong { display: block; color: #f3e6c8; font-size: 15px; }
-.intro-lux-steps small { display: block; margin-top: 2px; color: #a99c86; font-size: 12.5px; }
-.intro-lux-cta { min-height: 56px; border-radius: 16px; font-size: 17px; font-weight: 800; letter-spacing: .02em; box-shadow: 0 10px 28px rgba(201,154,67,.28), inset 0 1px 0 rgba(255,255,255,.35); }
-.intro-lux-note { margin: 12px 0 0; color: #9d927f; font-size: 12.5px; }
+/* ===== Visual premium — página inicial (somente aparência) ===== */
+.home-icon { flex: 0 0 auto; width: 20px; height: 20px; vertical-align: middle; }
+.home-lux { --gold: #f2ca50; --gold-light: #f3e5ab; --gold-satin: #c9a25e; --champagne: #f5f5f0; --muted: #9e9a90; --card: #1b1813; --ebony: #0d0d0d; position: relative; max-width: 460px; margin: 0 auto; padding: 8px 2px 40px; color: #e6e2de; font-family: Inter, system-ui, sans-serif; }
+.home-glow { position: absolute; inset: -60px -40px auto; height: 420px; background: radial-gradient(ellipse 90% 60% at 50% 20%, rgba(212,175,55,.09), transparent 70%); pointer-events: none; }
+.home-lux > *:not(.home-glow) { position: relative; }
+.home-lux { overflow-x: hidden; }
+.home-chip { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 12px; padding: 4px 12px; border-radius: 999px; background: rgba(92,67,8,.4); color: #e7c17c; font-size: 10px; font-weight: 600; letter-spacing: .18em; }
+.home-chip .home-icon { width: 14px; height: 14px; color: var(--gold); }
+.home-title { margin: 0; font-family: "Playfair Display", Georgia, serif; font-size: clamp(28px, 8vw, 36px); line-height: 1.25; font-weight: 500; color: var(--champagne); }
+.home-title em { font-style: italic; font-weight: 400; background: linear-gradient(90deg, var(--gold-light), var(--gold), var(--gold-satin)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.home-sub { margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 22px; }
+.home-preview { margin-top: 24px; padding: 16px; border-radius: 12px; background: var(--card); box-shadow: 0 20px 40px rgba(0,0,0,.45); }
+.home-preview-stage { position: relative; display: flex; align-items: center; justify-content: center; height: 176px; overflow: hidden; border-radius: 8px; background: radial-gradient(ellipse at 50% 35%, rgba(201,162,94,.22), transparent 60%), linear-gradient(160deg, #2a2219, #121110 60%); }
+.home-preview-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, var(--card), rgba(22,22,22,.55) 45%, transparent); }
+.home-hud { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 250px; }
+.home-hud-pill { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 4px 12px; border-radius: 999px; background: rgba(13,13,13,.9); color: var(--champagne); font-size: 11px; font-weight: 600; letter-spacing: .06em; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+.home-hud-pill .home-icon { width: 14px; height: 14px; color: var(--gold); }
+.home-hud-pill strong { color: var(--gold); font-family: "Playfair Display", Georgia, serif; font-size: 14px; }
+.home-caliper { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 0; }
+.home-caliper-arm { position: relative; display: flex; flex-direction: column; align-items: center; }
+.home-caliper-arm i { position: absolute; top: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--gold); opacity: .6; animation: home-ping 1.6s cubic-bezier(0,0,.2,1) infinite; }
+.home-caliper-arm b { display: block; width: 10px; height: 10px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 12px var(--gold); }
+.home-caliper-arm b::after { content: ""; position: absolute; top: 14px; left: 4px; width: 2px; height: 48px; background: rgba(242,202,80,.8); box-shadow: 0 0 8px var(--gold); }
+.home-caliper-line { flex: 1; height: 1px; margin: 0 4px; background: linear-gradient(90deg, var(--gold), var(--gold-light), var(--gold)); opacity: .8; }
+.home-tolerance { display: flex; align-items: center; gap: 8px; margin-top: 46px; color: var(--muted); font-size: 10.5px; letter-spacing: .06em; }
+.home-tolerance em { color: var(--gold); font-size: 8px; font-style: normal; }
+.home-tolerance strong { color: var(--gold-light); font-weight: 600; }
+.home-scan { position: absolute; left: 0; right: 0; top: 50%; height: 1.5px; background: linear-gradient(90deg, transparent, var(--gold), transparent); opacity: .6; animation: home-pulse 2s ease-in-out infinite; }
+.home-preview-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 11px; }
+.home-preview-foot > span { display: inline-flex; align-items: center; gap: 6px; }
+.home-ok { width: 16px !important; height: 16px !important; color: #2ecc71; }
+.home-video-link { padding: 0; border: 0; background: none; color: var(--gold); font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+.home-video { overflow: hidden; margin-top: 12px; border: 1px solid rgba(212,175,55,.28); border-radius: 12px; background: #000; }
+.home-video video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; }
+.home-steps-label { margin: 24px 4px 8px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.home-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.home-steps li { display: flex; align-items: center; gap: 16px; padding: 16px; border-radius: 12px; background: var(--card); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.home-step-n { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: rgba(92,67,8,.6); color: #e7c17c; font-family: "Playfair Display", Georgia, serif; font-size: 14px; font-weight: 500; }
+.home-steps li > div { flex: 1; min-width: 0; }
+.home-steps strong { display: block; color: var(--champagne); font-size: 15px; font-weight: 500; line-height: 1.3; }
+.home-steps small { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 18px; }
+.home-step-ico { color: rgba(158,154,144,.6); }
+.home-cta { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 56px; margin-top: 36px; border: 0; border-radius: 999px; background: linear-gradient(90deg, var(--gold-light), var(--gold), var(--gold-satin)); color: var(--ebony); font-size: 15px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; box-shadow: 0 8px 24px rgba(212,175,55,.28); cursor: pointer; transition: transform .12s; }
+.home-cta:active { transform: scale(.98); }
+.home-safe { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.home-safe .home-icon { width: 14px; height: 14px; color: var(--gold); }
+.home-foot { margin-top: 36px; padding-top: 24px; text-align: center; }
+.home-foot > div { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--champagne); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.home-foot > div .home-icon { width: 16px; height: 16px; color: var(--gold); }
+.home-foot p { max-width: 280px; margin: 8px auto 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+@keyframes home-ping { 75%, 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes home-pulse { 50% { opacity: .2; } }
