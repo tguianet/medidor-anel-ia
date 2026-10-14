@@ -4925,6 +4925,48 @@ export default function AppV2() {
             />
           )}
 
+          {phase === "finger" && !tryOn && (
+            <div className="edge-status" style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:10}}>
+              <strong>Diagnóstico completo (experimental)</strong>
+              <button className="secondary" type="button" onClick={() => {
+                // Apenas leitura: registra exatamente o estado usado nesta medição.
+                // Não interfere na câmera, nos snaps nem na fórmula de aro.
+                const snapshot = {
+                  schema: "medidor-anel-v2-diagnostico-completo-1",
+                  capturedAt: new Date().toISOString(),
+                  url: location.href,
+                  mode: { stage, phase, measurementMode, singlePhotoTestMode, diameterPhotoTestMode },
+                  image: { photoDataUrl: photo || null },
+                  card: {
+                    physicalWidthMm: CARD_WIDTH_MM,
+                    physicalHeightMm: CARD_HEIGHT_MM,
+                    cardLines, cardQuad, cardLineLocked,
+                    pixelsPerMm, mmPerPixel: pixelsPerMm && pixelsPerMm > 0 ? 1 / pixelsPerMm : null,
+                    calibrationConfidence,
+                  },
+                  finger: {
+                    liveWidthMm, widthSentToFormulaMm, widthAnalysis,
+                    anatomicalRegionReady, handLandmarkAnalysis,
+                    stableCaptures,
+                  },
+                  captureQuality: { captureQualityGate, preFormulaQuality, captureDeviceQuality },
+                  result: { result, commercialRingSize },
+                };
+                const json = JSON.stringify(snapshot, (_key, value) =>
+                  typeof value === "number" && !Number.isFinite(value) ? null : value, 2);
+                const url = URL.createObjectURL(new Blob([json], {type:"application/json;charset=utf-8"}));
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "diagnostico-v2-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+              }}>Baixar diagnóstico completo (.json)</button>
+              <small>Inclui foto, linhas, escala, dados do dedo, qualidade e resultado. Exporte após ajustar as linhas.</small>
+            </div>
+          )}
+
           {phase === "finger" && measurementMode === "finger" && !tryOn && (
             <BatchReviewV2
               ringSize={commercialRingSize}
