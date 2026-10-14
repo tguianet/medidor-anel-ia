@@ -1772,6 +1772,40 @@ export default function App() {
     };
   })();
 
+
+  // Exportacao adicional de diagnostico: somente na branch experimental.
+  const exportFingerEdgeDiagnostic = () => {
+    const source=photoPixelsRef.current,stage=measureRef.current;
+    if(!source||!stage||!photo||!fingerMagnetSamples?.length||!result)return;
+    const rect=stage.getBoundingClientRect();
+    const imageToPercentX=(screenX:number)=>
+      (((screenX/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+    const imageToPercentY=(screenY:number)=>
+      (((screenY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+    const lines=Object.fromEntries(Object.entries(cardLines).map(([key,line])=>[
+      key,{a:{x:imageToPercentX(line.a.x),y:imageToPercentY(line.a.y)},
+           b:{x:imageToPercentX(line.b.x),y:imageToPercentY(line.b.y)}}
+    ]));
+    const cuts=fingerMagnetSamples.map((sample,index)=>({
+      index, widthPx:sample.width,confidence:sample.confidence,
+      left:{x:sample.left/source.width*100,y:sample.y/source.height*100},
+      right:{x:sample.right/source.width*100,y:sample.rightY/source.height*100}
+    }));
+    const payload={
+      schema:"medidor-anel-v2-diagnostico-completo-2",
+      capturedAt:new Date().toISOString(),
+      image:{photoDataUrl:photo,widthPx:source.width,heightPx:source.height},
+      card:{cardLines:lines,physicalWidthMm:85.60,physicalHeightMm:53.98},
+      finger:{widthSentToFormulaMm:result.widthMm,cuts,coordinateSystem:"percent-of-untransformed-image"},
+      audit:measurementAudit,
+      limitations:["Apenas dados de diagnostico: calculo do aro nao modificado","Perspectiva no plano do cartao nao corrige a altura do dedo"]
+    };
+    const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}));
+    const a=document.createElement("a");a.href=url;
+    a.download="diagnostico-v2-bordas-"+Date.now()+".json";a.click();
+    window.setTimeout(()=>URL.revokeObjectURL(url),3000);
+  };
+
   const fourMagnetWidthsMm = (() => {
     if(!fingerMagnetSamples?.length||!pixelsPerMm) return [] as number[];
     const cardScaleMmPerPx=1/pixelsPerMm;
@@ -2168,6 +2202,7 @@ export default function App() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
+              <button type="button" onClick={exportFingerEdgeDiagnostic}>Baixar diagnóstico completo com bordas</button>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
