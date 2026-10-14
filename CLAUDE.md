@@ -3,7 +3,7 @@
 ## Versão /v2 CONGELADA (14/10/2026)
 
 A medição da v2 foi travada pelo Tiago na versão publicada em 14/10/2026
-(tag git `v2-medicao-congelada`, commit 8cb953d). Nos testes dele: 15/15 dentro
+(cópia fixa no branch `v2-congelada-2026-10-14`, commit 8cb953d). Nos testes dele: 15/15 dentro
 de ±1 aro.
 
 **Proibido mexer na lógica de medição.** Não alterar, sem pedido explícito do Tiago:
