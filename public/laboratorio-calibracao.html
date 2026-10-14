@@ -31,6 +31,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <button id="detect">Detectar bordas do cartão</button><button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
 </section>
 <section class="panel" id="comparison" hidden><h2>Comparativo da mesma foto</h2><p>Simulação diagnóstica; não altera a medição nem a V2 principal.</p><div class="grid"><div class="metric">Sem correção percentual<b id="compareRaw"></b></div><div class="metric">Com correção original<b id="compareCorrected"></b></div><div class="metric">Diferença causada pela correção<b id="compareDelta"></b></div><div class="metric">Perspectiva dos quatro cantos<b id="comparePerspective"></b></div></div><small id="compareNote"></small></section>
+<section class="panel" id="cutsPanel" hidden><h2>Diagnóstico dos cortes do dedo</h2><p id="cutsStatus"></p><div id="cutsSummary" class="grid"></div><div id="cutsTable" style="overflow-x:auto"></div><p class="warning">Os valores abaixo são apenas os cortes registrados no diagnóstico original. Nenhum corte é recriado a partir da largura final. A correção de 9,2% é exibida como hipótese de comparação, não como validação de perspectiva.</p></section>
 <section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
 <div id="snapshots"><table><thead><tr><th>#</th><th>Cartão</th><th>Escala</th><th>Largura simulada</th><th>Dif. da original</th></tr></thead><tbody id="rows"></tbody></table></div>
 <button id="download">Baixar relatório JSON</button><button id="clear">Limpar tentativas</button>
@@ -203,5 +204,62 @@ const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.d
    get('compareNote').textContent='A perspectiva está representada pelas quatro linhas móveis. Os valores acima são calculados por escala média, não por homografia ou nova detecção do dedo. A correção percentual é apenas desligada na simulação, não no sistema original.';
    return r;
  };
+})();
+</script><script>
+(function(){
+let cutReport={available:false,reason:'Nenhum diagnóstico carregado'};
+const out=(id,s)=>{document.getElementById(id).textContent=s};
+const dec=n=>Number(n).toFixed(3).replace('.',',');
+function flattenCandidates(root){
+ const found=[];const seen=new WeakSet();
+ function walk(obj,path,depth){
+  if(!obj||typeof obj!=='object'||depth>7||seen.has(obj))return;
+  seen.add(obj);
+  if(Array.isArray(obj)){
+   if(obj.length>=20&&obj.length<=200){
+    const extract=x=>typeof x==='number'?x:(x&&typeof x==='object'?(x.widthPx??x.width??x.larguraPx??x.largura??x.distancePx??x.distance):undefined);
+    const values=obj.map(extract);
+    const valid=values.filter(x=>typeof x==='number'&&Number.isFinite(x)&&x>0);
+    if(valid.length===obj.length&&/(cort|slice|scan|perfil|profile|width|largura|sample|amostr)/i.test(path))found.push({path,values});
+   }
+   for(let i=0;i<obj.length;i++)if(typeof obj[i]==='object')walk(obj[i],path+'['+i+']',depth+1);
+  }else for(const [key,v] of Object.entries(obj))if(typeof v==='object')walk(v,path+'.'+key,depth+1);
+ }
+ walk(root,'diagnostico',0);
+ return found.sort((a,b)=>Number(b.values.length===50)-Number(a.values.length===50));
+}
+function inspect(d){
+ const panel=document.getElementById('cutsPanel'),summary=document.getElementById('cutsSummary'),table=document.getElementById('cutsTable');
+ panel.hidden=false;summary.replaceChildren();table.replaceChildren();
+ const candidates=flattenCandidates(d);
+ if(!candidates.length){
+  cutReport={available:false,reason:'O JSON não inclui uma sequência numérica identificável dos cortes individuais. Exporte um diagnóstico completo com os cortes registrados no algoritmo V2.'};
+  out('cutsStatus',cutReport.reason);return;
+ }
+ const chosen=candidates[0],arr=chosen.values.slice(),sorted=[...arr].sort((a,b)=>a-b),mean=arr.reduce((a,b)=>a+b,0)/arr.length;
+ const median=sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2;
+ const sd=Math.sqrt(arr.reduce((s,v)=>s+(v-mean)**2,0)/arr.length);
+ const corr=Number(d.audit?.correctionPercent)||0;
+ cutReport={available:true,path:chosen.path,unit:/mm/i.test(chosen.path)?'unidade do registro (possivelmente mm)':'unidade original do diagnóstico (confirmar se px ou mm)',values:arr,statistics:{count:arr.length,min:sorted[0],max:sorted.at(-1),mean,median,standardDeviation:sd},correctionPercent:corr,otherCandidatePaths:candidates.slice(1).map(c=>c.path)};
+ out('cutsStatus',arr.length+' cortes encontrados em '+chosen.path+'. A unidade precisa ser conferida no código original antes de qualquer conversão ou conclusão.');
+ for(const [label,val] of [['Quantidade',String(arr.length)],['Média',dec(mean)],['Mediana',dec(median)],['Mínimo / máximo',dec(sorted[0])+' / '+dec(sorted.at(-1))],['Desvio-padrão',dec(sd)],['Correção registrada',dec(corr)+'%']]){
+ const card=document.createElement('div');card.className='metric';card.textContent=label;const bold=document.createElement('b');bold.textContent=val;card.appendChild(bold);summary.appendChild(card);
+ }
+ const t=document.createElement('table'),head=document.createElement('thead'),row=document.createElement('tr');
+ for(const txt of ['Corte','Valor bruto','Variação da média']){const th=document.createElement('th');th.textContent=txt;row.appendChild(th)}head.appendChild(row);t.appendChild(head);
+ const body=document.createElement('tbody');
+ arr.forEach((v,i)=>{const tr=document.createElement('tr');for(const txt of [String(i+1),dec(v),dec(v-mean)]){const td=document.createElement('td');td.textContent=txt;tr.appendChild(td)}body.appendChild(tr)});
+ t.appendChild(body);table.appendChild(t);
+}
+document.getElementById('file').addEventListener('change',async e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ try{inspect(JSON.parse(await f.text()))}catch(err){cutReport={available:false,reason:'Falha ao ler cortes: '+err.message};document.getElementById('cutsPanel').hidden=false;out('cutsStatus',cutReport.reason)}
+});
+document.getElementById('download').addEventListener('click',()=>{
+ if(!diagnostic)return;
+ const payload={schema:'v2-cortes-diagnostico-1',sourceCapturedAt:diagnostic.capturedAt,cutReport,reference:{originalWidth:reference.originalWidth,correctionPercent:reference.correctionPercent},limitations:'Dados de cortes extraídos do diagnóstico sem executar novamente segmentação, homografia ou algoritmo V2. Unidades e seleção de cortes precisam de validação no código original.'};
+ const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download='analise-cortes-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+});
 })();
 </script></body></html>
