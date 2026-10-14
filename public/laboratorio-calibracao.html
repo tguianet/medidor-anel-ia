@@ -7,7 +7,7 @@
 p,small{color:#bdc6d2;line-height:1.5}.panel{border:1px solid #394352;background:#1c232d;padding:14px;border-radius:12px;margin:12px 0}
 button,input[type=file]{font:inherit}button{border:0;border-radius:8px;padding:12px;background:#376fde;color:white;margin:5px 5px 5px 0;cursor:pointer}
 button:disabled{opacity:.4}input[type=range]{width:100%}label{display:block;margin:16px 0}
-strong,output{color:#fff}#photo{width:100%;display:block;border-radius:6px}#photoWrap{position:relative;touch-action:none}#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}#overlay line{stroke:#20e6b2;stroke-width:.6;cursor:grab;vector-effect:non-scaling-stroke}#overlay line.active{stroke:#ffd368;stroke-width:1}#overlay .hit{stroke:transparent;stroke-width:22px;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:grab;touch-action:none}#overlay .hit:active{cursor:grabbing}.adjust{display:grid;grid-template-columns:1fr 1fr;gap:8px}.adjust button{margin:2px;padding:10px;background:#34465c}
+strong,output{color:#fff}#photo{width:100%;display:block;border-radius:6px}#photoWrap{position:relative;touch-action:none}#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}#overlay line{stroke:#20e6b2;stroke-width:.6;cursor:grab;vector-effect:non-scaling-stroke}#overlay line.active{stroke:#ffd368;stroke-width:1}#overlay .hit{stroke:transparent;stroke-width:22px;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:grab;touch-action:none}#overlay .hit:active{cursor:grabbing}#overlay circle.corner{fill:#ffd368;stroke:#15202c;stroke-width:1.2;vector-effect:non-scaling-stroke;cursor:crosshair;touch-action:none}.adjust{display:grid;grid-template-columns:1fr 1fr;gap:8px}.adjust button{margin:2px;padding:10px;background:#34465c}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#29323e;padding:12px;border-radius:8px}
 .metric b{display:block;font-size:1.3rem;margin-top:4px}#snapshots{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}
 th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color:#ffd58a}
@@ -17,7 +17,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <section class="panel"><label>Arquivo de diagnóstico (.json)<br><input id="file" type="file" accept=".json,application/json"></label>
 <small id="status">Escolha um diagnóstico que contenha foto, escala e largura do dedo.</small></section>
 <section class="panel" id="lab" hidden>
-<div id="photoWrap"><img id="photo" alt="Fotografia original da medição"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="adjust" id="lineControls"><button data-dir="left">Esquerda ◀</button><button data-dir="right">Direita ▶</button><button data-dir="up">Cima ▲</button><button data-dir="down">Baixo ▼</button></div><p>Selecione uma das quatro bordas. A linha escolhida fica amarela. Se não conseguir arrastar, use os botões. As quatro guias precisam contornar o cartão completo.</p><p>Arraste as linhas verdes para alinhar com as bordas do cartão, sem mudar a fotografia. Depois registre as tentativas.</p>
+<div id="photoWrap"><img id="photo" alt="Fotografia original da medição"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="adjust" id="lineControls"><button data-dir="left">Esquerda ◀</button><button data-dir="right">Direita ▶</button><button data-dir="up">Cima ▲</button><button data-dir="down">Baixo ▼</button></div><p>Arraste uma linha para deslocar a borda. Arraste as bolinhas amarelas dos quatro cantos para ajustar a inclinação e a perspectiva. Se não conseguir arrastar uma linha, selecione-a e use os botões. As quatro guias precisam contornar o cartão completo.</p><p>Arraste as linhas verdes para alinhar com as bordas do cartão, sem mudar a fotografia. Depois registre as tentativas.</p>
 <div class="grid">
 <div class="metric">Escala original<b id="origScale"></b></div>
 <div class="metric">Largura original<b id="origWidth"></b></div>
@@ -82,33 +82,48 @@ function applyCardBounds(b){
 }
 let selected='left';
 function redraw(){draw();drawSelection();update()}
+const corners={tl:[['left','a'],['top','a']],tr:[['right','a'],['top','b']],bl:[['left','b'],['bottom','a']],br:[['right','b'],['bottom','b']]};
 function draw(){
-const svg=$('overlay');svg.replaceChildren();
-for(const name of ['left','right','top','bottom']){
-const l=lines[name],ns='http://www.w3.org/2000/svg';
-const visible=document.createElementNS(ns,'line'),hit=document.createElementNS(ns,'line');
-for(const el of [visible,hit]){el.setAttribute('x1',l.a.x);el.setAttribute('y1',l.a.y);el.setAttribute('x2',l.b.x);el.setAttribute('y2',l.b.y)}
-hit.classList.add('hit');hit.dataset.name=name;svg.append(visible,hit);
-}
+ const svg=$('overlay'),ns='http://www.w3.org/2000/svg';svg.replaceChildren();
+ for(const name of ['left','right','top','bottom']){
+ const l=lines[name],visible=document.createElementNS(ns,'line'),hit=document.createElementNS(ns,'line');
+ for(const el of [visible,hit]){el.setAttribute('x1',l.a.x);el.setAttribute('y1',l.a.y);el.setAttribute('x2',l.b.x);el.setAttribute('y2',l.b.y)}
+ hit.classList.add('hit');hit.dataset.name=name;svg.append(visible,hit);
+ }
+ for(const [key,pairs] of Object.entries(corners)){
+ const p=lines[pairs[0][0]][pairs[0][1]],handle=document.createElementNS(ns,'circle');
+ handle.classList.add('corner');handle.dataset.corner=key;handle.setAttribute('cx',p.x);handle.setAttribute('cy',p.y);
+ handle.setAttribute('r','1.4');svg.append(handle);
+ }
 }
 let dragging=null;
 $('overlay').addEventListener('pointerdown',e=>{
-const name=e.target.closest('line.hit')?.dataset.name;
-if(!name)return;
-selected=name;dragging={name,id:e.pointerId,x:e.clientX,y:e.clientY};
-e.currentTarget.setPointerCapture(e.pointerId);drawSelection();e.preventDefault();
+ const corner=e.target.closest('circle.corner')?.dataset.corner;
+ const name=e.target.closest('line.hit')?.dataset.name;
+ if(!corner&&!name)return;
+ if(name)selected=name;
+ dragging={corner,name,id:e.pointerId,x:e.clientX,y:e.clientY};
+ e.currentTarget.setPointerCapture(e.pointerId);drawSelection();e.preventDefault();
 });
 $('overlay').addEventListener('pointermove',e=>{
-if(!dragging||dragging.id!==e.pointerId)return;
-const rect=e.currentTarget.getBoundingClientRect(),axis=dragging.name==='left'||dragging.name==='right'?'x':'y';
-const delta=axis==='x'?(e.clientX-dragging.x)*100/rect.width:(e.clientY-dragging.y)*100/rect.height;
-dragging.x=e.clientX;dragging.y=e.clientY;
-moveLine(dragging.name,axis,delta);e.preventDefault();
+ if(!dragging||dragging.id!==e.pointerId)return;
+ const rect=e.currentTarget.getBoundingClientRect();
+ const dx=(e.clientX-dragging.x)*100/rect.width,dy=(e.clientY-dragging.y)*100/rect.height;
+ dragging.x=e.clientX;dragging.y=e.clientY;
+ if(dragging.corner)moveCorner(dragging.corner,dx,dy);
+ else{const axis=dragging.name==='left'||dragging.name==='right'?'x':'y';moveLine(dragging.name,axis,axis==='x'?dx:dy)}
+ e.preventDefault();
 });
 const stopDrag=e=>{if(dragging&&dragging.id===e.pointerId)dragging=null};
 $('overlay').addEventListener('pointerup',stopDrag);
 $('overlay').addEventListener('pointercancel',stopDrag);
 $('overlay').addEventListener('lostpointercapture',stopDrag);
+function moveCorner(key,dx,dy){
+ const pairs=corners[key],p=lines[pairs[0][0]][pairs[0][1]];
+ const nx=Math.max(0,Math.min(100,p.x+dx)),ny=Math.max(0,Math.min(100,p.y+dy));
+ for(const [name,end] of pairs)lines[name][end]={x:nx,y:ny};
+ redraw();
+}
 function drawSelection(){
 for(const el of $('overlay').querySelectorAll('line:not(.hit)'))el.classList.toggle('active',el.nextSibling?.dataset.name===selected);
 }
