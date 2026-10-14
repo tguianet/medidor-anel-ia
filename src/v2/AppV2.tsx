@@ -800,7 +800,9 @@ export default function AppV2() {
       }
 
       camera.setError(
-        fingerCardCalibrationStep === "reference"
+        singlePhotoTestMode
+          ? "Arraste as duas linhas verdes até as bordas laterais do cartão e toque em Confirmar."
+          : fingerCardCalibrationStep === "reference"
           ? "Foto 1: ajuste as 2 laterais e a base do cartão."
           : "Foto 2: ajuste novamente as 2 laterais e a base do cartão sobre o dedo."
       );
@@ -3916,7 +3918,13 @@ export default function AppV2() {
       guidedStep === 3 ? "3. Ajuste as duas linhas na parte mais grossa" :
       "4. Confira os dois números";
 
-  const guideText = singlePhotoTestMode
+  const guideText = singlePhotoTestMode && !debugMode
+    ? (guidedStep === 1
+        ? "Coloque o cartão sobre o dedo, enquadre na moldura e tire a foto."
+        : guidedStep === 2
+          ? "Arraste cada linha verde até a borda do dedo, na altura onde o anel vai ficar. Use o zoom (+) para mais precisão."
+          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
+    : singlePhotoTestMode
     ? (guidedStep === 1
         ? "Fotografe o cartão sobre o dedo. O detector aplica automaticamente as 3 linhas e calibra os 85,60 mm antes de abrir a medição."
         : guidedStep === 2
@@ -4485,7 +4493,9 @@ export default function AppV2() {
           {analyzingCard && <p className="analysis-loading">Localizando o cartão...</p>}
           {phase === "card" && measurementMode === "finger" && !diameterPhotoTestMode && !analyzingCard && (
             <>
-              <p style={{fontSize:"0.9rem",lineHeight:1.5,color:"#e8c978"}}>Ajuste somente as duas linhas verdes de ponta a ponta nas laterais reais do cartão. A base é detectada internamente e não precisa ser arrastada.</p>
+              <p style={{fontSize:"0.9rem",lineHeight:1.5,color:"#e8c978"}}>{debugMode
+                ? "Ajuste somente as duas linhas verdes de ponta a ponta nas laterais reais do cartão. A base é detectada internamente e não precisa ser arrastada."
+                : "Arraste as duas linhas verdes até as bordas laterais do cartão. Use o zoom (+) para encaixar com precisão."}</p>
               <button
                 className="primary confirm-perspective"
                 type="button"
@@ -4502,7 +4512,7 @@ export default function AppV2() {
                   {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
                 </span>)}
               </div>
-              <div className="card-base-status">
+              {debugMode && <div className="card-base-status">
                 <strong>{singlePhotoTestMode
                   ? "Modo 1 foto — cartão sobre o dedo"
                   : fingerCardCalibrationStep === "reference"
@@ -4519,7 +4529,7 @@ export default function AppV2() {
                     ? "A largura entre as duas laterais na linha da base representa os 85,60 mm do cartão."
                     : "A Foto 2 continua calculando sua própria escala, mas agora a captura é guiada para ficar o mais próxima possível da Foto 1."}</small>
                 <small>As 3 linhas mantêm o ímã: aproxime da borda e solte para encaixar.</small>
-              </div>
+              </div>}
             </>
           )}
           {phase === "card" && !(measurementMode === "finger" && !diameterPhotoTestMode) && !analyzingCard && <div className="card-line-status">
@@ -4556,22 +4566,28 @@ export default function AppV2() {
 
           {phase==="finger" && measurementMode==="finger" && liveWidthMm!==null && !anatomicalRegionReady && (
             <div className="analysis-result" role="alert">
-              <strong>Região do anel não detectada</strong>
-              <span>O aro foi bloqueado porque nem a anatomia nem os snaps físicos atingiram confiança suficiente nesta foto. Refaça a captura.</span>
+              <strong>{debugMode ? "Região do anel não detectada" : "Não foi possível medir nesta foto"}</strong>
+              <span>{debugMode
+                ? "O aro foi bloqueado porque nem a anatomia nem os snaps físicos atingiram confiança suficiente nesta foto. Refaça a captura."
+                : "Tire outra foto com a mão bem apoiada na mesa, os dedos esticados e o dedo do anel no centro da foto."}</span>
             </div>
           )}
           {phase==="finger" && singlePhotoTestMode && liveWidthMm!==null && !captureQualityGate.accepted && anatomicalRegionReady && (
             <div className="analysis-result">
-              <strong>Captura descartada</strong>
-              <span>Esta foto não passou na validação: {captureQualityGate.reasons.join(" · ")}. Refaça a captura; a nova foto começa do zero e não será combinada com esta.</span>
+              <strong>{debugMode ? "Captura descartada" : "Vamos tirar outra foto"}</strong>
+              <span>{debugMode
+                ? `Esta foto não passou na validação: ${captureQualityGate.reasons.join(" · ")}. Refaça a captura; a nova foto começa do zero e não será combinada com esta.`
+                : "Esta foto não ficou boa o suficiente para medir com segurança. Tire outra com o celular parado e paralelo à mesa."}</span>
             </div>
           )}
           {phase === "finger" && liveWidthMm !== null && !preFormulaQuality.accepted && (
             <div className="analysis-result">
-              <strong>Medição com baixa confiança</strong>
-              <span>Confiança: {preFormulaQuality.finalConfidence}/100 · {preFormulaQuality.label}.</span>
-              <span>Estabilidade da captura: {captureDeviceQuality?.stabilityScore==null?"n/d":captureDeviceQuality.stabilityScore}/100.</span>
-              <span>Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais.</span>
+              <strong>{debugMode ? "Medição com baixa confiança" : "Medida pouco precisa"}</strong>
+              {debugMode && <span>Confiança: {preFormulaQuality.finalConfidence}/100 · {preFormulaQuality.label}.</span>}
+              {debugMode && <span>Estabilidade da captura: {captureDeviceQuality?.stabilityScore==null?"n/d":captureDeviceQuality.stabilityScore}/100.</span>}
+              <span>{debugMode
+                ? "Refaça a captura com o cartão e o celular mais alinhados. Para liberar a medição, a estabilidade precisa ficar em 75 ou mais."
+                : "Tire outra foto com o cartão e o celular mais alinhados e o celular parado."}</span>
             </div>
           )}
           {phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
@@ -4856,16 +4872,18 @@ export default function AppV2() {
           {phase === "finger" && !tryOn && !diameterPhotoTestMode && (
             <div className="edge-status">
               <strong>Meça na parte mais grossa do dedo</strong>
-              <span>Posicione as linhas verdes aproximadamente na parte mais grossa do dedo. No diagnóstico privado, os snaps multiponto percorrem a faixa ao redor, grudam no contorno físico de cada lado e procuram a maior largura que forme uma constante estável.</span>
+              <span>{debugMode
+                ? "Posicione as linhas verdes aproximadamente na parte mais grossa do dedo. No diagnóstico privado, os snaps multiponto percorrem a faixa ao redor, grudam no contorno físico de cada lado e procuram a maior largura que forme uma constante estável."
+                : "Coloque cada linha verde exatamente na borda do dedo. A lupa aparece enquanto você arrasta."}</span>
             </div>
           )}
 
           {phase === "finger" && !tryOn && <div className="edge-status">
             <strong>{leftLocked && rightLocked ? "Laterais posicionadas" : "Ajuste as 2 laterais"}</strong>
             <span>
-              {leftLocked ? "✓ Esquerda manual" : "○ Ajuste a esquerda"}
+              {leftLocked ? "✓ Esquerda" : "○ Ajuste a esquerda"}
               {" · "}
-              {rightLocked ? "✓ Direita manual" : "○ Ajuste a direita"}
+              {rightLocked ? "✓ Direita" : "○ Ajuste a direita"}
             </span>
           </div>}
 
@@ -4883,7 +4901,7 @@ export default function AppV2() {
             />
           )}
 
-          {phase === "finger" && measurementMode === "finger" && !tryOn && (
+          {debugMode && phase === "finger" && measurementMode === "finger" && !tryOn && (
             <BatchReviewV2
               ringSize={commercialRingSize}
               widthMm={widthSentToFormulaMm}
