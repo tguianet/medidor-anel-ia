@@ -17,7 +17,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <section class="panel"><label>Arquivo de diagnóstico (.json)<br><input id="file" type="file" accept=".json,application/json"></label>
 <small id="status">Escolha um diagnóstico que contenha foto, escala e largura do dedo.</small></section>
 <section class="panel" id="lab" hidden>
-<div id="photoWrap"><img id="photo" alt="Fotografia original da medição"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="adjust" id="lineControls"><button data-dir="left">Esquerda ◀</button><button data-dir="right">Direita ▶</button><button data-dir="up">Cima ▲</button><button data-dir="down">Baixo ▼</button></div><p>Selecione uma linha tocando nela. Se o arraste falhar, use os botões para deslocá-la.</p><p>Arraste as linhas verdes para alinhar com as bordas do cartão, sem mudar a fotografia. Depois registre as tentativas.</p>
+<div id="photoWrap"><img id="photo" alt="Fotografia original da medição"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="adjust" id="lineControls"><button data-dir="left">Esquerda ◀</button><button data-dir="right">Direita ▶</button><button data-dir="up">Cima ▲</button><button data-dir="down">Baixo ▼</button></div><p>Selecione uma das quatro bordas. A linha escolhida fica amarela. Se não conseguir arrastar, use os botões. As quatro guias precisam contornar o cartão completo.</p><p>Arraste as linhas verdes para alinhar com as bordas do cartão, sem mudar a fotografia. Depois registre as tentativas.</p>
 <div class="grid">
 <div class="metric">Escala original<b id="origScale"></b></div>
 <div class="metric">Largura original<b id="origWidth"></b></div>
@@ -27,7 +27,7 @@ th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color
 <label>Ajuste fino da largura de referência do cartão (alteração percentual sobre os 85,60 mm em pixels da foto)
 <input id="offset" type="range" min="-8" max="8" step="0.1" value="0">
 <output id="change">0,0%</output></label>
-<p class="warning">As linhas arrastadas alteram a escala aproximada do cartão, mantendo os pixels do dedo fixos. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
+<p class="warning">Se o topo e a base vierem sobrepostos no JSON, o laboratório apresenta um retângulo inicial provisório. Confirme as quatro bordas visualmente antes de registrar. As linhas arrastadas alteram a escala aproximada do cartão, mantendo os pixels do dedo fixos. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
 <button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
 </section>
 <section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
@@ -39,11 +39,17 @@ const $=id=>document.getElementById(id), fmt=(n,d=3)=>Number(n).toFixed(d).repla
 let diagnostic=null, snapshots=[], reference={}, lines={};
 function clone(v){return JSON.parse(JSON.stringify(v))}
 function xAt(l,y){return Math.abs(l.b.y-l.a.y)<1e-6?(l.a.x+l.b.x)/2:l.a.x+(l.b.x-l.a.x)*(y-l.a.y)/(l.b.y-l.a.y)}
-function span(){
-const top=(lines.top.a.y+lines.top.b.y)/2, bottom=(lines.bottom.a.y+lines.bottom.b.y)/2;
-return (Math.abs(xAt(lines.right,top)-xAt(lines.left,top))+Math.abs(xAt(lines.right,bottom)-xAt(lines.left,bottom)))/2;
+function span(){const ys=[lines.top.a.y,lines.bottom.a.y];return ys.reduce((n,y)=>n+Math.abs(xAt(lines.right,y)-xAt(lines.left,y)),0)/2;}
+function extendedLines(raw){
+ const o=clone(raw),m={};for(const k of ['left','right','top','bottom'])m[k]={x:(o[k].a.x+o[k].b.x)/2,y:(o[k].a.y+o[k].b.y)/2};
+ let yt=m.top.y,yb=m.bottom.y;
+ if(Math.abs(yb-yt)<5){const w=Math.abs(m.right.x-m.left.x),h=w*53.98/85.60,c=Math.max(h/2,Math.min(100-h/2,(m.left.y+m.right.y)/2));yt=c-h/2;yb=c+h/2;}
+ if(yt>yb)[yt,yb]=[yb,yt];
+ const lt=xAt(o.left,yt),lb=xAt(o.left,yb),rt=xAt(o.right,yt),rb=xAt(o.right,yb);
+ return {left:{a:{x:lt,y:yt},b:{x:lb,y:yb}},right:{a:{x:rt,y:yt},b:{x:rb,y:yb}},top:{a:{x:lt,y:yt},b:{x:rt,y:yt}},bottom:{a:{x:lb,y:yb},b:{x:rb,y:yb}}};
 }
 let selected='left';
+function redraw(){draw();drawSelection();update()}
 function draw(){
 const svg=$('overlay');svg.replaceChildren();
 for(const name of ['left','right','top','bottom']){
@@ -56,7 +62,7 @@ hit.addEventListener('pointermove',e=>{if(!hit.hasPointerCapture(e.pointerId))re
 const rect=svg.getBoundingClientRect(),axis=name==='left'||name==='right'?'x':'y';
 const delta=axis==='x'?(e.clientX-Number(hit.dataset.x))*100/rect.width:(e.clientY-Number(hit.dataset.y))*100/rect.height;
 hit.dataset.x=e.clientX;hit.dataset.y=e.clientY;
-moveLine(name,axis,delta);paint();e.preventDefault()});
+moveLine(name,axis,delta);e.preventDefault()});
 svg.append(visible,hit);
 }}
 function drawSelection(){
@@ -65,9 +71,12 @@ for(const el of $('overlay').querySelectorAll('line:not(.hit)'))el.classList.tog
 function moveLine(name,axis,delta){
 if(!lines[name]||!Number.isFinite(delta))return;
 for(const pt of [lines[name].a,lines[name].b])pt[axis]=Math.max(0,Math.min(100,pt[axis]+delta));
-const elements=[...$('overlay').querySelectorAll('line')],idx=['left','right','top','bottom'].indexOf(name)*2;
-for(const el of elements.slice(idx,idx+2)){el.setAttribute('x1',lines[name].a.x);el.setAttribute('x2',lines[name].b.x);el.setAttribute('y1',lines[name].a.y);el.setAttribute('y2',lines[name].b.y)}
-drawSelection();update();
+const side=lines[name],L=lines.left,R=lines.right,T=lines.top,B=lines.bottom;
+if(name==='left'){T.a=clone(side.a);B.a=clone(side.b)}
+else if(name==='right'){T.b=clone(side.a);B.b=clone(side.b)}
+else if(name==='top'){L.a=clone(side.a);R.a=clone(side.b)}
+else {L.b=clone(side.a);R.b=clone(side.b)}
+redraw();
 }
 $('lineControls').addEventListener('click',e=>{
 const dir=e.target.closest('[data-dir]')?.dataset.dir;if(!dir||!diagnostic)return;
@@ -90,18 +99,18 @@ const d=JSON.parse(await f.text());
 const scale=Number(d.card?.pixelsPerMm ?? (1/Number(d.audit?.cardScaleMmPerPx))), width=Number(d.finger?.widthSentToFormulaMm), physical=Number(d.card?.physicalWidthMm);
 if(!d.image?.photoDataUrl?.startsWith('data:image/')||!Number.isFinite(scale)||scale<=0||!Number.isFinite(width)||width<=0||!Number.isFinite(physical)||physical<=0)throw Error('Diagnóstico incompleto ou incompatível.');
 if(!d.card?.cardLines?.left||!d.card?.cardLines?.right||!d.card?.cardLines?.top||!d.card?.cardLines?.bottom)throw Error('Linhas do cartão ausentes do JSON.');
-diagnostic=d; snapshots=[];lines=clone(d.card.cardLines);
+diagnostic=d; snapshots=[];lines=extendedLines(d.card.cardLines);
 reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:Number(d.audit?.usedWidthPx)||width*scale/(1-(Number(d.audit?.correctionPercent)||0)/100),correctionPercent:Number(d.audit?.correctionPercent)||0,initialSpan:span(),initialLines:clone(lines)};
 $('photo').src=d.image.photoDataUrl;
 $('origScale').textContent=fmt(scale,4)+' px/mm';
 $('origWidth').textContent=fmt(width)+' mm';
 $('offset').value=0;$('lab').hidden=false;$('results').hidden=false;$('rows').replaceChildren();
 $('status').textContent='Arquivo carregado: '+f.name+'. A foto permanecerá fixa.';
-draw();drawSelection();update();
+redraw();
 }catch(err){$('status').textContent='Erro: '+err.message;$('lab').hidden=true;$('results').hidden=true;}
 });
 $('offset').addEventListener('input',update);
-$('reset').addEventListener('click',()=>{$('offset').value=0;lines=clone(reference.initialLines);draw();update()});
+$('reset').addEventListener('click',()=>{$('offset').value=0;lines=clone(reference.initialLines);redraw()});
 $('save').addEventListener('click',()=>{
 if(!diagnostic)return; const data={number:snapshots.length+1,...update()};snapshots.push(data);
 const tr=document.createElement('tr');
