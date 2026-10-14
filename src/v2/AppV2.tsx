@@ -182,6 +182,10 @@ export default function AppV2() {
   const [tryOn, setTryOn] = useState(false);
   // Tela de resultado (só apresentação; o número vem do cálculo congelado).
   const [showResultScreen, setShowResultScreen] = useState(false);
+  // Abre a tela do número sozinha depois que a pessoa ajustou as DUAS linhas
+  // do dedo (ao soltar a segunda e a cada novo ajuste depois disso).
+  const fingerAdjustedRef = useRef<{ photo: string; left: boolean; right: boolean }>({ photo: "", left: false, right: false });
+  const autoResultTimerRef = useRef<number | null>(null);
   const [ringMetal, setRingMetal] = useState<RingMetal>("gold");
   const [ringBandWidth, setRingBandWidth] = useState(4);
   const [ringStyle, setRingStyle] = useState<RingStyle>("classic");
@@ -3976,6 +3980,30 @@ export default function AppV2() {
     return {width,height,left,right,top,bottom,minRing,maxRing,minMm,maxMm,x,y,path};
   })();
 
+  const finishDragAndMaybeShowResult = (event:React.PointerEvent) => {
+    const target = draggingRef.current;
+    finishDrag(event);
+    if (debugMode || phase !== "finger") return;
+    const side =
+      target === "left" || (typeof target === "string" && target.startsWith("finger-line-left")) ? "left"
+      : target === "right" || (typeof target === "string" && target.startsWith("finger-line-right")) ? "right"
+      : null;
+    if (!side) return;
+    const state = fingerAdjustedRef.current.photo === photo
+      ? fingerAdjustedRef.current
+      : { photo, left: false, right: false };
+    state[side] = true;
+    fingerAdjustedRef.current = state;
+    if (state.left && state.right) {
+      if (autoResultTimerRef.current !== null) window.clearTimeout(autoResultTimerRef.current);
+      // Pequena espera para o cálculo (inalterado) atualizar com a linha solta.
+      autoResultTimerRef.current = window.setTimeout(() => {
+        autoResultTimerRef.current = null;
+        setShowResultScreen(true);
+      }, 600);
+    }
+  };
+
   return (
     <main className="app">
       <header className="brand">
@@ -4138,7 +4166,7 @@ export default function AppV2() {
             className="measurement-stage is-active"
             onPointerDown={startPan}
             onPointerMove={(event) => updateDrag(event.clientX, event.clientY)}
-            onPointerUp={finishDrag}
+            onPointerUp={finishDragAndMaybeShowResult}
             onPointerCancel={() => { draggingRef.current = null; setFingerLoupe(null); }}
           >
             {photo && <img className="zoomable-photo" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }} src={photo} alt="Fotografia para medição" draggable={false} />}
