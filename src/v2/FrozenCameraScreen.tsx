@@ -93,8 +93,32 @@ export default function FrozenCameraScreen({
     phoneReady &&
     !cameraOpening;
 
+  // Disparo automático com alinhamento ACEITÁVEL (não precisa juntar as
+  // bolinhas perfeitamente): cartão encaixado, dedo quase reto e centrado sob
+  // o cartão e celular quase paralelo à mesa. Sem sensor de inclinação
+  // (iPhone sem permissão), o celular não bloqueia o disparo.
+  const fingerAcceptable =
+    liveFingerTiltDeg !== null &&
+    liveFingerTiltConfidence >= 45 &&
+    Math.abs(liveFingerTiltDeg) <= 4 &&
+    liveCardFingerOffsetPx !== null &&
+    liveOpticalCenterConfidence >= 45 &&
+    Math.abs(liveCardFingerOffsetPx) <= 12;
+  const phoneAcceptable =
+    devicePitch === null || deviceRoll === null
+      ? true
+      : Math.abs(devicePitch) <= 10 && Math.abs(deviceRoll) <= 6;
+  const autoReady =
+    singlePhotoTestMode &&
+    cardReady &&
+    fingerAcceptable &&
+    phoneAcceptable &&
+    !cameraOpening;
+  const onCaptureRef = useRef(onCapture);
+  onCaptureRef.current = onCapture;
+
   useEffect(() => {
-    if (!levelReady) {
+    if (!autoReady) {
       if (autoCaptureTimerRef.current !== null) {
         window.clearTimeout(autoCaptureTimerRef.current);
         autoCaptureTimerRef.current = null;
@@ -105,20 +129,19 @@ export default function FrozenCameraScreen({
 
     if (autoCaptureLockedRef.current || autoCaptureTimerRef.current !== null) return;
 
+    // Segura ~0,9 s dentro do aceitável e dispara. O timer só reinicia se o
+    // alinhamento sair do aceitável (não reinicia a cada atualização da tela).
     autoCaptureTimerRef.current = window.setTimeout(() => {
       autoCaptureTimerRef.current = null;
-      if (!levelReady || autoCaptureLockedRef.current) return;
+      if (autoCaptureLockedRef.current) return;
       autoCaptureLockedRef.current = true;
-      onCapture();
-    }, 700);
+      onCaptureRef.current();
+    }, 900);
+  }, [autoReady]);
 
-    return () => {
-      if (autoCaptureTimerRef.current !== null) {
-        window.clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current = null;
-      }
-    };
-  }, [levelReady, onCapture]);
+  useEffect(() => () => {
+    if (autoCaptureTimerRef.current !== null) window.clearTimeout(autoCaptureTimerRef.current);
+  }, []);
 
   return (
     <section className="camera-screen">
@@ -232,9 +255,9 @@ export default function FrozenCameraScreen({
                 width:112,
                 height:112,
                 borderRadius:"50%",
-                border:`3px solid ${levelReady ? "#52e0a3" : "rgba(242,207,115,.88)"}`,
+                border:`3px solid ${levelReady || autoReady ? "#52e0a3" : "rgba(242,207,115,.88)"}`,
                 background:"rgba(8,8,8,.62)",
-                boxShadow:levelReady
+                boxShadow:levelReady || autoReady
                   ? "0 0 22px rgba(82,224,163,.55)"
                   : "0 0 16px rgba(0,0,0,.45)",
                 transition:"border-color .15s ease, box-shadow .15s ease",
@@ -249,12 +272,12 @@ export default function FrozenCameraScreen({
                   position:"absolute",
                   left:"50%",
                   top:"50%",
-                  width:34,
-                  height:34,
+                  width:50,
+                  height:50,
                   borderRadius:"50%",
-                  border:`2px solid ${levelReady ? "#52e0a3" : "rgba(255,255,255,.55)"}`,
+                  border:`2px solid ${levelReady || autoReady ? "#52e0a3" : "rgba(255,255,255,.55)"}`,
                   transform:"translate(-50%,-50%)",
-                  boxShadow:levelReady ? "0 0 12px rgba(82,224,163,.7)" : "none",
+                  boxShadow:levelReady || autoReady ? "0 0 12px rgba(82,224,163,.7)" : "none",
                 }}
               />
 
@@ -268,7 +291,7 @@ export default function FrozenCameraScreen({
                   height:18,
                   borderRadius:"50%",
                   transform:"translate(-50%,-50%)",
-                  background:fingerReady ? "#52e0a3" : "#f2cf73",
+                  background:fingerAcceptable ? "#52e0a3" : "#f2cf73",
                   border:"2px solid rgba(0,0,0,.55)",
                   boxShadow:"0 0 9px rgba(242,207,115,.75)",
                   transition:"left .10s linear, top .10s linear, background .15s ease",
@@ -285,7 +308,7 @@ export default function FrozenCameraScreen({
                   height:14,
                   borderRadius:"50%",
                   transform:"translate(-50%,-50%)",
-                  background:phoneReady ? "#52e0a3" : "#79c8ff",
+                  background:phoneAcceptable ? "#52e0a3" : "#79c8ff",
                   border:"2px solid rgba(0,0,0,.55)",
                   boxShadow:"0 0 9px rgba(121,200,255,.8)",
                   transition:"left .10s linear, top .10s linear, background .15s ease",
@@ -303,7 +326,7 @@ export default function FrozenCameraScreen({
                 letterSpacing:".04em",
               }}
             >
-              {levelReady ? "✓ ALINHADO" : "JUNTE AS DUAS BOLINHAS NO CENTRO"}
+              {levelReady ? "✓ ALINHADO" : autoReady ? "✓ BOM — SEGURE PARADO" : "APROXIME AS BOLINHAS DO CENTRO"}
             </strong>
 
             <div style={{display:"flex",gap:10,fontSize:9,color:"#fff"}}>
