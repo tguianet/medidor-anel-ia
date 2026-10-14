@@ -1730,6 +1730,15 @@ export default function App() {
     if(widestRun.used===null) return null;
     const usedWidthPx=widestRun.used;
 
+    // Auditoria independente do resultado: largura horizontal entre os pontos
+    // rastreados em cada corte. Nao substitui a medida perpendicular da V2.
+    const horizontalWidthsPx=fingerMagnetSamples.map(sample=>sample.horizontalWidth);
+    const horizontalRun=selectWidestStableRun(horizontalWidthsPx);
+    const sameRunHorizontalWidthsPx=horizontalWidthsPx.slice(widestRun.startIndex,widestRun.startIndex+widestRun.selected.length);
+    const sameRunHorizontalUsedPx=sameRunHorizontalWidthsPx.length
+      ? sameRunHorizontalWidthsPx.reduce((sum,value)=>sum+value,0)/sameRunHorizontalWidthsPx.length
+      : null;
+
     const cardScaleMmPerPx =
       pixelsPerMm && pixelsPerMm>0
         ? 1/pixelsPerMm
@@ -1768,6 +1777,22 @@ export default function App() {
       spreadPercent,
       selectedUpperWidthsPx: widestRun.selected,
       selectedRunStart: widestRun.startIndex + 1,
+      comparison: {
+        source: "tracked-edge-points; horizontal same-y versus fitted perpendicular",
+        note: "Comparacao diagnostica, nao representa duas segmentacoes independentes.",
+        horizontalWidthsPx,
+        horizontalSelectedWidthsPx: horizontalRun.selected,
+        horizontalSelectedRunStart: horizontalRun.startIndex + 1,
+        horizontalUsedWidthPx: horizontalRun.used,
+        horizontalNormalizedMm: horizontalRun.used!==null && cardScaleMmPerPx!==null
+          ? horizontalRun.used*cardScaleMmPerPx*TEST_FINGER_CARD_NORMALIZATION : null,
+        sameRunHorizontalWidthsPx,
+        sameRunHorizontalUsedPx,
+        sameRunHorizontalNormalizedMm: sameRunHorizontalUsedPx!==null && cardScaleMmPerPx!==null
+          ? sameRunHorizontalUsedPx*cardScaleMmPerPx*TEST_FINGER_CARD_NORMALIZATION : null,
+        differenceSameRunMm: sameRunHorizontalUsedPx!==null && cardScaleMmPerPx!==null
+          ? (sameRunHorizontalUsedPx-usedWidthPx)*cardScaleMmPerPx*TEST_FINGER_CARD_NORMALIZATION : null,
+      },
       fingerAxisAngleDeg: fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
@@ -2216,6 +2241,12 @@ export default function App() {
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
+                  <strong>COMPARAÇÃO DE BORDAS — SOMENTE DIAGNÓSTICO</strong>
+                  <span>Perpendicular ajustada: {measurementAudit.normalizedMm?.toFixed(3) ?? "—"} mm</span>
+                  <span>Horizontal nos mesmos cortes: {measurementAudit.comparison.sameRunHorizontalNormalizedMm?.toFixed(3) ?? "—"} mm</span>
+                  <span>Diferença horizontal − perpendicular: {measurementAudit.comparison.differenceSameRunMm?.toFixed(3) ?? "—"} mm</span>
+                  <span>Horizontal com seleção própria: {measurementAudit.comparison.horizontalNormalizedMm?.toFixed(3) ?? "—"} mm · cortes {measurementAudit.comparison.horizontalSelectedRunStart}–{measurementAudit.comparison.horizontalSelectedRunStart + measurementAudit.comparison.horizontalSelectedWidthsPx.length - 1}</span>
+                  <small>Ambos partem dos mesmos pontos rastreados; ainda não são duas detecções independentes. O aro exibido não muda.</small>
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}
