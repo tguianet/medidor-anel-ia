@@ -77,7 +77,7 @@ moveLine(selected,dir==='left'||dir==='right'?'x':'y',dir==='left'||dir==='up'?-
 function update(){
 const factor=span()/reference.initialSpan*(1+Number($('offset').value)/100);
 const scale=reference.scale*factor;
-const width=reference.pixelFingerWidth/scale;
+const width=(reference.pixelFingerWidth/scale)*(1-reference.correctionPercent/100);
 $('change').textContent=(Number($('offset').value)>0?'+':'')+fmt($('offset').value,1)+'%';
 $('scaleValue').textContent=fmt(scale,4)+' px/mm';
 $('widthValue').textContent=fmt(width)+' mm';
@@ -87,11 +87,11 @@ $('file').addEventListener('change',async e=>{
 try{
 const f=e.target.files[0];if(!f)return;
 const d=JSON.parse(await f.text());
-const scale=Number(d.card?.pixelsPerMm), width=Number(d.finger?.widthSentToFormulaMm), physical=Number(d.card?.physicalWidthMm);
+const scale=Number(d.card?.pixelsPerMm ?? (1/Number(d.audit?.cardScaleMmPerPx))), width=Number(d.finger?.widthSentToFormulaMm), physical=Number(d.card?.physicalWidthMm);
 if(!d.image?.photoDataUrl?.startsWith('data:image/')||!Number.isFinite(scale)||scale<=0||!Number.isFinite(width)||width<=0||!Number.isFinite(physical)||physical<=0)throw Error('Diagnóstico incompleto ou incompatível.');
 if(!d.card?.cardLines?.left||!d.card?.cardLines?.right||!d.card?.cardLines?.top||!d.card?.cardLines?.bottom)throw Error('Linhas do cartão ausentes do JSON.');
 diagnostic=d; snapshots=[];lines=clone(d.card.cardLines);
-reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:width*scale,initialSpan:span(),initialLines:clone(lines)};
+reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:Number(d.audit?.usedWidthPx)||width*scale/(1-(Number(d.audit?.correctionPercent)||0)/100),correctionPercent:Number(d.audit?.correctionPercent)||0,initialSpan:span(),initialLines:clone(lines)};
 $('photo').src=d.image.photoDataUrl;
 $('origScale').textContent=fmt(scale,4)+' px/mm';
 $('origWidth').textContent=fmt(width)+' mm';
