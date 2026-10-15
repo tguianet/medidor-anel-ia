@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera as NativeCamera, CameraResultType, CameraSource } from "@capacitor/camera";
-import { chooseRotation, estimateOrientation, type Rotation } from "./orientation";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
@@ -308,89 +306,7 @@ export default function AppV2() {
   // A deteccao ao vivo do cartao continua apenas como guia visual.
   // A captura acontece somente quando o usuario toca no botao da camera.
 
-  // App nativo (Capacitor): usa a CÂMERA DO PRÓPRIO CELULAR (app de câmera,
-  // resolução total) em vez do vídeo dentro da página. A foto entra no mesmo
-  // fluxo de medição (recorte 3:4 em 900×1200, igual ao quadro do vídeo).
-  const isNativeApp = Boolean(
-    (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.(),
-  );
-  type NativeSource = HTMLImageElement | HTMLCanvasElement;
-  const sourceWidth = (src: NativeSource) => (src instanceof HTMLImageElement ? src.naturalWidth : src.width);
-  const sourceHeight = (src: NativeSource) => (src instanceof HTMLImageElement ? src.naturalHeight : src.height);
-  const rotateSource = (src: NativeSource, rotation: Rotation): NativeSource => {
-    if (rotation === 0) return src;
-    const w = sourceWidth(src), h = sourceHeight(src);
-    const swap = rotation === 90 || rotation === 270;
-    const c = document.createElement("canvas");
-    c.width = swap ? h : w;
-    c.height = swap ? w : h;
-    const ctx = c.getContext("2d");
-    if (!ctx) return src;
-    ctx.translate(c.width / 2, c.height / 2);
-    ctx.rotate((rotation * Math.PI) / 180);
-    ctx.drawImage(src, -w / 2, -h / 2);
-    return c;
-  };
-  // Celular apontado para a mesa às vezes salva a foto deitada: deixa o
-  // cartão deitado em cima e os dedos para baixo.
-  const autoRotation = (src: NativeSource): Rotation => {
-    try {
-      const w0 = sourceWidth(src), h0 = sourceHeight(src);
-      const k = 320 / Math.max(w0, h0);
-      const w = Math.max(8, Math.round(w0 * k)), h = Math.max(8, Math.round(h0 * k));
-      const c = document.createElement("canvas");
-      c.width = w; c.height = h;
-      const ctx = c.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return 0;
-      ctx.drawImage(src, 0, 0, w, h);
-      const d = ctx.getImageData(0, 0, w, h).data;
-      const ch = [0, 1, 2].map((k2) => {
-        const a = new Float32Array(w * h);
-        for (let i = 0; i < w * h; i++) a[i] = d[i * 4 + k2];
-        return a;
-      });
-      return chooseRotation(estimateOrientation(ch, w, h));
-    } catch {
-      return 0;
-    }
-  };
-  const [nativeLoading, setNativeLoading] = useState(false);
-  const openNativeCamera = async () => {
-    setStage("intro");
-    let dataUrl: string | undefined;
-    try {
-      const shot = await NativeCamera.getPhoto({
-        source: CameraSource.Camera,
-        resultType: CameraResultType.DataUrl,
-        quality: 92,
-        correctOrientation: true,
-        saveToGallery: false,
-        width: 3000,
-      });
-      dataUrl = shot.dataUrl;
-    } catch {
-      return; // pessoa cancelou a câmera
-    }
-    if (!dataUrl) return;
-    setNativeLoading(true);
-    try {
-      const img = new Image();
-      img.src = dataUrl;
-      await img.decode();
-      await capture(rotateSource(img, autoRotation(img)));
-    } catch {
-      camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
-      setStage("intro");
-    } finally {
-      setNativeLoading(false);
-    }
-  };
-
   const openCamera = async () => {
-    if (isNativeApp) {
-      await openNativeCamera();
-      return;
-    }
     if(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION){
       void deviceQuality.requestPermission();
     }
@@ -425,13 +341,12 @@ export default function AppV2() {
     await camera.startCameraStream();
   };
 
-  const capture = async (source?: NativeSource) => {
+  const capture = async () => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
     if(
-      !source &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 65
@@ -440,7 +355,6 @@ export default function AppV2() {
       return;
     }
     if(
-      !source &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 75
@@ -456,33 +370,26 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
-    const video = camera.videoRef.current as HTMLVideoElement;
-    const frameSource: HTMLVideoElement | NativeSource | null = source ?? (video?.videoWidth ? video : null);
-    if (!frameSource) {
+    const video = camera.videoRef.current;
+    if (!video?.videoWidth) {
       return;
     }
-    const srcW = source ? sourceWidth(source) : video.videoWidth;
-    const srcH = source ? sourceHeight(source) : video.videoHeight;
 
     const drawCurrentFrame = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 900;
       canvas.height = 1200;
       const targetRatio = canvas.width / canvas.height;
-      const sourceRatio = srcW / srcH;
-      let sx = 0, sy = 0, sw = srcW, sh = srcH;
+      const sourceRatio = video.videoWidth / video.videoHeight;
+      let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
       if (sourceRatio > targetRatio) {
-        sw = srcH * targetRatio;
-        sx = (srcW - sw) / 2;
+        sw = video.videoHeight * targetRatio;
+        sx = (video.videoWidth - sw) / 2;
       } else {
-        sh = srcW / targetRatio;
-        sy = (srcH - sh) / 2;
+        sh = video.videoWidth / targetRatio;
+        sy = (video.videoHeight - sh) / 2;
       }
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        if (source) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; }
-        ctx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      }
+      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
       return canvas;
     };
 
@@ -537,7 +444,6 @@ export default function AppV2() {
     };
 
     const useBurst =
-      !source &&
       singlePhotoTestMode &&
       measurementMode==="finger" &&
       !diameterPhotoTestMode;
@@ -4100,11 +4006,6 @@ export default function AppV2() {
 
   return (
     <main className="app">
-      {nativeLoading && (
-        <div style={{position:"fixed",inset:0,zIndex:300,display:"grid",placeItems:"center",background:"rgba(10,9,8,.9)",color:"#f3e5ab",fontWeight:700,fontSize:18}}>
-          Carregando foto…
-        </div>
-      )}
       <header className="brand">
         <button
           type="button"
