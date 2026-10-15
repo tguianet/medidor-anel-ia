@@ -1,3 +1,4 @@
+import { colorDifference } from "./cardEdges";
 export type CardCalibration = {
   pixelsPerMm: number;
   confidence: number;
@@ -480,16 +481,14 @@ const refineCardBoxByKnownRatio = (
   height: number,
   seed: Box,
 ): Box => {
-  const gray=new Uint8Array(width*height);
-  for(let i=0;i<width*height;i++){
-    const o=i*4;
-    gray[i]=Math.round(pixels[o]*0.299+pixels[o+1]*0.587+pixels[o+2]*0.114);
-  }
-
-  const grayAt=(x:number,y:number)=>{
-    const xx=Math.max(0,Math.min(width-1,Math.round(x)));
-    const yy=Math.max(0,Math.min(height-1,Math.round(y)));
-    return gray[yy*width+xx];
+  // Contraste em R,G,B (nao so cinza): cartoes vermelhos/azuis/escuros sobre
+  // fundos de brilho parecido continuam com borda visivel.
+  const colorDiffAt=(x1:number,y1:number,x2:number,y2:number)=>{
+    const ax=Math.max(0,Math.min(width-1,Math.round(x1)));
+    const ay=Math.max(0,Math.min(height-1,Math.round(y1)));
+    const bx=Math.max(0,Math.min(width-1,Math.round(x2)));
+    const by=Math.max(0,Math.min(height-1,Math.round(y2)));
+    return colorDifference(pixels,(ay*width+ax)*4,(by*width+bx)*4);
   };
 
   const seedW=Math.max(20,seed.maxX-seed.minX+1);
@@ -499,7 +498,7 @@ const refineCardBoxByKnownRatio = (
     let total=0, strong=0, count=0;
     const step=Math.max(1,Math.round((y1-y0)/70));
     for(let y=y0;y<=y1;y+=step){
-      const d=Math.abs(grayAt(x-2,y)-grayAt(x+2,y));
+      const d=colorDiffAt(x-2,y,x+2,y);
       total+=d;
       if(d>=16) strong++;
       count++;
@@ -513,7 +512,7 @@ const refineCardBoxByKnownRatio = (
     let total=0, strong=0, count=0;
     const step=Math.max(1,Math.round((x1-x0)/90));
     for(let x=x0;x<=x1;x+=step){
-      const d=Math.abs(grayAt(x,y-2)-grayAt(x,y+2));
+      const d=colorDiffAt(x,y-2,x,y+2);
       total+=d;
       if(d>=16) strong++;
       count++;

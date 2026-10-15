@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
+import { findCardEdge } from "./cardEdges";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
 import { useFrozenCameraStream } from "./FrozenCameraStream";
@@ -591,20 +592,7 @@ export default function AppV2() {
           const context=canvas.getContext("2d",{willReadFrequently:true});
           if(!context) return null;
           const imageData=context.getImageData(0,0,canvas.width,canvas.height);
-          const data=imageData.data;
-          const gray=(x:number,y:number)=>{
-            const ix=Math.max(0,Math.min(canvas.width-1,Math.round(x)));
-            const iy=Math.max(0,Math.min(canvas.height-1,Math.round(y)));
-            const o=(iy*canvas.width+ix)*4;
-            return data[o]*0.299+data[o+1]*0.587+data[o+2]*0.114;
-          };
-          const robustMean=(values:number[])=>{
-            if(!values.length) return 0;
-            const ordered=[...values].sort((a,b)=>a-b);
-            const trim=Math.floor(ordered.length*0.18);
-            const kept=ordered.slice(trim,Math.max(trim+1,ordered.length-trim));
-            return kept.reduce((sum,value)=>sum+value,0)/kept.length;
-          };
+          const image={data:imageData.data,width:canvas.width,height:canvas.height};
 
           const left0=detectedLeft/100*canvas.width;
           const right0=detectedRight/100*canvas.width;
@@ -613,115 +601,76 @@ export default function AppV2() {
           const cardW=Math.max(40,right0-left0);
           const cardH=Math.max(30,bottom0-top0);
 
-          type VerticalEdgeCandidate={
-            x:number;
-            dx:number;
-            edge:number;
-            coverage:number;
-            score:number;
+          // Borda fisica independente da cor (src/v2/cardEdges.ts):
+          // contraste em R,G,B + direcao constante + degrau persistente +
+          // pico nitido com precisao subpixel. Substitui a regra antiga
+          // "cinza + candidato mais externo", que escorregava para sombras
+          // (cartao claro) ou frisos internos (cartao escuro) e mudava o aro.
+          const alongFrom=top0+cardH*0.14;
+          const alongTo=bottom0-cardH*0.14;
+          const leftEdge=findCardEdge(image,{side:"left",expected:left0,from:alongFrom,to:alongTo});
+          const rightEdge=findCardEdge(image,{side:"right",expected:right0,from:alongFrom,to:alongTo});
+          // COMPATIBILIDADE COM A CURVA: a curva de aros foi ajustada com o
+          // detector antigo, que (pela janela de ±3 px + "candidato mais
+          // externo") lia cada lateral ~1,75 px para FORA da borda real.
+          // Simulacao em 90 cenarios (5 cores x 3 fundos x 3 focos x sombra):
+          // mediana +3,5 px na largura do cartao. Reaplicamos esse mesmo vies
+          // fixo, para a escala bater com a curva sem voltar a depender da cor.
+          const LEGACY_CARD_EDGE_OUTWARD_PX=1.75;
+          const refinedLeft=Math.min(leftEdge.position,rightEdge.position-20)-LEGACY_CARD_EDGE_OUTWARD_PX;
+          const refinedRight=Math.max(rightEdge.position,leftEdge.position+20)+LEGACY_CARD_EDGE_OUTWARD_PX;
+
+          // Base do cartao: detector ORIGINAL do site principal (cinza,
+          // contraste +/-3 px, penalidade de distancia). Com o cartao apoiado
+          // sobre os dedos, abaixo dele alternam pele/madeira/vao; o detector
+          // novo podia preferir uma linha interna do cartao e jogar a regiao
+          // do anel para cima. A base so posiciona a regiao anatomica; a
+          // escala vem das laterais (novas, independentes da cor).
+          const grayAt=(x:number,y:number)=>{
+            const ix=Math.max(0,Math.min(canvas.width-1,Math.round(x)));
+            const iy=Math.max(0,Math.min(canvas.height-1,Math.round(y)));
+            const o=(iy*canvas.width+ix)*4;
+            return image.data[o]*0.299+image.data[o+1]*0.587+image.data[o+2]*0.114;
           };
-
-          // Procura a BORDA FISICA EXTERNA de cada lateral.
-          // Primeiro identifica quais candidatos possuem contraste forte e
-          // continuidade vertical. Entre candidatos equivalentes, prefere:
-          //   esquerda -> o mais externo para a esquerda
-          //   direita  -> o mais externo para a direita
-          // Isso evita grudar em faixa, texto ou desenho interno do cartão.
-          const bestVertical=(expectedX:number,side:"left"|"right")=>{
-            const direction=side==="left" ? -1 : 1;
-            const candidates:VerticalEdgeCandidate[]=[];
-
-            for(let dx=-18;dx<=18;dx+=1){
-              const x=expectedX+dx;
-              const contrasts:number[]=[];
-              let strong=0;
-              let samples=0;
-
-              for(let y=top0+cardH*0.14;y<=bottom0-cardH*0.14;y+=Math.max(4,cardH/24)){
-                const contrast=Math.abs(gray(x-3,y)-gray(x+3,y));
-                contrasts.push(contrast);
-                if(contrast>=10) strong++;
-                samples++;
-              }
-
-              const edge=robustMean(contrasts);
-              const coverage=strong/Math.max(1,samples);
-              const outward=Math.max(0,direction*dx);
-              const inward=Math.max(0,-direction*dx);
-
-              // Continuidade vertical pesa mais que um pico isolado.
-              // Pequeno bônus externo só desempata bordas fisicamente plausíveis.
-              const score=
-                edge +
-                coverage*12 +
-                outward*0.22 -
-                inward*0.18 -
-                Math.abs(dx)*0.035;
-
-              candidates.push({x,dx,edge,coverage,score});
-            }
-
-            const maxEdge=Math.max(...candidates.map(candidate=>candidate.edge));
-            const maxCoverage=Math.max(...candidates.map(candidate=>candidate.coverage));
-
-            const physicalCandidates=candidates.filter(candidate=>
-              candidate.edge>=Math.max(7,maxEdge*0.78) &&
-              candidate.coverage>=Math.max(0.52,maxCoverage-0.18)
-            );
-
-            const pool=physicalCandidates.length ? physicalCandidates : candidates;
-
-            // Dentro do conjunto de bordas fortes/contínuas, escolhemos a mais
-            // externa. O score serve de desempate caso duas fiquem praticamente
-            // na mesma posição.
-            pool.sort((a,b)=>{
-              const outerA=direction*a.dx;
-              const outerB=direction*b.dx;
-              if(Math.abs(outerB-outerA)>0.75) return outerB-outerA;
-              return b.score-a.score;
-            });
-
-            const best=pool[0];
-            return {
-              x:best.x,
-              score:best.score,
-              edge:best.edge,
-              coverage:best.coverage,
-              shift:best.x-expectedX,
-            };
+          const legacyRobustMean=(values:number[])=>{
+            if(!values.length) return 0;
+            const ordered=[...values].sort((a,b)=>a-b);
+            const trim=Math.floor(ordered.length*0.18);
+            const kept=ordered.slice(trim,Math.max(trim+1,ordered.length-trim));
+            return kept.reduce((sum,value)=>sum+value,0)/kept.length;
           };
-
-          const leftEdge=bestVertical(left0,"left");
-          const rightEdge=bestVertical(right0,"right");
-          const refinedLeft=Math.min(leftEdge.x,rightEdge.x-20);
-          const refinedRight=Math.max(rightEdge.x,leftEdge.x+20);
-
-          const bestHorizontal=(expectedY:number)=>{
-            let bestY=expectedY;
+          const bottomEdge=(()=>{
+            let bestY=bottom0;
             let bestScore=-Infinity;
             for(let dy=-14;dy<=14;dy+=1){
-              const y=expectedY+dy;
+              const y=bottom0+dy;
               const contrasts:number[]=[];
               for(let x=refinedLeft+cardW*0.10;x<=refinedRight-cardW*0.10;x+=Math.max(4,cardW/28)){
-                contrasts.push(Math.abs(gray(x,y-3)-gray(x,y+3)));
+                contrasts.push(Math.abs(grayAt(x,y-3)-grayAt(x,y+3)));
               }
-              const edge=robustMean(contrasts);
+              const edge=legacyRobustMean(contrasts);
               const score=edge-Math.abs(dy)*0.20;
               if(score>bestScore){bestScore=score;bestY=y;}
             }
-            return {y:bestY,score:bestScore,shift:bestY-expectedY};
+            return {position:bestY,shift:bestY-bottom0,strength:bestScore,reliable:bestScore>=7};
+          })();
+
+          const debug={
+            left:{x:leftEdge.position,shift:leftEdge.shift,strength:leftEdge.strength,coverage:leftEdge.coverage,consistency:leftEdge.consistency,reliable:leftEdge.reliable},
+            right:{x:rightEdge.position,shift:rightEdge.shift,strength:rightEdge.strength,coverage:rightEdge.coverage,consistency:rightEdge.consistency,reliable:rightEdge.reliable},
+            bottom:{y:bottomEdge.position,shift:bottomEdge.shift,strength:bottomEdge.strength,reliable:bottomEdge.reliable},
+            cardWidthPx:refinedRight-refinedLeft,
+            canvasWidth:canvas.width,
           };
+          try{ (window as unknown as {__cardEdgeDebug?:unknown}).__cardEdgeDebug=debug; }catch{ /* debug opcional */ }
+          console.info("[cartao] bordas",debug);
 
-          const bottomEdge=bestHorizontal(bottom0);
-
-          // So aceitamos o refinamento se as 3 bordas possuem contraste real.
+          // So aceitamos o refinamento se as bordas tem contraste real.
           // Caso contrario, mantemos o retangulo inicial como fallback.
           if(
-            leftEdge.edge<7 ||
-            rightEdge.edge<7 ||
-            leftEdge.coverage<0.52 ||
-            rightEdge.coverage<0.52 ||
-            bottomEdge.score<7 ||
+            !leftEdge.reliable ||
+            !rightEdge.reliable ||
+            bottomEdge.strength<7 ||
             refinedRight-refinedLeft<cardW*0.92 ||
             refinedRight-refinedLeft>cardW*1.10
           ){
@@ -731,7 +680,7 @@ export default function AppV2() {
           return {
             left:clamp(refinedLeft/canvas.width*100,2,94),
             right:clamp(refinedRight/canvas.width*100,6,98),
-            bottom:clamp(bottomEdge.y/canvas.height*100,10,88),
+            bottom:clamp(bottomEdge.position/canvas.height*100,10,88),
             leftShiftPx:leftEdge.shift,
             rightShiftPx:rightEdge.shift,
             bottomShiftPx:bottomEdge.shift,
@@ -2552,6 +2501,7 @@ export default function AppV2() {
 
   const widthAnalysis = useMemo(() => {
     const empty = {
+      failReason:null as string|null,
       oldMm:null as number|null,
       newMm:null as number|null,
       stats:null as ReturnType<typeof robustWidthStats>|null,
@@ -2564,7 +2514,8 @@ export default function AppV2() {
       normalizedMmPerPx:pixelsPerMm ? 1/pixelsPerMm : null as number|null,
       measurementSource:"intersection-85.60" as const,
     };
-    if(!pixelsPerMm||!leftLocked||!rightLocked) return empty;
+    if(!pixelsPerMm) return {...empty,failReason:"escala do cartão ausente"};
+    if(!leftLocked||!rightLocked) return {...empty,failReason:"linhas do dedo não confirmadas"};
 
     const anatomy=handLandmarkAnalysis?.measuredFinger;
     const currentDetectedRegionY=
@@ -2589,7 +2540,7 @@ export default function AppV2() {
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
     const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
-    if(!samples || samples.length<35) return empty;
+    if(!samples || samples.length<35) return {...empty,failReason:`bordas do dedo encontradas em ${samples?.length ?? 0}/50 pontos (mínimo 35) na altura Y ${anatomicalGuideY.toFixed(1)}% · base do cartão ${cardBaseYPercent.toFixed(1)}%`};
 
     const baseMmPerPx=1/pixelsPerMm;
 
@@ -2710,6 +2661,7 @@ export default function AppV2() {
     const activeRobust=localRobust;
 
     return {
+      failReason:null as string|null,
       oldMm:activeStable,
       newMm:VISION_FEATURE_FLAGS.ENABLE_MULTI_SAMPLE_WIDTH && activeRobust!==null ? activeRobust : activeStable,
       stats:activeStats,
@@ -2729,7 +2681,7 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
     anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY,
-    photoPixelsReady
+    photoPixelsReady,cardBaseYPercent
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
@@ -4603,6 +4555,8 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              {widthAnalysis.failReason && <span>Motivo do n/d: {widthAnalysis.failReason}</span>}
+              {liveWidthMm!==null && !captureQualityGate.accepted && <span>Foto recusada: {captureQualityGate.reasons.join(" · ")}</span>}
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
