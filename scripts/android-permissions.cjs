@@ -22,6 +22,14 @@ for (const line of lines) {
     changed = true;
   }
 }
+// Android 11+: declara o uso do app de câmera (plugin @capacitor/camera).
+if (!xml.includes("android.media.action.IMAGE_CAPTURE")) {
+  xml = xml.replace(
+    "</manifest>",
+    '    <queries>\n        <intent>\n            <action android:name="android.media.action.IMAGE_CAPTURE" />\n        </intent>\n    </queries>\n</manifest>',
+  );
+  changed = true;
+}
 // O app só funciona em pé.
 if (!xml.includes("android:screenOrientation")) {
   xml = xml.replace(/<activity(\s)/, '<activity android:screenOrientation="portrait"$1');
