@@ -315,6 +315,9 @@ export default function AppV2() {
   // <input capture>. A foto entra no mesmo fluxo de medição (recorte 3:4 em
   // 900×1200, igual ao quadro do vídeo), com rotação automática.
   const phoneCameraModeRef = useRef(false);
+  // Botão de TESTE: câmera do app com a moldura + foto nítida da câmera do
+  // celular no disparo. O botão normal continua com o quadro do vídeo.
+  const sharpStillModeRef = useRef(false);
   const phoneInputRef = useRef<HTMLInputElement>(null);
   type NativeSource = HTMLImageElement | HTMLCanvasElement;
   const sourceWidth = (src: NativeSource) => (src instanceof HTMLImageElement ? src.naturalWidth : src.width);
@@ -357,8 +360,9 @@ export default function AppV2() {
     }
   };
   const [nativeLoading, setNativeLoading] = useState(false);
-  const startFingerMeasurement = (phoneCamera: boolean) => {
-    phoneCameraModeRef.current = phoneCamera;
+  const startFingerMeasurement = (sharpStill: boolean) => {
+    phoneCameraModeRef.current = false;
+    sharpStillModeRef.current = sharpStill;
     resetMeasurementSession();
     setSinglePhotoTestMode(true);
     setDiameterPhotoTestMode(false);
@@ -487,7 +491,11 @@ export default function AppV2() {
   };
 
   const capture = async (source?: NativeSource) => {
-    if (!source && camera.videoRef.current?.videoWidth) {
+    if (!source && !sharpStillModeRef.current) {
+      const v = camera.videoRef.current;
+      setCaptureSourceLabel(v?.videoWidth ? `quadro do vídeo ${v.videoWidth}×${v.videoHeight}` : null);
+    }
+    if (!source && sharpStillModeRef.current && camera.videoRef.current?.videoWidth) {
       // Mesmas checagens de estabilidade da captura normal, antes da foto.
       if (
         VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
@@ -4259,7 +4267,7 @@ export default function AppV2() {
             style={{width:"100%",marginTop:12}}
             onClick={() => startFingerMeasurement(true)}
           >
-            TESTE: tirar a foto com a câmera do celular
+            TESTE: câmera do celular com moldura (foto nítida)
           </button>
           {debugMode && (
             <section className="panel" style={{marginTop:12}}>
