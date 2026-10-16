@@ -152,6 +152,10 @@ export default function AppV2() {
   const [rightLine, setRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(60);
   const [ringGuideY, setRingGuideY] = useState(60);
+  // LINHAS MANUAIS (pedido do Tiago, 16/10/2026): a medida usa exatamente
+  // onde o usuario solta as linhas do cartao e do dedo, sem snap nas bordas.
+  // No modo privado da para desligar e comparar com o modo automatico.
+  const [manualLines, setManualLines] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -1887,7 +1891,12 @@ export default function AppV2() {
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match){
         const edge=match[1] as CardEdge;
-        snapCardLine(edge);
+        if(manualLines){
+          // Sem snap: a linha fica e vale exatamente onde foi solta.
+          setCardLineLocked((current)=>({...current,[edge]:true}));
+        }else{
+          snapCardLine(edge);
+        }
       }
     }
     draggingRef.current=null;
@@ -1898,7 +1907,7 @@ export default function AppV2() {
     setFingerLoupe(null);
   };
 
-  const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10) => {
+  const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10, manualOnly = false) => {
     const stage=measureRef.current;
     const source=photoPixelsRef.current;
     if(!stage||!source||!leftLocked||!rightLocked) return null;
@@ -2087,6 +2096,24 @@ export default function AppV2() {
       Math.abs(value-guideYPercent)<Math.abs(yPercents[bestIndex]-guideYPercent)?index:bestIndex
     ,0);
 
+    const pairs:EdgePair[]=[];
+
+    if(manualOnly){
+      // Modo manual: cada corte usa a posicao exata das linhas arrastadas.
+      // Nenhuma busca de borda na imagem.
+      for(const yPercent of yPercents){
+        const y=toImageY(yPercent);
+        if(y<6||y>=source.height-6) continue;
+        const lx=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+        const rx=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
+        if(!(rx>lx)) return null;
+        pairs.push({
+          left:{x:lx,y,yPercent,score:40},
+          right:{x:rx,y,yPercent,score:40},
+        });
+      }
+    }else{
+
     let seedIndex=-1;
     let seed:EdgePair|null=null;
     const seedOrder:number[]=[centerIndex];
@@ -2110,7 +2137,7 @@ export default function AppV2() {
     }
     if(seedIndex<0||!seed) return null;
 
-    const pairs:EdgePair[]=[seed];
+    pairs.push(seed);
 
     const traceDirection=(step:-1|1)=>{
       let previousLeft=seed!.left.x;
@@ -2162,6 +2189,7 @@ export default function AppV2() {
 
     traceDirection(-1);
     traceDirection(1);
+    }
 
     pairs.sort((a,b)=>a.left.yPercent-b.left.yPercent);
     const leftPoints=pairs.map(pair=>pair.left);
@@ -2594,7 +2622,7 @@ export default function AppV2() {
     // oficial deve ser medida SOMENTE perto dela. Não varremos mais +/-10%,
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
-    const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
+    const samples=fingerBandSamplesPx(anatomicalGuideY,2.5,manualLines);
     if(!samples || samples.length<35) return empty;
 
     const baseMmPerPx=1/pixelsPerMm;
@@ -2735,7 +2763,10 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
     anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY,
-    photoPixelsReady
+    photoPixelsReady,
+    // fingerLines so entra no modo manual, para o modo automatico continuar
+    // recalculando exatamente como na versao congelada.
+    manualLines, manualLines ? fingerLines : null,
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
@@ -4633,6 +4664,10 @@ export default function AppV2() {
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              <span>Linhas: {manualLines ? "MANUAIS (vale onde você soltou, sem snap)" : "AUTOMÁTICAS (snap nas bordas)"}</span>
+              <button className="secondary" type="button" onClick={() => setManualLines((value) => !value)}>
+                {manualLines ? "Comparar com modo automático (snap)" : "Voltar para linhas manuais"}
+              </button>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
