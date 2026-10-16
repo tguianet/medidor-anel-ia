@@ -2360,6 +2360,34 @@ export default function AppV2() {
           right:{x:rx,y,yPercent,score:40},
         });
       }
+      if(pairs.length<35) return null;
+      // As linhas manuais sao verticais, mas o dedo pode estar inclinado na
+      // foto. A largura certa e PERPENDICULAR ao dedo: horizontal x cos(angulo).
+      // O angulo vem do rastreamento automatico do contorno na mesma foto
+      // (so a direcao do dedo; as bordas continuam sendo as suas linhas).
+      const auto=fingerBandSamplesPx(guideYPercent,Math.max(6,scanHalfSpan),false);
+      const autoAngles=(auto??[]).map(sample=>sample.axisAngleDeg).filter(Number.isFinite).sort((a,b)=>a-b);
+      const axisAngleDeg=auto && auto.length>=35 && autoAngles.length
+        ? clamp(autoAngles[Math.floor(autoAngles.length/2)],-15,15)
+        : 0;
+      const cosAxis=Math.cos(axisAngleDeg*Math.PI/180);
+      return pairs.map(pair=>{
+        const horizontalWidth=pair.right.x-pair.left.x;
+        return {
+          left:pair.left.x,
+          right:pair.right.x,
+          y:pair.left.y,
+          rightY:pair.right.y,
+          width:horizontalWidth*cosAxis,
+          horizontalWidth,
+          axisAngleDeg,
+          yPercent:pair.left.yPercent,
+          rightYPercent:pair.right.yPercent,
+          leftPercent:toScreenXPercent(pair.left.x),
+          rightPercent:toScreenXPercent(pair.right.x),
+          confidence:auto && auto.length>=35 ? 90 : 70,
+        };
+      });
     }else{
 
     let seedIndex=-1;
