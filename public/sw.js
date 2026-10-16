@@ -2,7 +2,7 @@
 // Estratégia: rede primeiro (sempre pega a versão mais nova quando há internet)
 // e usa o cache só quando estiver sem conexão. Assim uma atualização publicada
 // chega ao app instalado sem ficar presa numa versão antiga.
-const CACHE = "medidor-anel-v2";
+const CACHE = "arovision-v3";
 const SHELL = ["/v2", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
