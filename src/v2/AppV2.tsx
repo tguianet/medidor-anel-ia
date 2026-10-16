@@ -21,6 +21,7 @@ import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
 import BatchReviewV2 from "./BatchReviewV2";
 import type { LightCardDetectionPayload } from "./LightCardDetectorTest";
+import TipModal, { type TipKind } from "./TipModal";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
@@ -128,6 +129,10 @@ export default function AppV2() {
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [photoPixelsReady, setPhotoPixelsReady] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
+  // Avisos de orientação (só visual). Cartão e dedo aparecem 1x por sessão.
+  const [tipKind, setTipKind] = useState<TipKind | null>(null);
+  const pendingSharpStartRef = useRef(false);
+  const shownTipsRef = useRef<Set<TipKind>>(new Set());
   const [photo, setPhoto] = useState("");
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
@@ -360,6 +365,17 @@ export default function AppV2() {
     }
   };
   const [nativeLoading, setNativeLoading] = useState(false);
+  useEffect(() => {
+    if (stage !== "review" || measurementMode !== "finger" || diameterPhotoTestMode || !photo) return;
+    if (phase === "card" && !analyzingCard && !shownTipsRef.current.has("card")) {
+      shownTipsRef.current.add("card");
+      setTipKind("card");
+    } else if (phase === "finger" && pixelsPerMm && !shownTipsRef.current.has("finger")) {
+      shownTipsRef.current.add("finger");
+      setTipKind("finger");
+    }
+  }, [stage, phase, photo, analyzingCard, pixelsPerMm, measurementMode, diameterPhotoTestMode]);
+
   const startFingerMeasurement = (sharpStill: boolean) => {
     phoneCameraModeRef.current = false;
     sharpStillModeRef.current = sharpStill;
@@ -4246,6 +4262,17 @@ export default function AppV2() {
 
   return (
     <main className="app">
+      {tipKind && (
+        <TipModal
+          kind={tipKind}
+          onConfirm={() => {
+            const kind = tipKind;
+            setTipKind(null);
+            if (kind === "photo") startFingerMeasurement(pendingSharpStartRef.current);
+          }}
+          onClose={() => setTipKind(null)}
+        />
+      )}
       <input
         ref={phoneInputRef}
         type="file"
@@ -4287,13 +4314,13 @@ export default function AppV2() {
         <>
           <FrozenIntroScreen
             error={camera.error}
-            onMeasureFinger={() => startFingerMeasurement(false)}
+            onMeasureFinger={() => { pendingSharpStartRef.current = false; setTipKind("photo"); }}
           />
           <button
             className="secondary"
             type="button"
             style={{width:"100%",marginTop:12}}
-            onClick={() => startFingerMeasurement(true)}
+            onClick={() => { pendingSharpStartRef.current = true; setTipKind("photo"); }}
           >
             TESTE: câmera do celular com moldura (foto nítida)
           </button>
