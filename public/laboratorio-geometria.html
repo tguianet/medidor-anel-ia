@@ -1,0 +1,53 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Geometria do cartão — laboratório V2</title><style>body{font:16px system-ui;background:#111820;color:#eaf0f5;max-width:830px;margin:auto;padding:18px}section{background:#1c2935;padding:18px;border-radius:12px;margin:14px 0}input,button{font:inherit;padding:10px;border-radius:8px}button{background:#2776d5;color:white;border:0;margin:5px}img{width:100%;display:block}#frame{position:relative}svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}circle{fill:#ffca49;stroke:#17222d;stroke-width:.45;cursor:grab;touch-action:none}.handle-label{font:2.3px system-ui;fill:white;paint-order:stroke;stroke:#17222d;stroke-width:.6;pointer-events:none}polygon{fill:#00ffaa16;stroke:#00edab;stroke-width:.5}p{line-height:1.5}small{color:#c9d6de}table{width:100%;border-collapse:collapse}td,th{padding:9px;border-bottom:1px solid #53616d;text-align:left}.warning{color:#ffd080}</style></head><body><h2>Laboratório de geometria — Medidor V2</h2><p>Ferramenta separada: recupera a foto e as quatro linhas do diagnóstico, resolve o quadrilátero por interseções e calcula a transformação projetiva do cartão de 85,60 × 53,98 mm. Não modifica a V2.</p><section><label>Diagnóstico completo (.json) <input type="file" id="file" accept=".json"></label><p id="status">Escolha um arquivo de diagnóstico da V2.</p></section><section id="out" hidden><div id="frame"><img id="photo"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon id="quad"></polygon><g id="handles"></g></svg></div><table><tbody id="data"></tbody></table><p><small>Arraste as bolinhas amarelas até as quatro esquinas do cartão. Em cartões arredondados, use a interseção imaginária das bordas retas. O cálculo atualiza imediatamente. Use o zoom do navegador se necessário.</small></p><p id="fingerResult" class="warning"></p><button id="reset" type="button">Restaurar cantos originais</button><p id="note" class="warning"></p><button id="download">Baixar análise JSON</button></section><script>
+const $=x=>document.getElementById(x);let analysis=null;
+function ix(a,b){const u={x:a.b.x-a.a.x,y:a.b.y-a.a.y},v={x:b.b.x-b.a.x,y:b.b.y-b.a.y},w={x:b.a.x-a.a.x,y:b.a.y-a.a.y},d=u.x*v.y-u.y*v.x;if(Math.abs(d)<1e-8)throw Error('Linhas paralelas ou degeneradas');const t=(w.x*v.y-w.y*v.x)/d;return{x:a.a.x+t*u.x,y:a.a.y+t*u.y}}
+function solve(a,b){for(let i=0;i<b.length;i++){let p=i;for(let j=i+1;j<b.length;j++)if(Math.abs(a[j][i])>Math.abs(a[p][i]))p=j;if(Math.abs(a[p][i])<1e-10)throw Error('Geometria degenerada');[a[i],a[p]]=[a[p],a[i]];[b[i],b[p]]=[b[p],b[i]];const q=a[i][i];for(let k=i;k<b.length;k++)a[i][k]/=q;b[i]/=q;for(let j=0;j<b.length;j++){if(j===i)continue;const v=a[j][i];for(let k=i;k<b.length;k++)a[j][k]-=v*a[i][k];b[j]-=v*b[i]}}return b}
+function fit(c,w,h){const target=[[0,0],[w,0],[w,h],[0,h]],a=[],b=[];c.forEach((p,i)=>{const [X,Y]=target[i],x=p.x,y=p.y;a.push([x,y,1,0,0,0,-X*x,-X*y]);b.push(X);a.push([0,0,0,x,y,1,-Y*x,-Y*y]);b.push(Y)});const z=solve(a,b);return [...z,1]}
+function project(H,p){const d=H[6]*p.x+H[7]*p.y+1;return{x:(H[0]*p.x+H[1]*p.y+H[2])/d,y:(H[3]*p.x+H[4]*p.y+H[5])/d}}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function row(k,v){const tr=document.createElement('tr');[k,v].forEach(t=>{const td=document.createElement('td');td.textContent=t;tr.append(td)});$('data').append(tr)}
+let diag=null, corners=null, initialCorners=null, imageReady=false;
+function edgePoint(p){return p&&Number.isFinite(p.x)&&Number.isFinite(p.y)?p:null}
+function projectFingerCuts(d,H){
+ const pools=[["finger.cuts",d.finger?.cuts],["finger.samples",d.finger?.samples],["finger.crossSections",d.finger?.crossSections],["cuts",d.cuts],["analysis.cuts",d.analysis?.cuts]];
+ for(const [field,cuts] of pools){
+  if(!Array.isArray(cuts))continue;
+  const values=[];
+  cuts.forEach((cut,index)=>{
+   const a=edgePoint(cut.left||cut.leftPoint||cut.a),b=edgePoint(cut.right||cut.rightPoint||cut.b);
+   if(!a||!b)return;
+   if([a,b].some(p=>p.x<0||p.x>100||p.y<0||p.y>100))return;
+   const aa=project(H,a),bb=project(H,b),mm=dist(aa,bb);
+   if(Number.isFinite(mm)&&mm>0&&mm<100)values.push({index,widthProjectedMm:mm});
+  });
+  if(values.length){
+   const sorted=values.map(v=>v.widthProjectedMm).sort((a,b)=>a-b);
+   return{status:"estimated",field,inputCount:cuts.length,projectedCount:values.length,medianProjectedMm:(sorted[Math.floor((sorted.length-1)/2)]+sorted[Math.floor(sorted.length/2)])/2,values,warning:"Projecao no plano do cartao, sem correcao da profundidade do dedo. Nao corresponde a nova medida oficial do aro."};
+  }
+ }
+ return{status:"unavailable",reason:"Nao foram encontrados pares de bordas do dedo em coordenadas percentuais. O diagnostico precisa exportar esses pontos para recalcular os cortes."}
+}
+function drawFingerResult(result){
+ const el=$("fingerResult");
+ el.textContent=result.status==="estimated"?
+ "Bordas projetadas: "+result.projectedCount+" cortes, mediana "+result.medianProjectedMm.toFixed(3)+" mm. "+result.warning:
+ result.reason;
+}
+
+function valid(c){const cross=(a,b,z)=>(b.x-a.x)*(z.y-a.y)-(b.y-a.y)*(z.x-a.x);const sides=c.map((p,i)=>cross(p,c[(i+1)%4],c[(i+2)%4]));return sides.every(v=>v>0.1)||sides.every(v=>v< -0.1)}
+function update(){if(!diag||!corners)return;try{if(!valid(corners))throw Error('Cantos cruzados ou quadrilatero invalido');const d=diag,w=85.60,h=53.98,H=fit(corners,w,h),c=corners;
+ const fingerProjection=projectFingerCuts(d,H);drawFingerResult(fingerProjection);
+ const samples=[.1,.5,.9].map(t=>{const left={x:c[0].x*(1-t)+c[3].x*t,y:c[0].y*(1-t)+c[3].y*t},right={x:c[1].x*(1-t)+c[2].x*t,y:c[1].y*(1-t)+c[2].y*t};return{heightFraction:t,widthRectifiedMm:dist(project(H,left),project(H,right))}});
+ $('data').replaceChildren();row('Cartao fisico',w.toFixed(2)+' × '+h.toFixed(2)+' mm (constante)');row('Largura original do dedo',Number(d.finger?.widthSentToFormulaMm).toFixed(3)+' mm (inalterada)');row('Extensao topo / base',dist(c[0],c[1]).toFixed(3)+' / '+dist(c[3],c[2]).toFixed(3)+' unidades %');row('Variacao topo/base',((dist(c[0],c[1])/dist(c[3],c[2])-1)*100).toFixed(2)+'%');row('Cartao retificado, topo / meio / base',samples.map(x=>x.widthRectifiedMm.toFixed(2)).join(' / ')+' mm');
+ $('quad').setAttribute('points',c.map(p=>p.x+','+p.y).join(' '));const g=$('handles');g.replaceChildren();c.forEach((p,i)=>{const ns='http://www.w3.org/2000/svg',circle=document.createElementNS(ns,'circle');circle.setAttribute('cx',p.x);circle.setAttribute('cy',p.y);circle.setAttribute('r',1.25);circle.dataset.index=i;g.append(circle);const t=document.createElementNS(ns,'text');t.setAttribute('x',p.x+1.8);t.setAttribute('y',p.y-1.5);t.setAttribute('class','handle-label');t.textContent=['SE','SD','ID','IE'][i];g.append(t)});
+ analysis={schema:'v2-geometria-manual-lab-2',sourceCapturedAt:d.capturedAt,physicalCardMm:{width:w,height:h},initialCornersPercent:initialCorners,adjustedCornersPercent:c.map(p=>({...p})),homographyPercentToMm:H,physicalWidthSamples:samples,originalFingerWidthMm:d.finger?.widthSentToFormulaMm,fingerProjection,limitations:['Apenas perspectiva do plano do cartao','Projetar cortes depende de pares de coordenadas presentes no diagnostico; nao recalcula aro oficial','Ajuste manual dos cantos, nao deteccao automatica']};$('status').textContent='Geometria recalculada. Arraste cada canto para ajustar.';$('download').disabled=false;
+ }catch(err){$('status').textContent='Ajuste invalido: '+err.message;$('download').disabled=true;analysis=null}}
+$('file').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const d=JSON.parse(await f.text()),l=d.card?.cardLines;if(!l?.left||!l?.right||!l?.top||!l?.bottom||!d.image?.photoDataUrl)throw Error('Diagnostico incompleto');diag=d;initialCorners=[ix(l.left,l.top),ix(l.right,l.top),ix(l.right,l.bottom),ix(l.left,l.bottom)];corners=initialCorners.map(p=>({...p}));$('photo').src=d.image.photoDataUrl;$('out').hidden=false;$('note').textContent='A homografia corrige apenas o plano do cartao; nao corrige o relevo ou a profundidade do dedo. Os cortes serão projetados somente quando o diagnóstico contiver coordenadas de suas bordas.';update()}catch(err){$('status').textContent='Erro: '+err.message;$('out').hidden=true}};
+function coords(ev){const r=$('overlay').getBoundingClientRect();return{x:100*(ev.clientX-r.left)/r.width,y:100*(ev.clientY-r.top)/r.height}}
+let dragging=-1;
+$('overlay').addEventListener('pointerdown',ev=>{const index=ev.target.dataset.index;if(index===undefined)return;dragging=+index;$('overlay').setPointerCapture(ev.pointerId);ev.preventDefault()});
+$('overlay').addEventListener('pointermove',ev=>{if(dragging<0||!corners)return;const p=coords(ev),next=corners.map(p=>({...p}));next[dragging]={x:Math.max(0,Math.min(100,p.x)),y:Math.max(0,Math.min(100,p.y))};if(valid(next)){corners=next;update()}ev.preventDefault()});
+function stop(){dragging=-1}$('overlay').addEventListener('pointerup',stop);$('overlay').addEventListener('pointercancel',stop);
+$('reset').onclick=()=>{if(initialCorners){corners=initialCorners.map(p=>({...p}));update()}};
+$('download').onclick=()=>{if(!analysis)return;const blob=new Blob([JSON.stringify(analysis,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='diagnostico-geometria-v2.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)};
+</script></body></html>

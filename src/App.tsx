@@ -1730,6 +1730,15 @@ export default function App() {
     if(widestRun.used===null) return null;
     const usedWidthPx=widestRun.used;
 
+    // Auditoria independente do resultado: largura horizontal entre os pontos
+    // rastreados em cada corte. Nao substitui a medida perpendicular da V2.
+    const horizontalWidthsPx=fingerMagnetSamples.map(sample=>sample.horizontalWidth);
+    const horizontalRun=selectWidestStableRun(horizontalWidthsPx);
+    const sameRunHorizontalWidthsPx=horizontalWidthsPx.slice(widestRun.startIndex,widestRun.startIndex+widestRun.selected.length);
+    const sameRunHorizontalUsedPx=sameRunHorizontalWidthsPx.length
+      ? sameRunHorizontalWidthsPx.reduce((sum,value)=>sum+value,0)/sameRunHorizontalWidthsPx.length
+      : null;
+
     const cardScaleMmPerPx =
       pixelsPerMm && pixelsPerMm>0
         ? 1/pixelsPerMm
@@ -1768,9 +1777,59 @@ export default function App() {
       spreadPercent,
       selectedUpperWidthsPx: widestRun.selected,
       selectedRunStart: widestRun.startIndex + 1,
+      comparison: {
+        source: "tracked-edge-points; horizontal same-y versus fitted perpendicular",
+        note: "Comparacao diagnostica, nao representa duas segmentacoes independentes.",
+        horizontalWidthsPx,
+        horizontalSelectedWidthsPx: horizontalRun.selected,
+        horizontalSelectedRunStart: horizontalRun.startIndex + 1,
+        horizontalUsedWidthPx: horizontalRun.used,
+        horizontalNormalizedMm: horizontalRun.used!==null && cardScaleMmPerPx!==null
+          ? horizontalRun.used*cardScaleMmPerPx*TEST_FINGER_CARD_NORMALIZATION : null,
+        sameRunHorizontalWidthsPx,
+        sameRunHorizontalUsedPx,
+        sameRunHorizontalNormalizedMm: sameRunHorizontalUsedPx!==null && cardScaleMmPerPx!==null
+          ? sameRunHorizontalUsedPx*cardScaleMmPerPx*TEST_FINGER_CARD_NORMALIZATION : null,
+        differenceSameRunMm: sameRunHorizontalUsedPx!==null && cardScaleMmPerPx!==null
+          ? (sameRunHorizontalUsedPx-usedWidthPx)*cardScaleMmPerPx*TEST_FINGER_CARD_NORMALIZATION : null,
+      },
       fingerAxisAngleDeg: fingerMagnetSamples[0]?.axisAngleDeg ?? 0,
     };
   })();
+
+
+  // Exportacao adicional de diagnostico: somente na branch experimental.
+  const exportFingerEdgeDiagnostic = () => {
+    const source=photoPixelsRef.current,stage=measureRef.current;
+    if(!source||!stage||!photo||!fingerMagnetSamples?.length||!result)return;
+    const rect=stage.getBoundingClientRect();
+    const imageToPercentX=(screenX:number)=>
+      (((screenX/100*rect.width)-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+    const imageToPercentY=(screenY:number)=>
+      (((screenY/100*rect.height)-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+    const lines=Object.fromEntries(Object.entries(cardLines).map(([key,line])=>[
+      key,{a:{x:imageToPercentX(line.a.x),y:imageToPercentY(line.a.y)},
+           b:{x:imageToPercentX(line.b.x),y:imageToPercentY(line.b.y)}}
+    ]));
+    const cuts=fingerMagnetSamples.map((sample,index)=>({
+      index, widthPx:sample.width, horizontalWidthPx:sample.horizontalWidth, axisAngleDeg:sample.axisAngleDeg, confidence:sample.confidence,
+      left:{x:sample.left/source.width*100,y:sample.y/source.height*100},
+      right:{x:sample.right/source.width*100,y:sample.rightY/source.height*100}
+    }));
+    const payload={
+      schema:"medidor-anel-v2-diagnostico-completo-2",
+      capturedAt:new Date().toISOString(),
+      image:{photoDataUrl:photo,widthPx:source.width,heightPx:source.height},
+      card:{cardLines:lines,physicalWidthMm:85.60,physicalHeightMm:53.98},
+      finger:{widthSentToFormulaMm:result.widthMm,cuts,coordinateSystem:"percent-of-untransformed-image"},
+      audit:measurementAudit,
+      limitations:["Apenas dados de diagnostico: calculo do aro nao modificado","Perspectiva no plano do cartao nao corrige a altura do dedo"]
+    };
+    const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}));
+    const a=document.createElement("a");a.href=url;
+    a.download="diagnostico-v2-bordas-"+Date.now()+".json";a.click();
+    window.setTimeout(()=>URL.revokeObjectURL(url),3000);
+  };
 
   const fourMagnetWidthsMm = (() => {
     if(!fingerMagnetSamples?.length||!pixelsPerMm) return [] as number[];
@@ -1831,6 +1890,12 @@ export default function App() {
           <small>{debugMode ? "Modo de teste privado ativo" : "Paquímetro digital"}</small>
         </div>
       </header>
+      <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <button type="button" onClick={() => setDebugMode(value => !value)} style={{padding:"10px 14px",borderRadius:8,border:"1px solid #5688ba",background:debugMode?"#216749":"#273b58",color:"#fff",fontWeight:700,cursor:"pointer"}}>
+          {debugMode ? "Desativar diagnóstico" : "Ativar modo de teste"}
+        </button>
+        <span style={{fontSize:12}}>{debugMode ? "Diagnóstico ativo: finalize a medição para exportar o JSON." : "PR #48 — somente versão experimental"}</span>
+      </div>
 
       {stage === "intro" && (
         <IntroScreen
@@ -2168,6 +2233,7 @@ export default function App() {
           {debugMode && phase === "finger" && result && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
+              <button type="button" onClick={exportFingerEdgeDiagnostic}>Baixar diagnóstico completo com bordas</button>
               <span>Medida final: {result.widthMm.toFixed(2)} mm</span>
               {measurementAudit && (
                 <>
@@ -2175,6 +2241,12 @@ export default function App() {
                   <span>Região mais larga estável: pontos {measurementAudit.selectedRunStart}–{measurementAudit.selectedRunStart + measurementAudit.selectedUpperWidthsPx.length - 1}</span>
                   <span>Platô usado: {measurementAudit.selectedUpperWidthsPx.map((value)=>value.toFixed(1)).join(" / ")} px</span>
                   <span>Largura usada: {measurementAudit.usedWidthPx.toFixed(2)} px</span>
+                  <strong>COMPARAÇÃO DE BORDAS — SOMENTE DIAGNÓSTICO</strong>
+                  <span>Perpendicular ajustada: {measurementAudit.normalizedMm?.toFixed(3) ?? "—"} mm</span>
+                  <span>Horizontal nos mesmos cortes: {measurementAudit.comparison.sameRunHorizontalNormalizedMm?.toFixed(3) ?? "—"} mm</span>
+                  <span>Diferença horizontal − perpendicular: {measurementAudit.comparison.differenceSameRunMm?.toFixed(3) ?? "—"} mm</span>
+                  <span>Horizontal com seleção própria: {measurementAudit.comparison.horizontalNormalizedMm?.toFixed(3) ?? "—"} mm · cortes {measurementAudit.comparison.horizontalSelectedRunStart}–{measurementAudit.comparison.horizontalSelectedRunStart + measurementAudit.comparison.horizontalSelectedWidthsPx.length - 1}</span>
+                  <small>Ambos partem dos mesmos pontos rastreados; ainda não são duas detecções independentes. O aro exibido não muda.</small>
                   <span>Variação: {measurementAudit.spreadPx.toFixed(2)} px · {measurementAudit.spreadPercent.toFixed(2)}%</span>
                   <span>Inclinação compensada: {measurementAudit.fingerAxisAngleDeg.toFixed(1)}°</span>
                   {measurementAudit.cardScaleMmPerPx !== null && <span>Escala: {measurementAudit.cardScaleMmPerPx.toFixed(4)} mm/px</span>}

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laboratório de calibração | V2</title>
+<style>
+:root{font-family:system-ui,sans-serif;color-scheme:dark;background:#11151c;color:#f4f5f6}
+*{box-sizing:border-box}body{margin:0 auto;max-width:820px;padding:16px}h1{font-size:1.45rem;margin:.4rem 0}
+p,small{color:#bdc6d2;line-height:1.5}.panel{border:1px solid #394352;background:#1c232d;padding:14px;border-radius:12px;margin:12px 0}
+button,input[type=file]{font:inherit}button{border:0;border-radius:8px;padding:12px;background:#376fde;color:white;margin:5px 5px 5px 0;cursor:pointer}
+button:disabled{opacity:.4}input[type=range]{width:100%}label{display:block;margin:16px 0}
+strong,output{color:#fff}#photo{width:100%;display:block;border-radius:6px}#photoWrap{position:relative;touch-action:none}#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}#overlay line{stroke:#20e6b2;stroke-width:.6;cursor:grab;vector-effect:non-scaling-stroke}#overlay line.active{stroke:#ffd368;stroke-width:1}#overlay .hit{stroke:transparent;stroke-width:22px;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:grab;touch-action:none}#overlay .hit:active{cursor:grabbing}#overlay circle.corner{fill:#ffd368;stroke:#15202c;stroke-width:1.2;vector-effect:non-scaling-stroke;cursor:crosshair;touch-action:none}.adjust{display:grid;grid-template-columns:1fr 1fr;gap:8px}.adjust button{margin:2px;padding:10px;background:#34465c}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#29323e;padding:12px;border-radius:8px}
+.metric b{display:block;font-size:1.3rem;margin-top:4px}#snapshots{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;border-bottom:1px solid #3c4653;padding:8px}.warning{color:#ffd58a}
+</style></head><body>
+<h1>Laboratório de calibração do cartão — V2</h1>
+<p>Experimento isolado. Carregue um diagnóstico completo .json da V2. A foto fica fixa; nenhum dado é enviado a servidor.</p>
+<section class="panel"><label>Arquivo de diagnóstico (.json)<br><input id="file" type="file" accept=".json,application/json"></label>
+<small id="status">Escolha um diagnóstico que contenha foto, escala e largura do dedo.</small></section>
+<section class="panel" id="lab" hidden>
+<div id="photoWrap"><img id="photo" alt="Fotografia original da medição"><svg id="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="adjust" id="lineControls"><button data-dir="left">Esquerda ◀</button><button data-dir="right">Direita ▶</button><button data-dir="up">Cima ▲</button><button data-dir="down">Baixo ▼</button></div><p>Arraste uma linha para deslocar a borda. Arraste as bolinhas amarelas dos quatro cantos para ajustar a inclinação e a perspectiva. Se não conseguir arrastar uma linha, selecione-a e use os botões. As quatro guias precisam contornar o cartão completo.</p><p>Arraste as linhas verdes para alinhar com as bordas do cartão, sem mudar a fotografia. Depois registre as tentativas.</p>
+<div class="grid">
+<div class="metric">Escala original<b id="origScale"></b></div>
+<div class="metric">Largura original<b id="origWidth"></b></div>
+<div class="metric">Escala simulada<b id="scaleValue"></b></div>
+<div class="metric">Largura simulada<b id="widthValue"></b></div>
+</div>
+<label>Ajuste fino da largura de referência do cartão (alteração percentual sobre os 85,60 mm em pixels da foto)
+<input id="offset" type="range" min="-8" max="8" step="0.1" value="0">
+<output id="change">0,0%</output></label>
+<p class="warning">Se o topo e a base vierem sobrepostos no JSON, o laboratório apresenta um retângulo inicial provisório. Confirme as quatro bordas visualmente antes de registrar. As linhas arrastadas alteram a escala aproximada do cartão, mantendo os pixels do dedo fixos. Não executa a homografia, os 50 cortes nem a fórmula comercial do aro. Não use como medição real.</p>
+<button id="detect">Detectar bordas do cartão</button><button id="save">Registrar tentativa</button><button id="reset">Voltar à referência</button>
+</section>
+<section class="panel" id="comparison" hidden><h2>Comparativo da mesma foto</h2><p>Simulação diagnóstica; não altera a medição nem a V2 principal.</p><div class="grid"><div class="metric">Sem correção percentual<b id="compareRaw"></b></div><div class="metric">Com correção original<b id="compareCorrected"></b></div><div class="metric">Diferença causada pela correção<b id="compareDelta"></b></div><div class="metric">Perspectiva dos quatro cantos<b id="comparePerspective"></b></div></div><small id="compareNote"></small></section>
+<section class="panel" id="cutsPanel" hidden><h2>Diagnóstico dos cortes do dedo</h2><p id="cutsStatus"></p><div id="cutsSummary" class="grid"></div><div id="cutsTable" style="overflow-x:auto"></div><p class="warning">Os valores abaixo são apenas os cortes registrados no diagnóstico original. Nenhum corte é recriado a partir da largura final. A correção de 9,2% é exibida como hipótese de comparação, não como validação de perspectiva.</p></section>
+<section class="panel" id="results" hidden><h2>Tentativas na mesma foto</h2>
+<div id="snapshots"><table><thead><tr><th>#</th><th>Cartão</th><th>Escala</th><th>Largura simulada</th><th>Dif. da original</th></tr></thead><tbody id="rows"></tbody></table></div>
+<button id="download">Baixar relatório JSON</button><button id="clear">Limpar tentativas</button>
+</section>
+<script>
+const $=id=>document.getElementById(id), fmt=(n,d=3)=>Number(n).toFixed(d).replace('.',',');
+let diagnostic=null, snapshots=[], reference={}, lines={};
+function clone(v){return JSON.parse(JSON.stringify(v))}
+function xAt(l,y){return Math.abs(l.b.y-l.a.y)<1e-6?(l.a.x+l.b.x)/2:l.a.x+(l.b.x-l.a.x)*(y-l.a.y)/(l.b.y-l.a.y)}
+function span(){const ys=[lines.top.a.y,lines.bottom.a.y];return ys.reduce((n,y)=>n+Math.abs(xAt(lines.right,y)-xAt(lines.left,y)),0)/2;}
+function extendedLines(raw){
+ const o=clone(raw),m={};for(const k of ['left','right','top','bottom'])m[k]={x:(o[k].a.x+o[k].b.x)/2,y:(o[k].a.y+o[k].b.y)/2};
+ let yt=m.top.y,yb=m.bottom.y;
+ if(Math.abs(yb-yt)<5){const w=Math.abs(m.right.x-m.left.x),h=w*53.98/85.60,c=Math.max(h/2,Math.min(100-h/2,(m.left.y+m.right.y)/2));yt=c-h/2;yb=c+h/2;}
+ if(yt>yb)[yt,yb]=[yb,yt];
+ const lt=xAt(o.left,yt),lb=xAt(o.left,yb),rt=xAt(o.right,yt),rb=xAt(o.right,yb);
+ return {left:{a:{x:lt,y:yt},b:{x:lb,y:yb}},right:{a:{x:rt,y:yt},b:{x:rb,y:yb}},top:{a:{x:lt,y:yt},b:{x:rt,y:yt}},bottom:{a:{x:lb,y:yb},b:{x:rb,y:yb}}};
+}
+function detectCardBounds(img){
+ const canvas=document.createElement('canvas');const max=800,ratio=Math.min(1,max/img.naturalWidth,max/img.naturalHeight);
+ canvas.width=Math.round(img.naturalWidth*ratio);canvas.height=Math.round(img.naturalHeight*ratio);
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ const {data}=ctx.getImageData(0,0,canvas.width,canvas.height),w=canvas.width,h=canvas.height;
+ const rows=new Uint32Array(h),cols=new Uint32Array(w);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const i=(y*w+x)*4,R=data[i],G=data[i+1],B=data[i+2];
+  if(R>145&&G>55&&G<225&&R>G*1.28&&G>B*1.36&&R-B>95){rows[y]++;cols[x]++;}
+ }
+ // Long continuous orange rows/columns identify the actual card, not the exported guides.
+ function region(counts,minCount){
+  let best=[0,0],start=-1;
+  for(let i=0;i<=counts.length;i++){
+   if(i<counts.length&&counts[i]>=minCount){if(start<0)start=i;}
+   else if(start>=0){if(i-start>best[1]-best[0])best=[start,i];start=-1;}
+  }
+  return best[1]-best[0]>=Math.min(18,counts.length/8)?best:null;
+ }
+ const xr=region(cols,Math.round(h*.18)),yr=region(rows,Math.round(w*.27));
+ if(!xr||!yr)return null;
+ const rect={left:xr[0]*100/w,right:xr[1]*100/w,top:yr[0]*100/h,bottom:yr[1]*100/h};
+ if(rect.right-rect.left<25||rect.bottom-rect.top<15)return null;
+ return rect;
+}
+function applyCardBounds(b){
+ lines={left:{a:{x:b.left,y:b.top},b:{x:b.left,y:b.bottom}},
+ right:{a:{x:b.right,y:b.top},b:{x:b.right,y:b.bottom}},
+ top:{a:{x:b.left,y:b.top},b:{x:b.right,y:b.top}},
+ bottom:{a:{x:b.left,y:b.bottom},b:{x:b.right,y:b.bottom}}};
+ selected='left';reference.initialSpan=span();reference.initialLines=clone(lines);redraw();
+}
+let selected='left';
+function redraw(){draw();drawSelection();update()}
+const corners={tl:[['left','a'],['top','a']],tr:[['right','a'],['top','b']],bl:[['left','b'],['bottom','a']],br:[['right','b'],['bottom','b']]};
+function draw(){
+ const svg=$('overlay'),ns='http://www.w3.org/2000/svg';svg.replaceChildren();
+ for(const name of ['left','right','top','bottom']){
+ const l=lines[name],visible=document.createElementNS(ns,'line'),hit=document.createElementNS(ns,'line');
+ for(const el of [visible,hit]){el.setAttribute('x1',l.a.x);el.setAttribute('y1',l.a.y);el.setAttribute('x2',l.b.x);el.setAttribute('y2',l.b.y)}
+ hit.classList.add('hit');hit.dataset.name=name;svg.append(visible,hit);
+ }
+ for(const [key,pairs] of Object.entries(corners)){
+ const p=lines[pairs[0][0]][pairs[0][1]],handle=document.createElementNS(ns,'circle');
+ handle.classList.add('corner');handle.dataset.corner=key;handle.setAttribute('cx',p.x);handle.setAttribute('cy',p.y);
+ handle.setAttribute('r','1.4');svg.append(handle);
+ }
+}
+let dragging=null;
+$('overlay').addEventListener('pointerdown',e=>{
+ const corner=e.target.closest('circle.corner')?.dataset.corner;
+ const name=e.target.closest('line.hit')?.dataset.name;
+ if(!corner&&!name)return;
+ if(name)selected=name;
+ dragging={corner,name,id:e.pointerId,x:e.clientX,y:e.clientY};
+ e.currentTarget.setPointerCapture(e.pointerId);drawSelection();e.preventDefault();
+});
+$('overlay').addEventListener('pointermove',e=>{
+ if(!dragging||dragging.id!==e.pointerId)return;
+ const rect=e.currentTarget.getBoundingClientRect();
+ const dx=(e.clientX-dragging.x)*100/rect.width,dy=(e.clientY-dragging.y)*100/rect.height;
+ dragging.x=e.clientX;dragging.y=e.clientY;
+ if(dragging.corner)moveCorner(dragging.corner,dx,dy);
+ else{const axis=dragging.name==='left'||dragging.name==='right'?'x':'y';moveLine(dragging.name,axis,axis==='x'?dx:dy)}
+ e.preventDefault();
+});
+const stopDrag=e=>{if(dragging&&dragging.id===e.pointerId)dragging=null};
+$('overlay').addEventListener('pointerup',stopDrag);
+$('overlay').addEventListener('pointercancel',stopDrag);
+$('overlay').addEventListener('lostpointercapture',stopDrag);
+function moveCorner(key,dx,dy){
+ const pairs=corners[key],p=lines[pairs[0][0]][pairs[0][1]];
+ const nx=Math.max(0,Math.min(100,p.x+dx)),ny=Math.max(0,Math.min(100,p.y+dy));
+ for(const [name,end] of pairs)lines[name][end]={x:nx,y:ny};
+ redraw();
+}
+function drawSelection(){
+for(const el of $('overlay').querySelectorAll('line:not(.hit)'))el.classList.toggle('active',el.nextSibling?.dataset.name===selected);
+}
+function moveLine(name,axis,delta){
+if(!lines[name]||!Number.isFinite(delta))return;
+for(const pt of [lines[name].a,lines[name].b])pt[axis]=Math.max(0,Math.min(100,pt[axis]+delta));
+const side=lines[name],L=lines.left,R=lines.right,T=lines.top,B=lines.bottom;
+if(name==='left'){T.a=clone(side.a);B.a=clone(side.b)}
+else if(name==='right'){T.b=clone(side.a);B.b=clone(side.b)}
+else if(name==='top'){L.a=clone(side.a);R.a=clone(side.b)}
+else {L.b=clone(side.a);R.b=clone(side.b)}
+redraw();
+}
+$('lineControls').addEventListener('click',e=>{
+const dir=e.target.closest('[data-dir]')?.dataset.dir;if(!dir||!diagnostic)return;
+moveLine(selected,dir==='left'||dir==='right'?'x':'y',dir==='left'||dir==='up'?-0.3:0.3);
+});
+
+function update(){
+const factor=span()/reference.initialSpan*(1+Number($('offset').value)/100);
+const scale=reference.scale*factor;
+const width=(reference.pixelFingerWidth/scale)*(1-reference.correctionPercent/100);
+$('change').textContent=(Number($('offset').value)>0?'+':'')+fmt($('offset').value,1)+'%';
+$('scaleValue').textContent=fmt(scale,4)+' px/mm';
+$('widthValue').textContent=fmt(width)+' mm';
+return {adjustmentPercent:Number($('offset').value),cardPixelWidth:reference.cardPixelWidth*factor,scalePxPerMm:scale,simulatedFingerMm:width,differenceMm:width-reference.originalWidth,cardLines:clone(lines),cardSpanPercent:span()};
+}
+$('file').addEventListener('change',async e=>{
+try{
+const f=e.target.files[0];if(!f)return;
+const d=JSON.parse(await f.text());
+const scale=Number(d.card?.pixelsPerMm ?? (1/Number(d.audit?.cardScaleMmPerPx))), width=Number(d.finger?.widthSentToFormulaMm), physical=Number(d.card?.physicalWidthMm);
+if(!d.image?.photoDataUrl?.startsWith('data:image/')||!Number.isFinite(scale)||scale<=0||!Number.isFinite(width)||width<=0||!Number.isFinite(physical)||physical<=0)throw Error('Diagnóstico incompleto ou incompatível.');
+if(!d.card?.cardLines?.left||!d.card?.cardLines?.right||!d.card?.cardLines?.top||!d.card?.cardLines?.bottom)throw Error('Linhas do cartão ausentes do JSON.');
+diagnostic=d; snapshots=[];lines=extendedLines(d.card.cardLines);
+reference={originalWidth:width,scale,physicalWidth:physical,cardPixelWidth:scale*physical,pixelFingerWidth:Number(d.audit?.usedWidthPx)||width*scale/(1-(Number(d.audit?.correctionPercent)||0)/100),correctionPercent:Number(d.audit?.correctionPercent)||0,initialSpan:span(),initialLines:clone(lines)};
+$('photo').onload=()=>{const bounds=detectCardBounds($('photo'));if(bounds){applyCardBounds(bounds);$('status').textContent='Cartão localizado pela cor na foto. Confira e ajuste as quatro bordas.'}else{$('status').textContent='Detecção automática indisponível nesta foto. Ajuste as quatro bordas manualmente.'}};
+$('photo').src=d.image.photoDataUrl;
+$('origScale').textContent=fmt(scale,4)+' px/mm';
+$('origWidth').textContent=fmt(width)+' mm';
+$('offset').value=0;$('lab').hidden=false;$('results').hidden=false;$('rows').replaceChildren();
+$('status').textContent='Arquivo carregado: '+f.name+'. A foto permanecerá fixa.';
+redraw();
+}catch(err){$('status').textContent='Erro: '+err.message;$('lab').hidden=true;$('results').hidden=true;}
+});
+$('offset').addEventListener('input',update);
+$('detect').addEventListener('click',()=>{const bounds=detectCardBounds($('photo'));if(bounds)applyCardBounds(bounds);else $('status').textContent='Não foi possível localizar automaticamente o cartão nesta foto.'});
+$('reset').addEventListener('click',()=>{$('offset').value=0;lines=clone(reference.initialLines);redraw()});
+$('save').addEventListener('click',()=>{
+if(!diagnostic)return; const data={number:snapshots.length+1,...update()};snapshots.push(data);
+const tr=document.createElement('tr');
+[data.number,fmt(data.adjustmentPercent,1)+'%',fmt(data.scalePxPerMm,4),fmt(data.simulatedFingerMm),fmt(data.differenceMm)].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.appendChild(td)});$('rows').appendChild(tr);
+});
+$('clear').addEventListener('click',()=>{snapshots=[];$('rows').replaceChildren()});
+$('download').addEventListener('click',()=>{
+if(!diagnostic)return;
+const report={schema:'v2-calibration-sensitivity-lab-1',sourceCapturedAt:diagnostic.capturedAt,sourceSchema:diagnostic.schema,reference,assumption:'finger pixels fixed, manual card line geometry with scale simulation; does not re-execute homography or production algorithm',snapshots};
+const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='laboratorio-calibracao-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+});
+</script><script>
+(function(){
+ const get=id=>document.getElementById(id);
+ const previous=update;
+ update=function(){
+   const r=previous();
+   if(!diagnostic||!reference||!Number.isFinite(r.scalePxPerMm))return r;
+   get('comparison').hidden=false;
+   const correction=reference.correctionPercent||0;
+   const raw=reference.pixelFingerWidth/r.scalePxPerMm;
+   const corrected=raw*(1-correction/100);
+   get('compareRaw').textContent=fmt(raw)+' mm';
+   get('compareCorrected').textContent=fmt(corrected)+' mm';
+   get('compareDelta').textContent=fmt(raw-corrected)+' mm ('+fmt(correction,1)+'%)';
+   get('comparePerspective').textContent='Cantos ajustáveis';
+   get('compareNote').textContent='A perspectiva está representada pelas quatro linhas móveis. Os valores acima são calculados por escala média, não por homografia ou nova detecção do dedo. A correção percentual é apenas desligada na simulação, não no sistema original.';
+   return r;
+ };
+})();
+</script><script>
+(function(){
+let cutReport={available:false,reason:'Nenhum diagnóstico carregado'};
+const out=(id,s)=>{document.getElementById(id).textContent=s};
+const dec=n=>Number(n).toFixed(3).replace('.',',');
+function flattenCandidates(root){
+ const found=[];const seen=new WeakSet();
+ function walk(obj,path,depth){
+  if(!obj||typeof obj!=='object'||depth>7||seen.has(obj))return;
+  seen.add(obj);
+  if(Array.isArray(obj)){
+   if(obj.length>=20&&obj.length<=200){
+    const extract=x=>typeof x==='number'?x:(x&&typeof x==='object'?(x.widthPx??x.width??x.larguraPx??x.largura??x.distancePx??x.distance):undefined);
+    const values=obj.map(extract);
+    const valid=values.filter(x=>typeof x==='number'&&Number.isFinite(x)&&x>0);
+    if(valid.length===obj.length&&/(cort|slice|scan|perfil|profile|width|largura|sample|amostr)/i.test(path))found.push({path,values});
+   }
+   for(let i=0;i<obj.length;i++)if(typeof obj[i]==='object')walk(obj[i],path+'['+i+']',depth+1);
+  }else for(const [key,v] of Object.entries(obj))if(typeof v==='object')walk(v,path+'.'+key,depth+1);
+ }
+ walk(root,'diagnostico',0);
+ return found.sort((a,b)=>Number(b.values.length===50)-Number(a.values.length===50));
+}
+function inspect(d){
+ const panel=document.getElementById('cutsPanel'),summary=document.getElementById('cutsSummary'),table=document.getElementById('cutsTable');
+ panel.hidden=false;summary.replaceChildren();table.replaceChildren();
+ const candidates=flattenCandidates(d);
+ if(!candidates.length){
+  cutReport={available:false,reason:'O JSON não inclui uma sequência numérica identificável dos cortes individuais. Exporte um diagnóstico completo com os cortes registrados no algoritmo V2.'};
+  out('cutsStatus',cutReport.reason);return;
+ }
+ const chosen=candidates[0],arr=chosen.values.slice(),sorted=[...arr].sort((a,b)=>a-b),mean=arr.reduce((a,b)=>a+b,0)/arr.length;
+ const median=sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2;
+ const sd=Math.sqrt(arr.reduce((s,v)=>s+(v-mean)**2,0)/arr.length);
+ const corr=Number(d.audit?.correctionPercent)||0;
+ cutReport={available:true,path:chosen.path,unit:/mm/i.test(chosen.path)?'unidade do registro (possivelmente mm)':'unidade original do diagnóstico (confirmar se px ou mm)',values:arr,statistics:{count:arr.length,min:sorted[0],max:sorted.at(-1),mean,median,standardDeviation:sd},correctionPercent:corr,otherCandidatePaths:candidates.slice(1).map(c=>c.path)};
+ out('cutsStatus',arr.length+' cortes encontrados em '+chosen.path+'. A unidade precisa ser conferida no código original antes de qualquer conversão ou conclusão.');
+ for(const [label,val] of [['Quantidade',String(arr.length)],['Média',dec(mean)],['Mediana',dec(median)],['Mínimo / máximo',dec(sorted[0])+' / '+dec(sorted.at(-1))],['Desvio-padrão',dec(sd)],['Correção registrada',dec(corr)+'%']]){
+ const card=document.createElement('div');card.className='metric';card.textContent=label;const bold=document.createElement('b');bold.textContent=val;card.appendChild(bold);summary.appendChild(card);
+ }
+ const t=document.createElement('table'),head=document.createElement('thead'),row=document.createElement('tr');
+ for(const txt of ['Corte','Valor bruto','Variação da média']){const th=document.createElement('th');th.textContent=txt;row.appendChild(th)}head.appendChild(row);t.appendChild(head);
+ const body=document.createElement('tbody');
+ arr.forEach((v,i)=>{const tr=document.createElement('tr');for(const txt of [String(i+1),dec(v),dec(v-mean)]){const td=document.createElement('td');td.textContent=txt;tr.appendChild(td)}body.appendChild(tr)});
+ t.appendChild(body);table.appendChild(t);
+}
+document.getElementById('file').addEventListener('change',async e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ try{inspect(JSON.parse(await f.text()))}catch(err){cutReport={available:false,reason:'Falha ao ler cortes: '+err.message};document.getElementById('cutsPanel').hidden=false;out('cutsStatus',cutReport.reason)}
+});
+document.getElementById('download').addEventListener('click',()=>{
+ if(!diagnostic)return;
+ const payload={schema:'v2-cortes-diagnostico-1',sourceCapturedAt:diagnostic.capturedAt,cutReport,reference:{originalWidth:reference.originalWidth,correctionPercent:reference.correctionPercent},limitations:'Dados de cortes extraídos do diagnóstico sem executar novamente segmentação, homografia ou algoritmo V2. Unidades e seleção de cortes precisam de validação no código original.'};
+ const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download='analise-cortes-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+});
+})();
+</script>
+<script>
+(function(){
+  const panel=document.createElement('section');
+  panel.className='panel';panel.id='edgeViewer';panel.hidden=true;
+  panel.innerHTML='<h2>Rastreamento individual do dedo</h2><p id="edgeStatus"></p><p>Linhas azuis: cortes registrados. Linhas amarelas: sete cortes selecionados. Pontos nas extremidades indicam as bordas calculadas. Os dados são provenientes do diagnóstico, não de uma nova detecção da foto.</p><label><input type="checkbox" id="edgeShowAll" checked> Mostrar todos os cortes</label><div id="edgeSummary"></div><div id="edgeTable" style="overflow-x:auto"></div><button type="button" id="edgeExport">Baixar diagnóstico visual JSON</button>';
+  document.getElementById('cutsPanel').after(panel);
+  let original=null;
+  const svg=document.getElementById('overlay');
+  const ns='http://www.w3.org/2000/svg';
+  const fmt3=n=>Number(n).toFixed(3).replace('.',',');
+  function render(){
+    svg.querySelectorAll('[data-edge-cut]').forEach(n=>n.remove());
+    if(!original)return;
+    const cuts=original.finger.cuts;
+    const start=Number(original.audit?.selectedRunStart)-1;
+    const size=Array.isArray(original.audit?.selectedUpperWidthsPx)?original.audit.selectedUpperWidthsPx.length:7;
+    const showAll=document.getElementById('edgeShowAll').checked;
+    const rows=[];
+    for(let i=0;i<cuts.length;i++){
+      const c=cuts[i],selected=i>=start && i<start+size;
+      if(!c?.left||!c?.right)continue;
+      const px=[Number(c.left.x),Number(c.left.y),Number(c.right.x),Number(c.right.y)];
+      if(px.some(n=>!Number.isFinite(n)))continue;
+      if(showAll||selected){
+        const line=document.createElementNS(ns,'line');
+        line.dataset.edgeCut=String(i);line.setAttribute('x1',String(px[0]));line.setAttribute('y1',String(px[1]));
+        line.setAttribute('x2',String(px[2]));line.setAttribute('y2',String(px[3]));
+        line.setAttribute('style','stroke:'+(selected?'#ffe066':'#48b9ff')+';stroke-width:'+(selected?'1.1':'.38')+';vector-effect:non-scaling-stroke;pointer-events:none');
+        svg.appendChild(line);
+        for(const j of [0,2]){
+          const dot=document.createElementNS(ns,'circle');dot.dataset.edgeCut=String(i);
+          dot.setAttribute('cx',String(px[j]));dot.setAttribute('cy',String(px[j+1]));
+          dot.setAttribute('r',selected?'.4':'.22');dot.setAttribute('fill',selected?'#ffe066':'#48b9ff');
+          dot.setAttribute('style','pointer-events:none');svg.appendChild(dot);
+        }
+      }
+      rows.push('<tr><td>'+(i+1)+'</td><td>'+fmt3(c.widthPx)+'</td><td>'+(Number.isFinite(c.horizontalWidthPx)?fmt3(c.horizontalWidthPx):'não registrado')+'</td><td>'+(selected?'Selecionado':'—')+'</td></tr>');
+    }
+    document.getElementById('edgeTable').innerHTML='<table><thead><tr><th>Corte</th><th>Largura perpendicular (px)</th><th>Largura horizontal (px)</th><th>Uso</th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+    document.getElementById('edgeStatus').textContent=cuts.length+' cortes com coordenadas • '+(Number.isFinite(start)&&start>=0?(start+1)+' a '+(start+size):'seleção não informada')+' selecionados';
+    const raw=Number(original.audit?.rawCardMm),corr=Number(original.audit?.normalizedMm);
+    document.getElementById('edgeSummary').textContent=Number.isFinite(raw)&&Number.isFinite(corr)?'Sem normalização: '+fmt3(raw)+' mm | Com 9,2%: '+fmt3(corr)+' mm | Diferença: '+fmt3(raw-corr)+' mm':'Comparação em milímetros indisponível neste arquivo.';
+  }
+  const formerDraw=draw;
+  draw=function(){formerDraw();render();};
+  document.getElementById('file').addEventListener('change',async e=>{
+    original=null;panel.hidden=true;
+    const file=e.target.files?.[0];if(!file)return;
+    try{
+      const d=JSON.parse(await file.text());
+      if(!Array.isArray(d.finger?.cuts)||!d.finger.cuts.some(c=>c?.left&&c?.right))return;
+      original=d;panel.hidden=false;render();
+    }catch(_){original=null;}
+  });
+  document.getElementById('edgeShowAll').addEventListener('change',render);
+  document.getElementById('edgeExport').addEventListener('click',()=>{
+    if(!original)return;
+    const payload={schema:'v2-edge-visual-diagnostic-1',capturedAt:original.capturedAt,coordinateSystem:original.finger.coordinateSystem,cuts:original.finger.cuts,selection:{startIndexOneBased:original.audit?.selectedRunStart,selectedWidthsPx:original.audit?.selectedUpperWidthsPx},comparison:{rawMm:original.audit?.rawCardMm,normalizedMm:original.audit?.normalizedMm,correctionPercent:original.audit?.correctionPercent},limitations:'Visualização de pontos registrados, sem nova detecção ou homografia.'};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download='diagnostico-visual-cortes-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2500);
+  });
+})();
+</script>
+</body></html>
