@@ -10,36 +10,13 @@ type Props = {
 };
 
 const PhotoArt = () => (
-  <svg viewBox="0 0 320 190" role="img" aria-label="Celular paralelo à mesa, cartão encaixado na moldura verde">
-    {/* mesa + mão */}
-    <rect x="0" y="0" width="320" height="190" rx="16" fill="#15120c" />
-    <g opacity=".95">
-      <rect x="196" y="96" width="22" height="78" rx="11" fill="#d9a07f" />
-      <rect x="222" y="90" width="22" height="84" rx="11" fill="#e2ab8a" />
-      <rect x="248" y="96" width="22" height="78" rx="11" fill="#d9a07f" />
-    </g>
-    {/* cartão sobre 3 dedos */}
-    <rect x="186" y="62" width="94" height="58" rx="6" fill="#f08a24" />
-    <rect x="198" y="74" width="16" height="12" rx="2" fill="#f3e5ab" opacity=".85" />
-    {/* celular */}
-    <g transform="translate(26 14)">
-      <rect x="0" y="0" width="104" height="164" rx="16" fill="#0b0b0b" stroke="#c9a25e" strokeWidth="2" />
-      <rect x="7" y="12" width="90" height="140" rx="9" fill="#1d1a14" />
-      {/* moldura verde + cartão encaixado */}
-      <rect x="15" y="28" width="74" height="46" rx="5" fill="#f08a24" />
-      <rect x="15" y="28" width="74" height="46" rx="5" fill="none" stroke="#52e0a3" strokeWidth="2.5" />
-      <rect x="40" y="74" width="9" height="62" rx="4.5" fill="#e2ab8a" />
-      <rect x="51" y="74" width="9" height="62" rx="4.5" fill="#d9a07f" />
-      <rect x="62" y="74" width="9" height="62" rx="4.5" fill="#e2ab8a" />
-      {/* nível: bolinhas quase juntas = ok */}
-      <circle cx="52" cy="112" r="11" fill="none" stroke="#52e0a3" strokeWidth="2" />
-      <circle cx="54" cy="110" r="4" fill="#52e0a3" />
-      <circle cx="49" cy="115" r="4" fill="#f2ca50" />
-    </g>
-    <text x="78" y="186" textAnchor="middle" fill="#52e0a3" fontSize="10" fontWeight="800">MOLDURA VERDE</text>
-    <path d="M150 92 h24" stroke="#c9a25e" strokeWidth="2" strokeDasharray="4 4" />
-    <text x="233" y="54" textAnchor="middle" fill="#f3e5ab" fontSize="10" fontWeight="700">cartão reto em 2–3 dedos</text>
-  </svg>
+  <img
+    className="tip-modal-photo"
+    src="/tips/foto-certa.jpg"
+    width={800}
+    height={520}
+    alt="Celular paralelo à mão, cartão reto sobre 2 a 3 dedos e encaixado na moldura"
+  />
 );
 
 const CardArt = () => (

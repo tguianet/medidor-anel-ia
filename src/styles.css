@@ -1245,3 +1245,4 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .tip-modal-list li::marker { color: #f2ca50; font-weight: 800; }
 .tip-modal-note { margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid #52e0a3; border-radius: 8px; background: rgba(82,224,163,.08); color: #cfe9dc; font-size: 13px; line-height: 1.45; }
 .tip-modal-cta { display: block; width: 100%; margin-top: 16px; padding: 15px 16px; border: 0; border-radius: 999px; background: linear-gradient(90deg, #f3e5ab, #f2ca50, #c9a25e); color: #171109; font-size: 15px; font-weight: 800; letter-spacing: .04em; }
+.tip-modal-art .tip-modal-photo { display: block; width: 100%; height: auto; border-radius: 16px; }
