@@ -86,6 +86,20 @@ export default function AppV2() {
   // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
   const [debugMode, setDebugMode] = useState(false);
   const debugTapRef = useRef({ count: 0, lastTap: 0 });
+  // Tela inicial: 7 toques no "O" do ARO ligam/desligam o modo desenvolvedor.
+  const logoTapRef = useRef({ count: 0, lastTap: 0 });
+  const handleLogoSecretTap = () => {
+    const now = Date.now();
+    const current = logoTapRef.current;
+    if (now - current.lastTap > 1800) current.count = 0;
+    current.lastTap = now;
+    current.count += 1;
+    if (current.count >= 7) {
+      current.count = 0;
+      setDebugMode((value) => !value);
+      try { navigator.vibrate?.(60); } catch { /* sem vibração */ }
+    }
+  };
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
@@ -4286,7 +4300,7 @@ export default function AppV2() {
           Carregando foto…
         </div>
       )}
-      <header className="brand">
+      {stage !== "intro" && <header className="brand">
         <button
           type="button"
           className="mark"
@@ -4308,22 +4322,26 @@ export default function AppV2() {
           <strong>Medidor de Anel</strong>
           <small>{debugMode ? "Modo de teste privado ativo" : "Paquímetro digital"}</small>
         </div>
-      </header>
+      </header>}
 
       {stage === "intro" && (
         <>
           <FrozenIntroScreen
             error={camera.error}
             onMeasureFinger={() => { pendingSharpStartRef.current = false; setTipKind("photo"); }}
+            onSecretTap={handleLogoSecretTap}
+            developerMode={debugMode}
           />
-          <button
-            className="secondary"
-            type="button"
-            style={{width:"100%",marginTop:12}}
-            onClick={() => { pendingSharpStartRef.current = true; setTipKind("photo"); }}
-          >
-            TESTE: câmera do celular com moldura (foto nítida)
-          </button>
+          {debugMode && (
+            <button
+              className="secondary"
+              type="button"
+              style={{width:"100%",marginTop:12}}
+              onClick={() => { pendingSharpStartRef.current = true; setTipKind("photo"); }}
+            >
+              TESTE: câmera do celular com moldura (foto nítida)
+            </button>
+          )}
           {debugMode && (
             <section className="panel" style={{marginTop:12}}>
               <span className="step">TESTE PRIVADO</span>

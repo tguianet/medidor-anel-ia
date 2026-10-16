@@ -1246,3 +1246,11 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .tip-modal-note { margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid #52e0a3; border-radius: 8px; background: rgba(82,224,163,.08); color: #cfe9dc; font-size: 13px; line-height: 1.45; }
 .tip-modal-cta { display: block; width: 100%; margin-top: 16px; padding: 15px 16px; border: 0; border-radius: 999px; background: linear-gradient(90deg, #f3e5ab, #f2ca50, #c9a25e); color: #171109; font-size: 15px; font-weight: 800; letter-spacing: .04em; }
 .tip-modal-art .tip-modal-photo { display: block; width: 100%; height: auto; border-radius: 16px; }
+
+/* Tela inicial AROVISION: só logo + começar + instalar */
+.home-brand { --gold: #f2ca50; --gold-light: #f3e5ab; --gold-satin: #c9a25e; --ebony: #0d0d0d; display: flex; flex-direction: column; justify-content: center; min-height: calc(100dvh - 48px); max-width: 460px; margin: 0 auto; padding: 24px 4px 32px; font-family: Inter, system-ui, sans-serif; }
+.home-brand-logo { position: relative; width: 100%; }
+.home-brand-logo img { display: block; width: 100%; height: auto; mix-blend-mode: lighten; }
+.home-brand-secret { position: absolute; left: 30%; top: 62%; width: 16%; height: 27%; padding: 0; border: 0; border-radius: 50%; background: transparent; -webkit-tap-highlight-color: transparent; touch-action: manipulation; cursor: default; }
+.home-brand .home-cta { margin-top: 40px; }
+.home-dev-flag { margin: 16px 0 0; color: #52e0a3; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-align: center; text-transform: uppercase; }

@@ -22,11 +22,12 @@ const Icon = ({ name, className = "" }: { name: string; className?: string }) =>
 type Props = {
   error: string;
   onMeasureFinger: () => void;
+  // Toque no "O" do ARO (o pai conta 7 toques para o modo desenvolvedor).
+  onSecretTap?: () => void;
+  developerMode?: boolean;
 };
 
-export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
-  const [showPresentation, setShowPresentation] = useState(false);
-  const [videoAvailable, setVideoAvailable] = useState(true);
+export default function FrozenIntroScreen({ error, onMeasureFinger, onSecretTap, developerMode = false }: Props) {
 
   // PWA: botão "Instalar app" (Android) e dica para iPhone.
   type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice?: Promise<{ outcome: string }> };
@@ -56,103 +57,27 @@ export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
   };
 
   return (
-    <section className="home-lux">
-      <div className="home-glow" aria-hidden="true" />
-
-      <div className="home-chip">
-        <Icon name="token" />
-        PAQUÍMETRO POR FOTO
+    <section className="home-brand" aria-label="AROVISION">
+      <div className="home-brand-logo">
+        <img src="/brand/arovision-logo.jpg" width={1296} height={727} alt="AROVISION — seu aro na medida certa" />
+        <button type="button" className="home-brand-secret" aria-label="O" onClick={() => onSecretTap?.()} />
       </div>
-      <h1 className="home-title">
-        Descubra o <em>número exato</em> do seu anel.
-      </h1>
-      <p className="home-sub">
-        Apenas com a câmera do celular e um cartão padrão como referência. Em menos de 60 segundos.
-      </p>
-
-      <div className="home-preview">
-        <div className="home-preview-stage">
-          <div className="home-preview-scrim" aria-hidden="true" />
-          <div className="home-hud">
-            <div className="home-hud-pill">
-              <Icon name="straighten" />
-              EXEMPLO · ARO <strong>25</strong>
-            </div>
-            <div className="home-caliper" aria-hidden="true">
-              <div className="home-caliper-arm"><i /><b /></div>
-              <div className="home-caliper-line" />
-              <div className="home-caliper-arm"><i /><b /></div>
-            </div>
-            <div className="home-tolerance">
-              <strong>Exato 25</strong><em>✦</em><span>Conforto 26</span>
-            </div>
-          </div>
-          <div className="home-scan" aria-hidden="true" />
-        </div>
-        <div className="home-preview-foot">
-          <span><Icon name="verified" className="home-ok" />Escala pelo cartão (85,60 mm)</span>
-          {videoAvailable && (
-            <button type="button" className="home-video-link" onClick={() => setShowPresentation((v) => !v)}>
-              {showPresentation ? "Fechar vídeo" : "▶ Ver como funciona"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {showPresentation && videoAvailable && (
-        <div className="home-video">
-          <video
-            src="/medidor-apresentacao.mp4"
-            controls
-            playsInline
-            preload="metadata"
-            onError={() => setVideoAvailable(false)}
-          />
-        </div>
-      )}
-
-      <div className="home-steps-label">Como funciona em 3 passos</div>
-      <ol className="home-steps">
-        <li>
-          <span className="home-step-n">1</span>
-          <div><strong>Apoie a mão</strong><small>Mão espalmada sobre uma mesa bem iluminada.</small></div>
-          <Icon name="pan_tool" className="home-step-ico" />
-        </li>
-        <li>
-          <span className="home-step-n">2</span>
-          <div><strong>Use qualquer cartão</strong><small>Cartão deitado sobre os dedos, como régua.</small></div>
-          <Icon name="credit_card" className="home-step-ico" />
-        </li>
-        <li>
-          <span className="home-step-n">3</span>
-          <div><strong>Fotografe de cima</strong><small>Dedo no centro; depois ajuste as linhas.</small></div>
-          <Icon name="photo_camera" className="home-step-ico" />
-        </li>
-      </ol>
 
       <button type="button" className="home-cta" onClick={() => { try { navigator.vibrate?.(25); } catch { /* sem vibração */ } onMeasureFinger(); }}>
         <Icon name="center_focus_strong" />
-        Começar medição agora
+        Começar medição
       </button>
-      <div className="home-safe">
-        <Icon name="lock" />
-        Sem cadastro · leva menos de 1 minuto
-      </div>
 
       {!isStandalone && installPrompt && (
         <button type="button" className="home-install" onClick={() => void install()}>
-          <Icon name="photo_camera" /> Instalar o app no celular
+          <Icon name="photo_camera" /> Instalar o app
         </button>
       )}
       {!isStandalone && !installPrompt && isIos && (
         <p className="home-install-ios">No iPhone: toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong> para instalar o app.</p>
       )}
 
-      <div className="home-foot">
-        <div><Icon name="stars" />Exato · Conforto</div>
-        <p>Você recebe o número exato e também uma opção mais confortável.</p>
-      </div>
-
+      {developerMode && <p className="home-dev-flag">Modo desenvolvedor ativo</p>}
       {error && <p className="error">{error}</p>}
     </section>
   );
