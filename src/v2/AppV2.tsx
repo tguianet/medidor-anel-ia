@@ -4236,20 +4236,20 @@ export default function AppV2() {
         ? "Coloque o cartão sobre o dedo, enquadre na moldura e tire a foto."
         : guidedStep === 2
           ? "Arraste cada linha verde até a borda do dedo, na altura onde o anel vai ficar. Use o zoom (+) para mais precisão."
-          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
+          : "Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : singlePhotoTestMode
     ? (guidedStep === 1
         ? "Fotografe o cartão sobre o dedo. O detector aplica automaticamente as 3 linhas e calibra os 85,60 mm antes de abrir a medição."
         : guidedStep === 2
           ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos ficam concentrados nessa mesma altura."
-          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
+          : "Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
       : guidedStep === 2
         ? "Coloque o cartão sobre o dedo e ajuste novamente as duas laterais e a base. A foto 2 define a escala final da medição."
         : guidedStep === 3
           ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia aproximada. O sistema faz 50 refinamentos automáticos perto dessas linhas e calcula pela região mais larga estável."
-          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.";
+          : "Exato = aro calculado. Conforto = um aro acima para maior folga.";
 
   const historicalFingerTests = [
     { ring:17, mm:19.09 },
@@ -4804,7 +4804,6 @@ export default function AppV2() {
             )}
             {debugMode && phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
-                <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
                 <strong>{commercialRingSize}</strong>
                 <small>Conforto: {clamp(commercialRingSize + 1, 1, 40)} · recomendado com folga</small>
@@ -4967,10 +4966,9 @@ export default function AppV2() {
           )}
           {debugMode && phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
-              <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {commercialRingSize}</strong>
               <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
-              <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
+              <small>Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
             </div>
           )}
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
@@ -5315,9 +5313,9 @@ export default function AppV2() {
                   <strong className="result-screen-number">{commercialRingSize}</strong>
                   <div className="result-screen-divider" aria-hidden="true"><span /><b>◇</b><span /></div>
                   <p className="result-screen-options">
-                    Justo <em>{clamp(commercialRingSize - 1, 1, 40)}</em> · Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
+                    Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
                   </p>
-                  <p className="result-screen-hint">Na dúvida entre dois números, prefira o de conforto para anéis largos ou para usar o dia todo.</p>
+                  <p className="result-screen-hint">Prefira o de conforto para anéis largos ou para usar o dia todo.</p>
                 </div>
               ) : (
                 <div className="result-screen-body">

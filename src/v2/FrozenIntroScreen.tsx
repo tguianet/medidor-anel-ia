@@ -84,7 +84,7 @@ export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
               <div className="home-caliper-arm"><i /><b /></div>
             </div>
             <div className="home-tolerance">
-              <span>Justo 24</span><em>✦</em><strong>Exato 25</strong><em>✦</em><span>Conforto 26</span>
+              <strong>Exato 25</strong><em>✦</em><span>Conforto 26</span>
             </div>
           </div>
           <div className="home-scan" aria-hidden="true" />
@@ -149,8 +149,8 @@ export default function FrozenIntroScreen({ error, onMeasureFinger }: Props) {
       )}
 
       <div className="home-foot">
-        <div><Icon name="stars" />Justo · Exato · Conforto</div>
-        <p>Você recebe o número exato e também uma opção mais justa e uma mais confortável.</p>
+        <div><Icon name="stars" />Exato · Conforto</div>
+        <p>Você recebe o número exato e também uma opção mais confortável.</p>
       </div>
 
       {error && <p className="error">{error}</p>}
