@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { chooseRotation, estimateOrientation, type Rotation } from "./orientation";
 import { analyzeLiveCardGuide, calibratePhoto } from "./visionV2";
 import { clamp, computeDiameterOnlyTestResult, computeRingResult, type CalibrationRule } from "../ringCalculation";
 import { lineIntersection, type Line, type Point } from "../perspective";
@@ -20,6 +21,7 @@ import { assessCardQuadGeometry, quadFromLines } from "../perspective";
 import OpenCvCardTest from "./OpenCvCardTest";
 import BatchReviewV2 from "./BatchReviewV2";
 import type { LightCardDetectionPayload } from "./LightCardDetectorTest";
+import TipModal, { type TipKind } from "./TipModal";
 
 const MIN_CARD_CALIBRATION_CONFIDENCE = 90;
 const HIGH_CARD_CALIBRATION_CONFIDENCE = 92;
@@ -84,6 +86,20 @@ export default function AppV2() {
   // com permissao/ciclo da camera. Toque 5 vezes no simbolo da marca.
   const [debugMode, setDebugMode] = useState(false);
   const debugTapRef = useRef({ count: 0, lastTap: 0 });
+  // Tela inicial: 7 toques no "O" do ARO ligam/desligam o modo desenvolvedor.
+  const logoTapRef = useRef({ count: 0, lastTap: 0 });
+  const handleLogoSecretTap = () => {
+    const now = Date.now();
+    const current = logoTapRef.current;
+    if (now - current.lastTap > 1800) current.count = 0;
+    current.lastTap = now;
+    current.count += 1;
+    if (current.count >= 7) {
+      current.count = 0;
+      setDebugMode((value) => !value);
+      try { navigator.vibrate?.(60); } catch { /* sem vibração */ }
+    }
+  };
   const measureRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<DragTarget>(null);
   const dragStartRef = useRef({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0 });
@@ -127,6 +143,10 @@ export default function AppV2() {
   const photoPixelsRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null);
   const [photoPixelsReady, setPhotoPixelsReady] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
+  // Avisos de orientação (só visual). Cartão e dedo aparecem 1x por sessão.
+  const [tipKind, setTipKind] = useState<TipKind | null>(null);
+  const pendingSharpStartRef = useRef(false);
+  const shownTipsRef = useRef<Set<TipKind>>(new Set());
   const [photo, setPhoto] = useState("");
   const [phase, setPhase] = useState<MeasurePhase>("card");
   const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(null);
@@ -152,6 +172,10 @@ export default function AppV2() {
   const [rightLine, setRightLine] = useState(38);
   const [measureY, setMeasureY] = useState(60);
   const [ringGuideY, setRingGuideY] = useState(60);
+  // LINHAS MANUAIS (pedido do Tiago, 16/10/2026): a medida usa exatamente
+  // onde o usuario solta as linhas do cartao e do dedo, sem snap nas bordas.
+  // No modo privado da para desligar e comparar com o modo automatico.
+  const [manualLines, setManualLines] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -306,6 +330,100 @@ export default function AppV2() {
   // A deteccao ao vivo do cartao continua apenas como guia visual.
   // A captura acontece somente quando o usuario toca no botao da camera.
 
+  // TESTE (link de teste): foto pela CÂMERA DO PRÓPRIO CELULAR via
+  // <input capture>. A foto entra no mesmo fluxo de medição (recorte 3:4 em
+  // 900×1200, igual ao quadro do vídeo), com rotação automática.
+  const phoneCameraModeRef = useRef(false);
+  // Botão de TESTE: câmera do app com a moldura + foto nítida da câmera do
+  // celular no disparo. O botão normal continua com o quadro do vídeo.
+  const sharpStillModeRef = useRef(false);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
+  type NativeSource = HTMLImageElement | HTMLCanvasElement;
+  const sourceWidth = (src: NativeSource) => (src instanceof HTMLImageElement ? src.naturalWidth : src.width);
+  const sourceHeight = (src: NativeSource) => (src instanceof HTMLImageElement ? src.naturalHeight : src.height);
+  const rotateSource = (src: NativeSource, rotation: Rotation): NativeSource => {
+    if (rotation === 0) return src;
+    const w = sourceWidth(src), h = sourceHeight(src);
+    const swap = rotation === 90 || rotation === 270;
+    const c = document.createElement("canvas");
+    c.width = swap ? h : w;
+    c.height = swap ? w : h;
+    const ctx = c.getContext("2d");
+    if (!ctx) return src;
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.drawImage(src, -w / 2, -h / 2);
+    return c;
+  };
+  // Celular apontado para a mesa às vezes salva a foto deitada: deixa o
+  // cartão deitado em cima e os dedos para baixo.
+  const autoRotation = (src: NativeSource): Rotation => {
+    try {
+      const w0 = sourceWidth(src), h0 = sourceHeight(src);
+      const k = 320 / Math.max(w0, h0);
+      const w = Math.max(8, Math.round(w0 * k)), h = Math.max(8, Math.round(h0 * k));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return 0;
+      ctx.drawImage(src, 0, 0, w, h);
+      const d = ctx.getImageData(0, 0, w, h).data;
+      const ch = [0, 1, 2].map((k2) => {
+        const a = new Float32Array(w * h);
+        for (let i = 0; i < w * h; i++) a[i] = d[i * 4 + k2];
+        return a;
+      });
+      return chooseRotation(estimateOrientation(ch, w, h));
+    } catch {
+      return 0;
+    }
+  };
+  const [nativeLoading, setNativeLoading] = useState(false);
+  useEffect(() => {
+    if (stage !== "review" || measurementMode !== "finger" || diameterPhotoTestMode || !photo) return;
+    if (phase === "card" && !analyzingCard && !shownTipsRef.current.has("card")) {
+      shownTipsRef.current.add("card");
+      setTipKind("card");
+    } else if (phase === "finger" && pixelsPerMm && !shownTipsRef.current.has("finger")) {
+      shownTipsRef.current.add("finger");
+      setTipKind("finger");
+    }
+  }, [stage, phase, photo, analyzingCard, pixelsPerMm, measurementMode, diameterPhotoTestMode]);
+
+  const startFingerMeasurement = (sharpStill: boolean) => {
+    phoneCameraModeRef.current = false;
+    sharpStillModeRef.current = sharpStill;
+    resetMeasurementSession();
+    setSinglePhotoTestMode(true);
+    setDiameterPhotoTestMode(false);
+    setMeasurementMode("finger");
+    setFingerCardCalibrationStep("measurement");
+    setReferenceCardLengthPx(null);
+    setReferenceCardWidthPercent(null);
+    setReferenceCardAngleDeg(null);
+    setMeasurementCardLengthPx(null);
+    setPerspectiveMismatchPercent(null);
+    void openCamera();
+  };
+
+  const handlePhoneFile = async (file: File | undefined) => {
+    if (!file) return;
+    setNativeLoading(true);
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      await capture(rotateSource(img, autoRotation(img)));
+    } catch {
+      camera.setError("Não consegui abrir a foto. Tente tirar novamente.");
+      setStage("intro");
+    } finally {
+      URL.revokeObjectURL(url);
+      setNativeLoading(false);
+    }
+  };
+
   const openCamera = async () => {
     if(VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION){
       void deviceQuality.requestPermission();
@@ -332,6 +450,13 @@ export default function AppV2() {
     setLiveOpticalCenterOffsetPx(null);
     setLiveCardFingerOffsetPx(null);
     setLiveOpticalCenterConfidence(0);
+    if (phoneCameraModeRef.current) {
+      // Abre a câmera do celular ainda dentro do toque do usuário.
+      setStage("intro");
+      if (phoneInputRef.current) phoneInputRef.current.value = "";
+      phoneInputRef.current?.click();
+      return;
+    }
     setStage("camera");
     await camera.startCameraStream();
   };
@@ -341,12 +466,93 @@ export default function AppV2() {
     await camera.startCameraStream();
   };
 
-  const capture = async () => {
+  // TESTE (link de teste): FOTO NÍTIDA. Com a moldura na tela (câmera do
+  // app), o disparo tira uma foto de verdade pela câmera do celular
+  // (ImageCapture.takePhoto, resolução total) em vez de copiar o quadro do
+  // vídeo de 1280×720. A foto é recortada para o MESMO enquadramento do vídeo,
+  // então a moldura do cartão continua valendo. Se o aparelho não suportar,
+  // usa o quadro do vídeo como antes.
+  const [captureSourceLabel, setCaptureSourceLabel] = useState<string | null>(null);
+  const takeSharpStill = async (): Promise<NativeSource | null> => {
+    const video = camera.videoRef.current;
+    const stream = video?.srcObject as MediaStream | null | undefined;
+    const track = stream?.getVideoTracks?.()[0];
+    const ImageCaptureCtor = (window as unknown as { ImageCapture?: new (t: MediaStreamTrack) => { takePhoto: (s?: Record<string, unknown>) => Promise<Blob> } }).ImageCapture;
+    if (!video || !video.videoWidth || !track || track.readyState !== "live" || !ImageCaptureCtor) return null;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    let url: string | null = null;
+    try {
+      const imageCapture = new ImageCaptureCtor(track);
+      const blob = await Promise.race([
+        imageCapture.takePhoto({ fillLightMode: "off" }).catch(() => imageCapture.takePhoto()),
+        new Promise<Blob>((_, reject) => window.setTimeout(() => reject(new Error("timeout")), 5000)),
+      ]);
+      url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      let still: NativeSource = img;
+      // Mesma orientação do vídeo (retrato/paisagem).
+      if ((sourceWidth(still) > sourceHeight(still)) !== (vw > vh)) {
+        const guess = autoRotation(still);
+        still = rotateSource(still, guess === 90 || guess === 270 ? guess : 90);
+      }
+      const sw = sourceWidth(still), sh = sourceHeight(still);
+      if ((sw > sh) !== (vw > vh) || Math.min(sw, sh) < Math.min(vw, vh)) return null;
+      // Recorta a foto para o campo de visão do vídeo (lado maior inteiro).
+      const videoAspect = vw / vh;
+      let cropW: number, cropH: number;
+      if (vh >= vw) { cropH = sh; cropW = cropH * videoAspect; } else { cropW = sw; cropH = cropW / videoAspect; }
+      if (cropW > sw) { cropW = sw; cropH = cropW / videoAspect; }
+      if (cropH > sh) { cropH = sh; cropW = cropH * videoAspect; }
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(cropW);
+      canvas.height = Math.round(cropH);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(still, (sw - cropW) / 2, (sh - cropH) / 2, cropW, cropH, 0, 0, canvas.width, canvas.height);
+      setCaptureSourceLabel(`foto nítida da câmera ${sw}×${sh} (vídeo ${vw}×${vh})`);
+      return canvas;
+    } catch {
+      return null;
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
+  };
+
+  const capture = async (source?: NativeSource) => {
+    if (!source && !sharpStillModeRef.current) {
+      const v = camera.videoRef.current;
+      setCaptureSourceLabel(v?.videoWidth ? `quadro do vídeo ${v.videoWidth}×${v.videoHeight}` : null);
+    }
+    if (!source && sharpStillModeRef.current && camera.videoRef.current?.videoWidth) {
+      // Mesmas checagens de estabilidade da captura normal, antes da foto.
+      if (
+        VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
+        deviceQuality.stabilityScore !== null &&
+        deviceQuality.stabilityScore < 75
+      ) {
+        return captureFrame();
+      }
+      setNativeLoading(true);
+      let still: NativeSource | null = null;
+      try { still = await takeSharpStill(); } finally { setNativeLoading(false); }
+      if (still) return captureFrame(still, true);
+      const v = camera.videoRef.current;
+      setCaptureSourceLabel(v ? `quadro do vídeo ${v.videoWidth}×${v.videoHeight}` : null);
+      return captureFrame();
+    }
+    if (source) setCaptureSourceLabel(`câmera do celular ${sourceWidth(source)}×${sourceHeight(source)}`);
+    return captureFrame(source);
+  };
+
+  const captureFrame = async (source?: NativeSource, liveStill = false) => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
     if(
+      (!source || liveStill) &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 65
@@ -355,6 +561,7 @@ export default function AppV2() {
       return;
     }
     if(
+      (!source || liveStill) &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 75
@@ -370,26 +577,33 @@ export default function AppV2() {
     };
     setCaptureDeviceQuality(frozenDeviceQuality);
 
-    const video = camera.videoRef.current;
-    if (!video?.videoWidth) {
+    const video = camera.videoRef.current as HTMLVideoElement;
+    const frameSource: HTMLVideoElement | NativeSource | null = source ?? (video?.videoWidth ? video : null);
+    if (!frameSource) {
       return;
     }
+    const srcW = source ? sourceWidth(source) : video.videoWidth;
+    const srcH = source ? sourceHeight(source) : video.videoHeight;
 
     const drawCurrentFrame = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 900;
       canvas.height = 1200;
       const targetRatio = canvas.width / canvas.height;
-      const sourceRatio = video.videoWidth / video.videoHeight;
-      let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+      const sourceRatio = srcW / srcH;
+      let sx = 0, sy = 0, sw = srcW, sh = srcH;
       if (sourceRatio > targetRatio) {
-        sw = video.videoHeight * targetRatio;
-        sx = (video.videoWidth - sw) / 2;
+        sw = srcH * targetRatio;
+        sx = (srcW - sw) / 2;
       } else {
-        sh = video.videoWidth / targetRatio;
-        sy = (video.videoHeight - sh) / 2;
+        sh = srcW / targetRatio;
+        sy = (srcH - sh) / 2;
       }
-      canvas.getContext("2d")?.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        if (source) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; }
+        ctx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      }
       return canvas;
     };
 
@@ -444,6 +658,7 @@ export default function AppV2() {
     };
 
     const useBurst =
+      !source &&
       singlePhotoTestMode &&
       measurementMode==="finger" &&
       !diameterPhotoTestMode;
@@ -1887,7 +2102,12 @@ export default function AppV2() {
       const match=/^card-line-(top|right|bottom|left)/.exec(target);
       if(match){
         const edge=match[1] as CardEdge;
-        snapCardLine(edge);
+        if(manualLines){
+          // Sem snap: a linha fica e vale exatamente onde foi solta.
+          setCardLineLocked((current)=>({...current,[edge]:true}));
+        }else{
+          snapCardLine(edge);
+        }
       }
     }
     draggingRef.current=null;
@@ -1898,7 +2118,7 @@ export default function AppV2() {
     setFingerLoupe(null);
   };
 
-  const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10) => {
+  const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10, manualOnly = false) => {
     const stage=measureRef.current;
     const source=photoPixelsRef.current;
     if(!stage||!source||!leftLocked||!rightLocked) return null;
@@ -2087,6 +2307,52 @@ export default function AppV2() {
       Math.abs(value-guideYPercent)<Math.abs(yPercents[bestIndex]-guideYPercent)?index:bestIndex
     ,0);
 
+    const pairs:EdgePair[]=[];
+
+    if(manualOnly){
+      // Modo manual: cada corte usa a posicao exata das linhas arrastadas.
+      // Nenhuma busca de borda na imagem.
+      for(const yPercent of yPercents){
+        const y=toImageY(yPercent);
+        if(y<6||y>=source.height-6) continue;
+        const lx=toImageX(lineXAtScreenY(fingerLines.left,yPercent));
+        const rx=toImageX(lineXAtScreenY(fingerLines.right,yPercent));
+        if(!(rx>lx)) return null;
+        pairs.push({
+          left:{x:lx,y,yPercent,score:40},
+          right:{x:rx,y,yPercent,score:40},
+        });
+      }
+      if(pairs.length<35) return null;
+      // As linhas manuais sao verticais, mas o dedo pode estar inclinado na
+      // foto. A largura certa e PERPENDICULAR ao dedo: horizontal x cos(angulo).
+      // O angulo vem do rastreamento automatico do contorno na mesma foto
+      // (so a direcao do dedo; as bordas continuam sendo as suas linhas).
+      const auto=fingerBandSamplesPx(guideYPercent,Math.max(6,scanHalfSpan),false);
+      const autoAngles=(auto??[]).map(sample=>sample.axisAngleDeg).filter(Number.isFinite).sort((a,b)=>a-b);
+      const axisAngleDeg=auto && auto.length>=35 && autoAngles.length
+        ? clamp(autoAngles[Math.floor(autoAngles.length/2)],-15,15)
+        : 0;
+      const cosAxis=Math.cos(axisAngleDeg*Math.PI/180);
+      return pairs.map(pair=>{
+        const horizontalWidth=pair.right.x-pair.left.x;
+        return {
+          left:pair.left.x,
+          right:pair.right.x,
+          y:pair.left.y,
+          rightY:pair.right.y,
+          width:horizontalWidth*cosAxis,
+          horizontalWidth,
+          axisAngleDeg,
+          yPercent:pair.left.yPercent,
+          rightYPercent:pair.right.yPercent,
+          leftPercent:toScreenXPercent(pair.left.x),
+          rightPercent:toScreenXPercent(pair.right.x),
+          confidence:auto && auto.length>=35 ? 90 : 70,
+        };
+      });
+    }else{
+
     let seedIndex=-1;
     let seed:EdgePair|null=null;
     const seedOrder:number[]=[centerIndex];
@@ -2110,7 +2376,7 @@ export default function AppV2() {
     }
     if(seedIndex<0||!seed) return null;
 
-    const pairs:EdgePair[]=[seed];
+    pairs.push(seed);
 
     const traceDirection=(step:-1|1)=>{
       let previousLeft=seed!.left.x;
@@ -2162,6 +2428,7 @@ export default function AppV2() {
 
     traceDirection(-1);
     traceDirection(1);
+    }
 
     pairs.sort((a,b)=>a.left.yPercent-b.left.yPercent);
     const leftPoints=pairs.map(pair=>pair.left);
@@ -2594,7 +2861,7 @@ export default function AppV2() {
     // oficial deve ser medida SOMENTE perto dela. Não varremos mais +/-10%,
     // porque a parte inferior do dedo é naturalmente mais larga e podia
     // puxar o resultado para cima.
-    const samples=fingerBandSamplesPx(anatomicalGuideY,2.5);
+    const samples=fingerBandSamplesPx(anatomicalGuideY,2.5,manualLines);
     if(!samples || samples.length<35) return empty;
 
     const baseMmPerPx=1/pixelsPerMm;
@@ -2735,7 +3002,10 @@ export default function AppV2() {
     handLandmarkAnalysis?.measuredFinger?.confidence,
     contourAnatomy?.detected,contourAnatomy?.ringRegionY,
     anatomicalRegionFusion.active,anatomicalRegionFusion.medianOffsetY,
-    photoPixelsReady
+    photoPixelsReady,
+    // fingerLines so entra no modo manual, para o modo automatico continuar
+    // recalculando exatamente como na versao congelada.
+    manualLines, manualLines ? fingerLines : null,
   ]);
 
   const liveWidthMm = widthAnalysis.newMm;
@@ -3929,20 +4199,20 @@ export default function AppV2() {
         ? "Coloque o cartão sobre o dedo, enquadre na moldura e tire a foto."
         : guidedStep === 2
           ? "Arraste cada linha verde até a borda do dedo, na altura onde o anel vai ficar. Use o zoom (+) para mais precisão."
-          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
+          : "Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : singlePhotoTestMode
     ? (guidedStep === 1
         ? "Fotografe o cartão sobre o dedo. O detector aplica automaticamente as 3 linhas e calibra os 85,60 mm antes de abrir a medição."
         : guidedStep === 2
           ? "As linhas verdes partem automaticamente da base calibrada do cartão. A linha amarela encontra a região anatômica do anel e os 50 refinamentos ficam concentrados nessa mesma altura."
-          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.")
+          : "Exato = aro calculado. Conforto = um aro acima para maior folga.")
     : guidedStep === 1
       ? "Ajuste as duas laterais e a linha da base do cartão. A largura na base representa 85,60 mm."
       : guidedStep === 2
         ? "Coloque o cartão sobre o dedo e ajuste novamente as duas laterais e a base. A foto 2 define a escala final da medição."
         : guidedStep === 3
           ? "Posicione a linha amarela na altura do anel e use as linhas verdes como guia aproximada. O sistema faz 50 refinamentos automáticos perto dessas linhas e calcula pela região mais larga estável."
-          : "Justo = um aro abaixo do calculado. Exato = aro calculado. Conforto = um aro acima para maior folga.";
+          : "Exato = aro calculado. Conforto = um aro acima para maior folga.";
 
   const historicalFingerTests = [
     { ring:17, mm:19.09 },
@@ -4006,7 +4276,31 @@ export default function AppV2() {
 
   return (
     <main className="app">
-      <header className="brand">
+      {tipKind && (
+        <TipModal
+          kind={tipKind}
+          onConfirm={() => {
+            const kind = tipKind;
+            setTipKind(null);
+            if (kind === "photo") startFingerMeasurement(pendingSharpStartRef.current);
+          }}
+          onClose={() => setTipKind(null)}
+        />
+      )}
+      <input
+        ref={phoneInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{display:"none"}}
+        onChange={(event) => { void handlePhoneFile(event.target.files?.[0]); }}
+      />
+      {nativeLoading && (
+        <div style={{position:"fixed",inset:0,zIndex:300,display:"grid",placeItems:"center",background:"rgba(10,9,8,.9)",color:"#f3e5ab",fontWeight:700,fontSize:18}}>
+          Carregando foto…
+        </div>
+      )}
+      {stage !== "intro" && <header className="brand">
         <button
           type="button"
           className="mark"
@@ -4028,26 +4322,26 @@ export default function AppV2() {
           <strong>Medidor de Anel</strong>
           <small>{debugMode ? "Modo de teste privado ativo" : "Paquímetro digital"}</small>
         </div>
-      </header>
+      </header>}
 
       {stage === "intro" && (
         <>
           <FrozenIntroScreen
             error={camera.error}
-            onMeasureFinger={() => {
-              resetMeasurementSession();
-              setSinglePhotoTestMode(true);
-              setDiameterPhotoTestMode(false);
-              setMeasurementMode("finger");
-              setFingerCardCalibrationStep("measurement");
-              setReferenceCardLengthPx(null);
-              setReferenceCardWidthPercent(null);
-              setReferenceCardAngleDeg(null);
-              setMeasurementCardLengthPx(null);
-              setPerspectiveMismatchPercent(null);
-              void openCamera();
-            }}
+            onMeasureFinger={() => { pendingSharpStartRef.current = false; setTipKind("photo"); }}
+            onSecretTap={handleLogoSecretTap}
+            developerMode={debugMode}
           />
+          {debugMode && (
+            <button
+              className="secondary"
+              type="button"
+              style={{width:"100%",marginTop:12}}
+              onClick={() => { pendingSharpStartRef.current = true; setTipKind("photo"); }}
+            >
+              TESTE: câmera do celular com moldura (foto nítida)
+            </button>
+          )}
           {debugMode && (
             <section className="panel" style={{marginTop:12}}>
               <span className="step">TESTE PRIVADO</span>
@@ -4242,9 +4536,9 @@ export default function AppV2() {
                       boxShadow:"0 10px 36px rgba(0,0,0,.65)",
                       backgroundImage:`url("${photo}")`,
                       backgroundRepeat:"no-repeat",
-                      backgroundSize:"600% 600%",
-                       // Center the actual image pixel within the 6x magnifier.
-                       backgroundPosition:`${(6*fingerLoupe.imageX/100-0.5)/5*100}% ${(6*fingerLoupe.imageY/100-0.5)/5*100}%`,
+                      backgroundSize:"1000% 1000%",
+                       // Centraliza o pixel real da foto na lupa de 10x.
+                       backgroundPosition:`${(10*fingerLoupe.imageX/100-0.5)/9*100}% ${(10*fingerLoupe.imageY/100-0.5)/9*100}%`,
                       zIndex:12,
                       pointerEvents:"none",
                     }}
@@ -4279,7 +4573,7 @@ export default function AppV2() {
                       fontSize:"10px",
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                    }}>BORDA DA LINHA · 6×</span>
+                    }}>BORDA DA LINHA · 10×</span>
                   </div>
                 )}
                 {debugMode && fingerMagnetSamples && (
@@ -4488,7 +4782,6 @@ export default function AppV2() {
             )}
             {debugMode && phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && !tryOn && (
               <div className="ring-size-badge" style={{ left: `${visualBandCenter}%` }} aria-live="polite">
-                <span>JUSTO: {clamp(commercialRingSize - 1, 1, 40)}</span>
                 <span>NÚMERO EXATO:</span>
                 <strong>{commercialRingSize}</strong>
                 <small>Conforto: {clamp(commercialRingSize + 1, 1, 40)} · recomendado com folga</small>
@@ -4622,17 +4915,21 @@ export default function AppV2() {
           )}
           {debugMode && phase === "finger" && result && commercialRingSize!==null && leftLocked && rightLocked && (
             <div className="analysis-result commercial-result">
-              <span><strong>Número justo: {clamp(commercialRingSize - 1, 1, 40)}</strong></span>
               <strong>Número exato: {commercialRingSize}</strong>
               <span><strong>Número de conforto: {clamp(commercialRingSize + 1, 1, 40)}</strong></span>
-              <small>Justo = um aro abaixo · Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
+              <small>Exato = aro calculado · Conforto = um aro acima para maior folga.</small>
             </div>
           )}
           {debugMode && phase === "finger" && leftLocked && rightLocked && (
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
+              <span>Origem da foto: {captureSourceLabel ?? "n/d"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
+              <span>Linhas: {manualLines ? "MANUAIS (vale onde você soltou, sem snap)" : "AUTOMÁTICAS (snap nas bordas)"}</span>
+              <button className="secondary" type="button" onClick={() => setManualLines((value) => !value)}>
+                {manualLines ? "Comparar com modo automático (snap)" : "Voltar para linhas manuais"}
+              </button>
               {measurementAudit && (
                 <>
                   <span>Modo híbrido: linhas manuais + 50 refinamentos automáticos</span>
@@ -4965,9 +5262,9 @@ export default function AppV2() {
                   <strong className="result-screen-number">{commercialRingSize}</strong>
                   <div className="result-screen-divider" aria-hidden="true"><span /><b>◇</b><span /></div>
                   <p className="result-screen-options">
-                    Justo <em>{clamp(commercialRingSize - 1, 1, 40)}</em> · Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
+                    Exato <em>{commercialRingSize}</em> · Conforto <em>{clamp(commercialRingSize + 1, 1, 40)}</em>
                   </p>
-                  <p className="result-screen-hint">Na dúvida entre dois números, prefira o de conforto para anéis largos ou para usar o dia todo.</p>
+                  <p className="result-screen-hint">Prefira o de conforto para anéis largos ou para usar o dia todo.</p>
                 </div>
               ) : (
                 <div className="result-screen-body">

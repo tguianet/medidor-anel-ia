@@ -2,7 +2,7 @@
 // Estratégia: rede primeiro (sempre pega a versão mais nova quando há internet)
 // e usa o cache só quando estiver sem conexão. Assim uma atualização publicada
 // chega ao app instalado sem ficar presa numa versão antiga.
-const CACHE = "medidor-anel-v1";
+const CACHE = "medidor-anel-v2";
 const SHELL = ["/v2", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -24,8 +24,10 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // fontes, CDNs: direto da rede
   if (url.pathname.startsWith("/.netlify/")) return; // funções: nunca cachear
+  // Página (HTML): sempre revalida no servidor, para nunca abrir versão velha.
+  const fresh = req.mode === "navigate" ? fetch(req, { cache: "no-cache" }) : fetch(req);
   event.respondWith(
-    fetch(req)
+    fresh
       .then((res) => {
         if (res && res.ok && res.type === "basic") {
           const copy = res.clone();
