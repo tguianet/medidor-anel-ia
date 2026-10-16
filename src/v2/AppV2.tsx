@@ -432,13 +432,89 @@ export default function AppV2() {
     await camera.startCameraStream();
   };
 
+  // TESTE (link de teste): FOTO NÍTIDA. Com a moldura na tela (câmera do
+  // app), o disparo tira uma foto de verdade pela câmera do celular
+  // (ImageCapture.takePhoto, resolução total) em vez de copiar o quadro do
+  // vídeo de 1280×720. A foto é recortada para o MESMO enquadramento do vídeo,
+  // então a moldura do cartão continua valendo. Se o aparelho não suportar,
+  // usa o quadro do vídeo como antes.
+  const [captureSourceLabel, setCaptureSourceLabel] = useState<string | null>(null);
+  const takeSharpStill = async (): Promise<NativeSource | null> => {
+    const video = camera.videoRef.current;
+    const stream = video?.srcObject as MediaStream | null | undefined;
+    const track = stream?.getVideoTracks?.()[0];
+    const ImageCaptureCtor = (window as unknown as { ImageCapture?: new (t: MediaStreamTrack) => { takePhoto: (s?: Record<string, unknown>) => Promise<Blob> } }).ImageCapture;
+    if (!video || !video.videoWidth || !track || track.readyState !== "live" || !ImageCaptureCtor) return null;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    let url: string | null = null;
+    try {
+      const imageCapture = new ImageCaptureCtor(track);
+      const blob = await Promise.race([
+        imageCapture.takePhoto({ fillLightMode: "off" }).catch(() => imageCapture.takePhoto()),
+        new Promise<Blob>((_, reject) => window.setTimeout(() => reject(new Error("timeout")), 5000)),
+      ]);
+      url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      let still: NativeSource = img;
+      // Mesma orientação do vídeo (retrato/paisagem).
+      if ((sourceWidth(still) > sourceHeight(still)) !== (vw > vh)) {
+        const guess = autoRotation(still);
+        still = rotateSource(still, guess === 90 || guess === 270 ? guess : 90);
+      }
+      const sw = sourceWidth(still), sh = sourceHeight(still);
+      if ((sw > sh) !== (vw > vh) || Math.min(sw, sh) < Math.min(vw, vh)) return null;
+      // Recorta a foto para o campo de visão do vídeo (lado maior inteiro).
+      const videoAspect = vw / vh;
+      let cropW: number, cropH: number;
+      if (vh >= vw) { cropH = sh; cropW = cropH * videoAspect; } else { cropW = sw; cropH = cropW / videoAspect; }
+      if (cropW > sw) { cropW = sw; cropH = cropW / videoAspect; }
+      if (cropH > sh) { cropH = sh; cropW = cropH * videoAspect; }
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(cropW);
+      canvas.height = Math.round(cropH);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(still, (sw - cropW) / 2, (sh - cropH) / 2, cropW, cropH, 0, 0, canvas.width, canvas.height);
+      setCaptureSourceLabel(`foto nítida da câmera ${sw}×${sh} (vídeo ${vw}×${vh})`);
+      return canvas;
+    } catch {
+      return null;
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
+  };
+
   const capture = async (source?: NativeSource) => {
+    if (!source && camera.videoRef.current?.videoWidth) {
+      // Mesmas checagens de estabilidade da captura normal, antes da foto.
+      if (
+        VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
+        deviceQuality.stabilityScore !== null &&
+        deviceQuality.stabilityScore < 75
+      ) {
+        return captureFrame();
+      }
+      setNativeLoading(true);
+      let still: NativeSource | null = null;
+      try { still = await takeSharpStill(); } finally { setNativeLoading(false); }
+      if (still) return captureFrame(still, true);
+      const v = camera.videoRef.current;
+      setCaptureSourceLabel(v ? `quadro do vídeo ${v.videoWidth}×${v.videoHeight}` : null);
+      return captureFrame();
+    }
+    if (source) setCaptureSourceLabel(`câmera do celular ${sourceWidth(source)}×${sourceHeight(source)}`);
+    return captureFrame(source);
+  };
+
+  const captureFrame = async (source?: NativeSource, liveStill = false) => {
     // Modo comercial de 1 foto: nao exigimos mais que pitch, roll,
     // dedo e centro optico fiquem perfeitos no mesmo instante.
     // Um toque dispara uma rajada curta e o sistema escolhe o melhor quadro.
 
     if(
-      !source &&
+      (!source || liveStill) &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 65
@@ -447,7 +523,7 @@ export default function AppV2() {
       return;
     }
     if(
-      !source &&
+      (!source || liveStill) &&
       VISION_FEATURE_FLAGS.ENABLE_DEVICE_ORIENTATION &&
       deviceQuality.stabilityScore !== null &&
       deviceQuality.stabilityScore < 75
@@ -4769,6 +4845,7 @@ export default function AppV2() {
             <div className="analysis-result">
               <strong>DIAGNÓSTICO PRIVADO</strong>
               <span>Captura: {singlePhotoTestMode ? "1 foto (teste)" : "2 fotos"}</span>
+              <span>Origem da foto: {captureSourceLabel ?? "n/d"}</span>
               <span>Medida final: {(result?.widthMm ?? widthSentToFormulaMm ?? liveWidthMm)?.toFixed(2) ?? "n/d"} mm</span>
               <span>Linhas: {manualLines ? "MANUAIS (vale onde você soltou, sem snap)" : "AUTOMÁTICAS (snap nas bordas)"}</span>
               <button className="secondary" type="button" onClick={() => setManualLines((value) => !value)}>

@@ -108,9 +108,12 @@ export default function FrozenCameraScreen({
     devicePitch === null || deviceRoll === null
       ? true
       : Math.abs(devicePitch) <= 10 && Math.abs(deviceRoll) <= 6;
+  // TESTE: o disparo automático só acontece com a DISTÂNCIA ADEQUADA (verde),
+  // para todas as fotos saírem da mesma altura.
   const autoReady =
     singlePhotoTestMode &&
     cardReady &&
+    distanceAligned &&
     fingerAcceptable &&
     phoneAcceptable &&
     !cameraOpening;
@@ -364,8 +367,8 @@ export default function FrozenCameraScreen({
           </div>
         </div>
         <div className={`capture-standard-guide${cardReady ? " ready" : ""}`} aria-hidden="true">
-          <div className="live-card-frame">
-            <span>{cardReady ? "✓ ALINHADO — PODE CAPTURAR" : "ENCAIXE O CARTÃO"}</span>
+          <div className={`live-card-frame${distanceAligned ? " distance-ok" : cardScalePercent !== null ? " distance-off" : ""}`}>
+            <span>{cardReady && distanceAligned ? "✓ ALINHADO — PODE CAPTURAR" : cardScalePercent !== null && !distanceAligned ? distanceInstruction : "ENCAIXE O CARTÃO AQUI"}</span>
             <i className="card-guide-corner tl" />
             <i className="card-guide-corner tr" />
             <i className="card-guide-corner br" />
