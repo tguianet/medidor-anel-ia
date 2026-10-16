@@ -1,5 +1,22 @@
 /* OpenCV card detector runs entirely off the UI thread. */
-self.importScripts("https://docs.opencv.org/4.x/opencv.js");
+// Load on request so network errors are reported to the interface instead of hanging at worker startup.
+let loadPromise=null;
+const loadCv=()=>loadPromise ??= (async()=>{
+  const urls=[
+    "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
+    "https://docs.opencv.org/4.x/opencv.js",
+  ];
+  let last=null;
+  for(const url of urls){
+    try{
+      self.postMessage({type:"status",message:"Carregando OpenCV..."});
+      self.importScripts(url);
+      const cv=await waitForCv();
+      return cv;
+    }catch(e){last=e;}
+  }
+  throw new Error("Falha ao carregar OpenCV. Confira a conexao de internet. "+String(last?.message||""));
+})();
 
 const CARD_RATIO=85.6/53.98;
 
@@ -18,7 +35,7 @@ const orderCorners=(points)=>{
 
 const waitForCv=async()=>{
   const started=Date.now();
-  while(Date.now()-started<20000){
+  while(Date.now()-started<7000){
     if(self.cv?.Mat) return self.cv;
     if(self.cv && typeof self.cv.then==="function"){
       const ready=await self.cv;
