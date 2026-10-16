@@ -169,8 +169,6 @@ export default function AppV2() {
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
   const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number}|null>(null);
-  // TESTE: lupa também nas laterais do cartão (coordenadas da foto, 0-100).
-  const [cardLoupe, setCardLoupe] = useState<{edge:"left"|"right";imageX:number;imageY:number}|null>(null);
   const loupeTimerRef = useRef<number | null>(null);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
@@ -1535,14 +1533,9 @@ export default function AppV2() {
   const scheduleLoupeHide = () => {
     if(loupeTimerRef.current!==null) window.clearTimeout(loupeTimerRef.current);
     loupeTimerRef.current=window.setTimeout(()=>{
-      setCardLoupe(null);
       setFingerLoupe(null);
       loupeTimerRef.current=null;
     },1600);
-  };
-  const showCardLoupe = (edge:"left"|"right", line:Line, imageY:number, autoHide:boolean) => {
-    setCardLoupe({edge,imageX:clamp(lineXAtImageY(line,imageY),0,100),imageY:clamp(imageY,0,100)});
-    if(autoHide) scheduleLoupeHide();
   };
   const cardLoupeY = () => {
     const l=cardLines.left, r=cardLines.right;
@@ -1568,7 +1561,6 @@ export default function AppV2() {
     setCardLineLocked((current)=>({...current,[edge]:true}));
     setSelectedCardLine(edge);
     setPerspectiveReady(false);
-    showCardLoupe(edge,next,cardLoupeY(),true);
   };
   const nudgeFingerLine = (side:"left"|"right", direction:-1|1) => {
     const stage=measureRef.current;
@@ -1642,25 +1634,18 @@ export default function AppV2() {
           delete next[edge];
           return next;
         });
-        let nextLine:Line|null=null;
         if(endpoint){
-          nextLine={...cardLines[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}};
           setCardLines((current)=>({...current,[edge]:{...current[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}}}));
         } else {
           const start=cardLineDragStartRef.current;
           if(start){
             const dx=imageX-start.pointer.x, dy=imageY-start.pointer.y;
-            nextLine={
-              a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
-              b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
-            };
             setCardLines((current)=>({...current,[edge]:{
               a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
               b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
             }}));
           }
         }
-        if(nextLine && (edge==="left"||edge==="right")) showCardLoupe(edge,nextLine,clamp(imageY,1,99),false);
         return;
       }
     }
@@ -2168,7 +2153,6 @@ export default function AppV2() {
     cardLineDragStartRef.current=null;
     cardCornerDragRef.current=null;
     setFingerLoupe(null);
-    setCardLoupe(null);
   };
 
   const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10, manualOnly = false) => {
@@ -4528,32 +4512,6 @@ export default function AppV2() {
                 })}
               </svg>
             ) : null}
-            {phase === "card" && cardLoupe && photo && (
-              <div
-                aria-hidden="true"
-                style={{
-                  position:"absolute",
-                  left:cardLoupe.edge==="left" ? "72%" : "28%",
-                  top:"76%",
-                  width:"min(188px, 48vw)",
-                  height:"min(188px, 48vw)",
-                  transform:"translate(-50%,-50%)",
-                  borderRadius:"50%",
-                  overflow:"hidden",
-                  border:"3px solid #52e0a3",
-                  boxShadow:"0 10px 36px rgba(0,0,0,.65)",
-                  backgroundImage:`url("${photo}")`,
-                  backgroundRepeat:"no-repeat",
-                  backgroundSize:"600% 600%",
-                  backgroundPosition:`${(6*cardLoupe.imageX/100-0.5)/5*100}% ${(6*cardLoupe.imageY/100-0.5)/5*100}%`,
-                  zIndex:12,
-                  pointerEvents:"none",
-                }}
-              >
-                <span style={{position:"absolute",left:"50%",top:0,bottom:0,width:"1px",background:"#52e0a3",transform:"translateX(-50%)"}} />
-                <span style={{position:"absolute",left:"50%",bottom:"8px",transform:"translateX(-50%)",padding:"3px 7px",borderRadius:"999px",background:"rgba(0,0,0,.72)",color:"#fff",fontSize:"10px",fontWeight:700,whiteSpace:"nowrap"}}>BORDA DO CARTÃO · 6×</span>
-              </div>
-            )}
             {phase === "finger" && pixelsPerMm && (
               <>
                 {fingerLoupe && photo && (
@@ -4572,9 +4530,9 @@ export default function AppV2() {
                       boxShadow:"0 10px 36px rgba(0,0,0,.65)",
                       backgroundImage:`url("${photo}")`,
                       backgroundRepeat:"no-repeat",
-                      backgroundSize:"600% 600%",
-                       // Center the actual image pixel within the 6x magnifier.
-                       backgroundPosition:`${(6*fingerLoupe.imageX/100-0.5)/5*100}% ${(6*fingerLoupe.imageY/100-0.5)/5*100}%`,
+                      backgroundSize:"1000% 1000%",
+                       // Centraliza o pixel real da foto na lupa de 10x.
+                       backgroundPosition:`${(10*fingerLoupe.imageX/100-0.5)/9*100}% ${(10*fingerLoupe.imageY/100-0.5)/9*100}%`,
                       zIndex:12,
                       pointerEvents:"none",
                     }}
@@ -4609,7 +4567,7 @@ export default function AppV2() {
                       fontSize:"10px",
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                    }}>BORDA DA LINHA · 6×</span>
+                    }}>BORDA DA LINHA · 10×</span>
                   </div>
                 )}
                 {debugMode && fingerMagnetSamples && (
