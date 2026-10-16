@@ -169,6 +169,9 @@ export default function AppV2() {
   const [leftManualRefined, setLeftManualRefined] = useState(false);
   const [rightManualRefined, setRightManualRefined] = useState(false);
   const [fingerLoupe, setFingerLoupe] = useState<{side:"left"|"right";imageX:number;imageY:number}|null>(null);
+  // TESTE: lupa também nas laterais do cartão (coordenadas da foto, 0-100).
+  const [cardLoupe, setCardLoupe] = useState<{edge:"left"|"right";imageX:number;imageY:number}|null>(null);
+  const loupeTimerRef = useRef<number | null>(null);
   const fingerRefineDragRef = useRef<"left" | "right" | null>(null);
   const fingerLineDragStartRef = useRef<{ pointer: Point; line: Line } | null>(null);
   const [fingerLines, setFingerLines] = useState<Record<FingerSide, Line>>({
@@ -1522,6 +1525,78 @@ export default function AppV2() {
     setStage("hand-review");
   };
 
+  // ---------- TESTE: ajuste fino (0,1 mm por toque) + lupa ----------
+  const FINE_STEP_MM = 0.1;
+  const lineXAtImageY = (line:Line, y:number) => {
+    const dy=line.b.y-line.a.y;
+    if(Math.abs(dy)<1e-6) return (line.a.x+line.b.x)/2;
+    return line.a.x+(line.b.x-line.a.x)*(y-line.a.y)/dy;
+  };
+  const scheduleLoupeHide = () => {
+    if(loupeTimerRef.current!==null) window.clearTimeout(loupeTimerRef.current);
+    loupeTimerRef.current=window.setTimeout(()=>{
+      setCardLoupe(null);
+      setFingerLoupe(null);
+      loupeTimerRef.current=null;
+    },1600);
+  };
+  const showCardLoupe = (edge:"left"|"right", line:Line, imageY:number, autoHide:boolean) => {
+    setCardLoupe({edge,imageX:clamp(lineXAtImageY(line,imageY),0,100),imageY:clamp(imageY,0,100)});
+    if(autoHide) scheduleLoupeHide();
+  };
+  const cardLoupeY = () => {
+    const l=cardLines.left, r=cardLines.right;
+    return (l.a.y+l.b.y+r.a.y+r.b.y)/4;
+  };
+  const nudgeCardLine = (edge:"left"|"right", direction:-1|1) => {
+    const widthPct=Math.abs(lineXAtImageY(cardLines.right,cardLoupeY())-lineXAtImageY(cardLines.left,cardLoupeY()));
+    if(!(widthPct>0)) return;
+    // 0,1 mm em % da largura da foto, pela própria escala atual do cartão.
+    const step=direction*FINE_STEP_MM*widthPct/CARD_WIDTH_MM;
+    const line=cardLines[edge];
+    const next:Line={
+      a:{x:clamp(line.a.x+step,1,99),y:line.a.y},
+      b:{x:clamp(line.b.x+step,1,99),y:line.b.y},
+    };
+    setCardLines((current)=>({...current,[edge]:next}));
+    setCardSnapLines((current)=>{
+      if(!current[edge]) return current;
+      const copy={...current};
+      delete copy[edge];
+      return copy;
+    });
+    setCardLineLocked((current)=>({...current,[edge]:true}));
+    setSelectedCardLine(edge);
+    setPerspectiveReady(false);
+    showCardLoupe(edge,next,cardLoupeY(),true);
+  };
+  const nudgeFingerLine = (side:"left"|"right", direction:-1|1) => {
+    const stage=measureRef.current;
+    const source=photoPixelsRef.current;
+    if(!stage||!source||!pixelsPerMm) return;
+    const rect=stage.getBoundingClientRect();
+    // 0,1 mm -> pixels da foto -> % da tela (considerando o zoom).
+    const step=direction*FINE_STEP_MM*pixelsPerMm/source.width*100*zoom;
+    const shift=(line:Line):Line=>({a:{x:line.a.x+step,y:line.a.y},b:{x:line.b.x+step,y:line.b.y}});
+    let lineX:number;
+    if(side==="left"){
+      lineX=Math.min(leftLine+step,rightLine-0.5);
+      setLeftLine(lineX);
+      setLeftLocked(true);
+      setLeftManualRefined(true);
+    }else{
+      lineX=Math.max(rightLine+step,leftLine+0.5);
+      setRightLine(lineX);
+      setRightLocked(true);
+      setRightManualRefined(true);
+    }
+    setFingerLines((current)=>({...current,[side]:shift(current[side])}));
+    const lineImageX=((lineX/100*rect.width-rect.width/2-panX)/zoom+rect.width/2)/rect.width*100;
+    const guideImageY=((ringGuideY/100*rect.height-rect.height/2-panY)/zoom+rect.height/2)/rect.height*100;
+    setFingerLoupe({side,imageX:clamp(lineImageX,0,100),imageY:clamp(guideImageY,0,100)});
+    scheduleLoupeHide();
+  };
+
   const updateDrag = (clientX: number, clientY: number) => {
     if (!draggingRef.current || !measureRef.current) return;
     const rect = measureRef.current.getBoundingClientRect();
@@ -1567,18 +1642,25 @@ export default function AppV2() {
           delete next[edge];
           return next;
         });
+        let nextLine:Line|null=null;
         if(endpoint){
+          nextLine={...cardLines[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}};
           setCardLines((current)=>({...current,[edge]:{...current[edge],[endpoint]:{x:clamp(imageX,1,99),y:clamp(imageY,1,99)}}}));
         } else {
           const start=cardLineDragStartRef.current;
           if(start){
             const dx=imageX-start.pointer.x, dy=imageY-start.pointer.y;
+            nextLine={
+              a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
+              b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
+            };
             setCardLines((current)=>({...current,[edge]:{
               a:{x:clamp(start.line.a.x+dx,1,99),y:clamp(start.line.a.y+dy,1,99)},
               b:{x:clamp(start.line.b.x+dx,1,99),y:clamp(start.line.b.y+dy,1,99)},
             }}));
           }
         }
+        if(nextLine && (edge==="left"||edge==="right")) showCardLoupe(edge,nextLine,clamp(imageY,1,99),false);
         return;
       }
     }
@@ -2086,6 +2168,7 @@ export default function AppV2() {
     cardLineDragStartRef.current=null;
     cardCornerDragRef.current=null;
     setFingerLoupe(null);
+    setCardLoupe(null);
   };
 
   const fingerBandSamplesPx = (guideYPercent = ringGuideY, scanHalfSpan = 10, manualOnly = false) => {
@@ -4445,6 +4528,32 @@ export default function AppV2() {
                 })}
               </svg>
             ) : null}
+            {phase === "card" && cardLoupe && photo && (
+              <div
+                aria-hidden="true"
+                style={{
+                  position:"absolute",
+                  left:cardLoupe.edge==="left" ? "72%" : "28%",
+                  top:"76%",
+                  width:"min(188px, 48vw)",
+                  height:"min(188px, 48vw)",
+                  transform:"translate(-50%,-50%)",
+                  borderRadius:"50%",
+                  overflow:"hidden",
+                  border:"3px solid #52e0a3",
+                  boxShadow:"0 10px 36px rgba(0,0,0,.65)",
+                  backgroundImage:`url("${photo}")`,
+                  backgroundRepeat:"no-repeat",
+                  backgroundSize:"600% 600%",
+                  backgroundPosition:`${(6*cardLoupe.imageX/100-0.5)/5*100}% ${(6*cardLoupe.imageY/100-0.5)/5*100}%`,
+                  zIndex:12,
+                  pointerEvents:"none",
+                }}
+              >
+                <span style={{position:"absolute",left:"50%",top:0,bottom:0,width:"1px",background:"#52e0a3",transform:"translateX(-50%)"}} />
+                <span style={{position:"absolute",left:"50%",bottom:"8px",transform:"translateX(-50%)",padding:"3px 7px",borderRadius:"999px",background:"rgba(0,0,0,.72)",color:"#fff",fontSize:"10px",fontWeight:700,whiteSpace:"nowrap"}}>BORDA DO CARTÃO · 6×</span>
+              </div>
+            )}
             {phase === "finger" && pixelsPerMm && (
               <>
                 {fingerLoupe && photo && (
@@ -4763,6 +4872,19 @@ export default function AppV2() {
                   {cardLineLocked[edge] ? "✓" : "○"} {edge==="bottom"?"Base":edge==="left"?"Esquerda":"Direita"}
                 </span>)}
               </div>
+              <div className="fine-adjust" aria-label="Ajuste fino das laterais do cartão">
+                <span className="fine-adjust-title">Ajuste fino do cartão · 0,1 mm por toque</span>
+                {(["left","right"] as const).map((edge)=>(
+                  <div className="fine-adjust-row" key={edge}>
+                    <button type="button" onClick={()=>nudgeCardLine(edge,-1)} aria-label={`Mover lateral ${edge==="left"?"esquerda":"direita"} do cartão para a esquerda`}>◀</button>
+                    <strong>{edge==="left"?"Lateral esquerda":"Lateral direita"}</strong>
+                    <button type="button" onClick={()=>nudgeCardLine(edge,1)} aria-label={`Mover lateral ${edge==="left"?"esquerda":"direita"} do cartão para a direita`}>▶</button>
+                  </div>
+                ))}
+                {debugMode && cardReferencePreview && (
+                  <small>Cartão: {cardReferencePreview.lengthPx.toFixed(1)} px = 85,60 mm · {(1/cardReferencePreview.mmPerPx).toFixed(2)} px/mm</small>
+                )}
+              </div>
               {debugMode && <div className="card-base-status">
                 <strong>{singlePhotoTestMode
                   ? "Modo 1 foto — cartão sobre o dedo"
@@ -4812,6 +4934,22 @@ export default function AppV2() {
               <strong>{zoom.toFixed(1)}×</strong>
               <button onClick={() => changeZoom(zoom + 0.5)} disabled={zoom >= (phase === "card" ? 8 : 4)} aria-label="Aumentar zoom">+</button>
               <button className="zoom-reset" onClick={() => { setZoom(1); setPanX(0); setPanY(0); }}>Redefinir</button>
+            </div>
+          )}
+
+          {phase === "finger" && measurementMode === "finger" && pixelsPerMm && !tryOn && (
+            <div className="fine-adjust" aria-label="Ajuste fino das linhas do dedo">
+              <span className="fine-adjust-title">Ajuste fino do dedo · 0,1 mm por toque</span>
+              {(["left","right"] as const).map((side)=>(
+                <div className="fine-adjust-row" key={side}>
+                  <button type="button" onClick={()=>nudgeFingerLine(side,-1)} aria-label={`Mover linha ${side==="left"?"esquerda":"direita"} do dedo para a esquerda`}>◀</button>
+                  <strong>{side==="left"?"Borda esquerda":"Borda direita"}</strong>
+                  <button type="button" onClick={()=>nudgeFingerLine(side,1)} aria-label={`Mover linha ${side==="left"?"esquerda":"direita"} do dedo para a direita`}>▶</button>
+                </div>
+              ))}
+              {debugMode && (
+                <small className="fine-adjust-live">Largura do dedo agora: {liveWidthMm===null ? "ajuste as duas linhas" : liveWidthMm.toFixed(2).replace(".",",")+" mm"}</small>
+              )}
             </div>
           )}
 

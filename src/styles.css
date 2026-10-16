@@ -1232,3 +1232,13 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .home-install { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px; margin-top: 14px; border: 1px solid rgba(212,175,55,.4); border-radius: 999px; color: #e7c17c; background: transparent; font-size: 14px; font-weight: 600; cursor: pointer; }
 .home-install-ios { margin: 14px auto 0; max-width: 300px; color: #9e9a90; font-size: 12px; line-height: 1.55; text-align: center; }
 .home-install-ios strong { color: #e7c17c; }
+
+/* TESTE: ajuste fino 0,1 mm */
+.fine-adjust { display:grid; gap:8px; margin:12px 0; padding:12px; border:1px solid #3a2f1a; border-radius:14px; background:#15120c; }
+.fine-adjust-title { font-size:12px; font-weight:800; letter-spacing:.04em; color:#e8c978; text-transform:uppercase; }
+.fine-adjust-row { display:grid; grid-template-columns:52px minmax(0,1fr) 52px; align-items:center; gap:8px; }
+.fine-adjust-row strong { text-align:center; font-size:14px; color:#f3e5ab; }
+.fine-adjust-row button { height:46px; border-radius:12px; border:1px solid #c9a24a; background:#211a0e; color:#f3e5ab; font-size:18px; font-weight:800; touch-action:manipulation; }
+.fine-adjust-row button:active { background:#c9a24a; color:#171109; }
+.fine-adjust small { color:#cbb98a; font-size:12px; }
+.fine-adjust-live { font-size:14px !important; font-weight:800; color:#52e0a3 !important; }
