@@ -1254,3 +1254,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-size: clamp(31px, 7v
 .home-brand-secret { position: absolute; left: 30%; top: 62%; width: 16%; height: 27%; padding: 0; border: 0; border-radius: 50%; background: transparent; -webkit-tap-highlight-color: transparent; touch-action: manipulation; cursor: default; }
 .home-brand .home-cta { margin-top: 40px; }
 .home-dev-flag { margin: 16px 0 0; color: #52e0a3; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-align: center; text-transform: uppercase; }
+.tip-modal-subtitle { margin: -4px 0 12px; color: #d9d4cc; font-size: 14px; line-height: 1.4; }
+.tip-modal-side { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 12px; align-items: center; margin-top: 14px; padding: 12px; border: 1px solid #3a2f1a; border-radius: 16px; background: #15120c; }
+.tip-modal-side .tip-modal-compare { display: block; width: 100%; height: auto; border-radius: 10px; }
+.tip-modal-side .tip-modal-list { margin: 0; font-size: 12.5px; gap: 6px; }

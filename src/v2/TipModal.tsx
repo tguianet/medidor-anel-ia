@@ -20,21 +20,23 @@ const PhotoArt = () => (
 );
 
 const CardArt = () => (
-  <svg viewBox="0 0 320 170" role="img" aria-label="Linha do cartão certa encostada na borda e errada para dentro">
-    <rect x="0" y="0" width="320" height="170" rx="16" fill="#15120c" />
-    {/* errado */}
-    <g transform="translate(18 26)">
-      <rect x="22" y="0" width="110" height="106" rx="8" fill="#2f5fb3" />
-      <line x1="40" y1="-10" x2="40" y2="118" stroke="#ff6b5e" strokeWidth="3" />
-      <text x="70" y="132" textAnchor="middle" fill="#ff8f85" fontSize="12" fontWeight="800">✕ Para dentro</text>
-    </g>
-    {/* certo */}
-    <g transform="translate(168 26)">
-      <rect x="22" y="0" width="110" height="106" rx="8" fill="#2f5fb3" />
-      <line x1="22" y1="-10" x2="22" y2="118" stroke="#52e0a3" strokeWidth="3" />
-      <text x="70" y="132" textAnchor="middle" fill="#52e0a3" fontSize="12" fontWeight="800">✓ Na borda</text>
-    </g>
-  </svg>
+  <img
+    className="tip-modal-photo"
+    src="/tips/cartao-linhas.jpg"
+    width={918}
+    height={794}
+    alt="Foto do cartão sobre os dedos com as duas linhas verdes encostadas nas bordas laterais"
+  />
+);
+
+const CardCompareArt = () => (
+  <img
+    className="tip-modal-compare"
+    src="/tips/cartao-certo-errado.jpg"
+    width={402}
+    height={230}
+    alt="Linha vermelha para dentro do cartão (errado) e linha verde na borda (certo)"
+  />
 );
 
 const FingerArt = () => (
@@ -64,7 +66,7 @@ const FingerArt = () => (
   </svg>
 );
 
-const CONTENT: Record<TipKind, { step: string; title: string; art: typeof PhotoArt; items: string[]; note?: string; cta: string }> = {
+const CONTENT: Record<TipKind, { step: string; title: string; subtitle?: string; art: typeof PhotoArt; sideArt?: typeof PhotoArt; items: string[]; note?: string; cta: string }> = {
   photo: {
     step: "ANTES DA FOTO",
     title: "Como tirar a foto certa",
@@ -79,9 +81,11 @@ const CONTENT: Record<TipKind, { step: string; title: string; art: typeof PhotoA
     cta: "Entendi, abrir a câmera",
   },
   card: {
-    step: "CALIBRAR O CARTÃO",
-    title: "Encoste as linhas nas bordas do cartão",
+    step: "1. CARTÃO SOBRE O DEDO",
+    title: "Calibre o cartão nesta foto",
+    subtitle: "Arraste as linhas até as bordas laterais do cartão.",
     art: CardArt,
+    sideArt: CardCompareArt,
     items: [
       "Arraste as duas linhas verdes até as bordas laterais do cartão.",
       "Use o zoom (+) para ver a borda de perto.",
@@ -107,6 +111,7 @@ const CONTENT: Record<TipKind, { step: string; title: string; art: typeof PhotoA
 export default function TipModal({ kind, onConfirm, onClose }: Props) {
   const c = CONTENT[kind];
   const Art = c.art;
+  const SideArt = c.sideArt;
   return (
     <div className="tip-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="tip-modal-title">
       <div className="tip-modal">
@@ -115,10 +120,20 @@ export default function TipModal({ kind, onConfirm, onClose }: Props) {
         )}
         <span className="tip-modal-step">{c.step}</span>
         <h2 id="tip-modal-title">{c.title}</h2>
+        {c.subtitle && <p className="tip-modal-subtitle">{c.subtitle}</p>}
         <div className="tip-modal-art"><Art /></div>
-        <ol className="tip-modal-list">
-          {c.items.map((item) => <li key={item}>{item}</li>)}
-        </ol>
+        {SideArt ? (
+          <div className="tip-modal-side">
+            <SideArt />
+            <ol className="tip-modal-list">
+              {c.items.map((item) => <li key={item}>{item}</li>)}
+            </ol>
+          </div>
+        ) : (
+          <ol className="tip-modal-list">
+            {c.items.map((item) => <li key={item}>{item}</li>)}
+          </ol>
+        )}
         {c.note && <p className="tip-modal-note">{c.note}</p>}
         <button type="button" className="tip-modal-cta" onClick={onConfirm}>{c.cta}</button>
       </div>
