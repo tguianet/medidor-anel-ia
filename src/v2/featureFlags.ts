@@ -10,6 +10,8 @@ export const VISION_FEATURE_FLAGS = {
   ENABLE_CAMERA_CORRECTION: false,
   ENABLE_DEPTH_VALIDATION: false,
   ENABLE_DEPTH_FROM_MOTION: false,
+  // TESTE: cartão automático (quadrilátero inclinado) só para sugerir as linhas
+  ENABLE_AUTO_CARD_QUAD: true,
 } as const;
 
 export type VisionFeatureFlag = keyof typeof VISION_FEATURE_FLAGS;
