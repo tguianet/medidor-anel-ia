@@ -13,6 +13,7 @@ import HandReviewScreen from "../components/HandReviewScreen";
 import TryOnPanel from "../components/TryOnPanel";
 import { classifyFingerWidthMm, classifyFingerWidthMmExperimentalHigh } from "./ringClassifier";
 import { VISION_FEATURE_FLAGS } from "./featureFlags";
+import { detectCardLines } from "./autoCardDetect";
 import { robustWidthStats, combineConfidenceScore, confidenceLabel } from "./measurementQuality";
 import { useDeviceCaptureQuality } from "./useDeviceCaptureQuality";
 import { analyzeHandLandmarks, type HandLandmarkAnalysis } from "./handLandmarks";
@@ -989,15 +990,37 @@ export default function AppV2() {
           {x:finalLeft,y:finalBottom},
         ];
 
-        setCardLeft(finalLeft);
-        setCardRight(finalRight);
-        setCardBottom(finalBottom);
-        setCardLines({
-          top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
-          right:detectedRightLine,
-          bottom:detectedBottomLine,
-          left:detectedLeftLine,
-        });
+        // TESTE (pedido do Tiago, 19/11/2026): detecção automática do cartão
+        // inclinado. Só muda ONDE as linhas aparecem no início; a medição usa
+        // as linhas confirmadas pelo usuário, com a mesma fórmula da versão travada.
+        let autoCard:ReturnType<typeof detectCardLines>=null;
+        if(VISION_FEATURE_FLAGS.ENABLE_AUTO_CARD_QUAD){
+          try{
+            const autoCtx=canvas.getContext("2d",{willReadFrequently:true});
+            if(autoCtx){
+              const autoData=autoCtx.getImageData(0,0,canvas.width,canvas.height);
+              autoCard=detectCardLines({data:autoData.data,width:canvas.width,height:canvas.height});
+            }
+          }catch{ autoCard=null; }
+        }
+
+        if(autoCard){
+          const L=autoCard.lines;
+          setCardLeft((L.left.a.x+L.left.b.x)/2);
+          setCardRight((L.right.a.x+L.right.b.x)/2);
+          setCardBottom((L.bottom.a.y+L.bottom.b.y)/2);
+          setCardLines(L);
+        }else{
+          setCardLeft(finalLeft);
+          setCardRight(finalRight);
+          setCardBottom(finalBottom);
+          setCardLines({
+            top:{a:{x:finalLeft,y:top},b:{x:finalRight,y:top}},
+            right:detectedRightLine,
+            bottom:detectedBottomLine,
+            left:detectedLeftLine,
+          });
+        }
 
         // A detecção automática apenas sugere as bordas. O usuário sempre
         // confirma as linhas na fotografia antes de calibrar os milímetros.
